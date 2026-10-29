@@ -2,7 +2,9 @@
 
 Game 3D berbasis browser untuk siswa SMK TKJ kelas 10/11. Pemain magang di **Nusantara Tech Hotel & Office**, gedung 8 lantai di tengah kota fiktif bergaya Jakarta (400 × 300 m), lalu mengerjakan misi jaringan komputer yang diselaraskan dengan CP TKJ Fase E/F.
 
-README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 28 Oktober 2026, versi v4).
+**▶ Main langsung di browser:** https://bahtiarindra32-spec.github.io/TKJSIMULATOR/
+
+README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 29 Oktober 2026).
 
 ---
 
