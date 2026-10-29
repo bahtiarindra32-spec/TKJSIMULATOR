@@ -169,3 +169,10 @@
 #pcos .ntf { position: absolute; right: 12px; bottom: 60px; width: 360px; background: rgba(243,243,243,.97); border: 1px solid rgba(0,0,0,.1); border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,.25); padding: 12px 14px; z-index: 45; transform: translateX(120%); transition: .25s ease; }
 #pcos .ntf.show { transform: none; }
 #pcos .ntf b { display: block; margin-bottom: 2px; }
+#pcos .wf .frow { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+#pcos .wf .frow span { width: 170px; color: #2e3b4e; }
+#pcos .wf input { border: 1px solid #b8c2cc; padding: 3px 6px; font: inherit; background: #fff; }
+#pcos .wf .ferr { color: #b3261e; margin: 6px 0; }
+#pcos .wf .fok { color: #1b7a3a; margin: 6px 0; }
+#pcos .wf .fnote { color: #5a6573; margin-top: 10px; }
+#pcos .wf main { overflow: auto; }

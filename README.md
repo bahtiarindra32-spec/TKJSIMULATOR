@@ -56,11 +56,10 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | Shift | Lari |
 | Spasi | Lompat (bisa juga jatuh dari pinggiran) |
 | V | Ganti kamera orang pertama / orang ketiga (avatar siswa terlihat) |
-| F | Interaksi misi, buka/tutup pintu engsel (beranimasi), buka PC |
+| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak switch (Ruang Server), Papan kerja (meja NOC) |
 | E / Q | Naik/turun di lift atau tangga (animasi perjalanan + indikator lantai) |
-| T | Papan Tiket NOC (mulai shift, lacak tiket) |
-| C | Cek fisik: kabel di dekat PC, atau port switch di rak ruang server L1 (saat ada tiket) |
-| J | Buku Misi |
+| T | Papan kerja NOC: ambil surat kerja, mulai shift, lacak pekerjaan |
+| C | Cek fisik kabel di PC (konektor, LED link, LAN tester, ganti/pasang patch cord) |
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
 | G atau `?low` | Mode grafis ringan |
@@ -97,34 +96,31 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 - ✅ Browser "Tepi": WebKonfig router, halaman server, printer, halaman internet, dan halaman error.
 - ✅ Simulasi jaringan (`net.ts`): lab 192.168.10.0/24, kantor 192.168.20.0/24, tamu 172.16.4.0/22, adapter per PC, lease DHCP, ping, resolve DNS, dan hop.
 
-### Misi (13 misi berurutan)
-| No | Misi | Fase |
+### Pekerjaan jaringan (tanpa kuis, bisa diulang) — `src/game/noc.ts`
+Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai misi kuis lama sudah tidak dipakai.
+
+**Surat kerja (kontrak acak).** Tiap kali diambil, lokasi, PC, alamat IP, subnet, nama, dan kejutannya berbeda:
+
+| Surat kerja | Yang dikerjakan pemain | Terbuka |
 |---|---|---|
-| 1 | K3 Dulu, Baru Kerja (APD & 5R) | E |
-| 2 | Crimping Kabel Straight (T568B + LAN tester) | E |
-| 3 | Atur IP & Ping Server | E |
-| 4 | Hitung Subnet untuk Hotel | F |
-| 5 | Wi-Fi tamu | F |
-| 6 | DHCP | F |
-| 7 | DNS | F |
-| 8 | VLAN: pisahkan jaringan | F |
-| 9 | NAT & routing | F |
-| 10 | Firewall & keamanan | F |
-| 11 | VoIP | F |
-| 12 | Fiber optic | F |
-| 13 | Cek UPS & suhu ruang server (18–27 °C) | F |
+| Pasang IP Statis | Isi IPv4 statis persis surat kerja di 2–3 PC, uji dari tiap PC | Magang |
+| Sambungkan Meja Baru | Ambil patch cord + console + laptop di Lemari Alat, pasang patch cord di PC, `no shutdown` (dan VLAN yang benar) di switch lewat console, uji DHCP | Magang |
+| Nama untuk Server Intranet | Tambah record DNS di router (WebKonfig), perbaiki PC yang memakai DNS publik, buka nama itu di browser | Teknisi Junior |
+| Pasang Router Baru & DHCP | Router setelan pabrik 192.168.88.1: IP statis sementara di PC, ganti alamat LAN (koneksi putus!), pindah subnet, atur DHCP & DNS, kembalikan PC ke DHCP, renew, uji | Teknisi Junior |
+| Pindahkan Meja ke VLAN Kasir | `vlan 30` / `name KASIR` / `switchport access vlan 30` di switch lantai, renew, buka server POS 192.168.30.10 | Teknisi |
 
-- ✅ Pelacak misi, penanda 3D + jarak, waypoint, Buku Misi (J), dan tag elemen CP per misi.
-- ✅ Progres tersimpan di `localStorage` (`kotaNusantara.missions.v2`).
+**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
 
-### Shift Helpdesk NOC (loop misi tanpa batas) — `src/game/noc.ts`
-- ✅ Shift berisi 3–5 tiket gangguan **nyata** yang disuntikkan ke simulasi jaringan PC (bukan kuis): kabel UTP lepas, adapter di-disable, DHCP terlepas, IP statis salah subnet, gateway salah, DNS salah, port switch shutdown, IP bentrok.
-- ✅ Tiap tiket punya pelapor, lokasi PC (L1–L8), keluhan berupa gejala, prioritas, dan SLA (4/7/10 menit). Penanda 3D, waypoint lintas lantai, dan minimap mengarah ke PC yang dilacak.
-- ✅ Perbaikan dilakukan seperti di dunia nyata: lewat CMD/Network Connections/IPv4 di Jendela 11, atau fisik dengan **C** (colok ulang RJ45 di PC, `no shutdown` port switch di rak server).
-- ✅ Verifikasi otomatis: tiket baru tertutup kalau PC benar-benar sehat (IP valid, gateway, DNS, internet) **dan** siswa menguji dari PC itu (ping atau browser).
-- ✅ Laporan penyebab utama (pilihan), XP (SLA, langkah tidak perlu, laporan tepat), pangkat Magang → Teknisi Junior → Teknisi → Network Engineer. Gangguan baru terbuka per pangkat, dan mulai pangkat Teknisi ada tiket dengan 2 penyebab.
-- ✅ Gangguan yang sering salah lebih sering muncul (bobot penguasaan per jenis gangguan). Progres tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
-- ✅ Dibuka lewat **T** di mana saja atau **F** di meja NOC.
+**Aturan dunia nyata**
+- Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak switch di Ruang Server L1. Penanda hanya menunjuk arah.
+- Alat fisik: LAN tester, kabel console USB–RJ45, laptop teknisi, patch cord (stok habis pakai). Tanpa console + laptop, switch tidak bisa dikonfigurasi.
+- Switch per lantai (SW-L1/L2/L3, 48 port) dengan CLI mirip Cisco IOS: `enable`, `conf t`, `interface [range] gi1/0/N`, `shutdown`, `switchport access vlan`, `vlan`/`name`, `show interfaces status`, `show vlan brief`, `show mac address-table`, `show running-config`, `write memory`, singkatan (`sh vl br`), `?`, dan pesan error IOS. Label outlet (L2-14) = port Gi1/0/14. LED port di rak mengikuti status.
+- Router tiap segmen bisa diubah di WebKonfig: alamat LAN, DHCP server (pool, gateway, DNS, lease, daftar lease), DNS forwarder (upstream, Allow Remote Requests, record A).
+- Klien DHCP menyimpan lease lama sampai renew; lease dari subnet lama ditolak dan klien mencoba ulang sendiri (±60 detik). Lepas/colok kabel atau enable adapter = minta alamat baru. IP bentrok antar-PC terdeteksi.
+- Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
+- Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
+- Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
+- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang → Teknisi Junior → Teknisi → Network Engineer tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
 
 ### Kamera, gerak, grafik
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
@@ -167,8 +163,6 @@ kota-nusantara/
 Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordinat tabel PDF).
 Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
 
-## 8. Validasi terakhir (28 Okt 2026)
+## 8. Validasi terakhir (29 Okt 2026)
 - `npx tsc --noEmit` lolos, `vite build` lolos, build single-file lolos.
-- Playwright: 13 misi terdeteksi, lift L1→L2 bergerak bertahap, pintu buka 1.00 lalu tutup 0.00, tidak ada page error.
-- Audit kolider kota dan properti jalan: 0 mesh padat yang terlewat.
-- Shift NOC (`tools/qa/qa_noc.mjs`): 4 tiket (kabel, port switch, DNS, DHCP) rusak di awal, diperbaiki lewat input nyata (C, CMD `ipconfig /renew`, ping), keempatnya tertutup, laporan tepat, naik pangkat ke Teknisi Junior, rekap shift muncul, tanpa page error.
+- Playtest otomatis `tools/qa/qa_jobs.mjs` dengan input nyata (jalan ke lokasi, F/C, mengetik di CMD, form IPv4, WebKonfig, console switch): kelima surat kerja selesai bintang 3; shift 4 tiket (konektor, patch cord rusak, port shutdown, VLAN salah) selesai; uji "sengaja merusak" (shutdown port PC lain) menurunkan bintang dan memunculkan keluhan susulan yang lalu diperbaiki. Tanpa page error.

@@ -1,42 +1,63 @@
-// Simulated client network for the in-game PCs (pure TS, no DOM).
-// Each PC sits in a network environment (lab / office / hotel guest Wi-Fi). Its adapter config
-// (DHCP or static IP/mask/gateway/DNS, cable) decides what ipconfig/ping/tracert/nslookup/browser see.
+// Simulated building network (pure TS, no DOM).
+// Wired PCs hang off one access switch per floor (SW-L1..SW-L3, in the L1 server-room rack). The VLAN of the
+// switch port decides which segment (Env) a PC is on; each segment has its own router with an editable
+// DHCP server and DNS forwarder. Laptops on L4-L8 use the guest Wi-Fi. Everything the player sees in
+// ipconfig/ping/nslookup/browser is computed from this state, so faults and fixes are real, not scripted.
 import { parseIp, ipStr, prefixToMask, networkOf, broadcastOf, parseMask } from '../game/missionLogic';
 
 export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string }
+export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'none';
+export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
+export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
 export interface Env {
-  id: 'lab' | 'office' | 'guest';
+  id: EnvId; vlan: number;
   label: string; net: string; prefix: number; gateway: string; dns: string[];
-  dhcp: { from: number; to: number; lease: number } | null; suffix: string;
+  dhcp: DhcpCfg | null; dnsSrv: DnsCfg; suffix: string;
   hosts: Host[]; internet: boolean; adapter: string; wireless: boolean;
+  leases: Map<string, string>;
 }
 
-export const ENVS: Record<Env['id'], Env> = {
-  lab: {
-    id: 'lab', label: 'Lab TKJ (L1)', net: '192.168.10.0', prefix: 24, gateway: '192.168.10.1', dns: ['192.168.10.1'],
-    dhcp: { from: 100, to: 199, lease: 24 }, suffix: 'lab.smk.local', internet: true, adapter: 'Realtek PCIe GbE Family Controller', wireless: false,
-    hosts: [
-      { ip: '192.168.10.1', name: 'router-lab', mac: '48-8f-5a-10-00-01', ttl: 64, web: 'router' },
-      { ip: '192.168.10.2', name: 'sw-lab-01', mac: '00-1e-7a-10-00-02', ttl: 255 },
-      { ip: '192.168.10.10', name: 'srv-praktik', mac: '52-54-00-10-00-0a', ttl: 64, web: 'server' },
-      { ip: '192.168.10.21', name: 'pc-praktik-02', mac: 'b4-2e-99-10-00-15', ttl: 128 },
-    ],
-  },
-  office: {
-    id: 'office', label: 'Kantor (L2–L3)', net: '192.168.20.0', prefix: 24, gateway: '192.168.20.1', dns: ['192.168.20.1'],
-    dhcp: { from: 100, to: 220, lease: 8 }, suffix: 'kantor.local', internet: true, adapter: 'Intel(R) Ethernet Connection I219-LM', wireless: false,
-    hosts: [
-      { ip: '192.168.20.1', name: 'router-kantor', mac: '48-8f-5a-20-00-01', ttl: 64, web: 'router' },
-      { ip: '192.168.20.50', name: 'printer-l2', mac: '00-80-77-20-00-32', ttl: 64, web: 'printer' },
-      { ip: '192.168.20.10', name: 'nas-kantor', mac: '00-11-32-20-00-0a', ttl: 64 },
-    ],
-  },
-  guest: {
-    id: 'guest', label: 'Wi-Fi Tamu Hotel', net: '172.16.4.0', prefix: 22, gateway: '172.16.4.1', dns: ['172.16.4.1'],
-    dhcp: { from: 100, to: 1000, lease: 2 }, suffix: 'tamu.hotel', internet: true, adapter: 'Intel(R) Wi-Fi 6 AX201 160MHz', wireless: true,
-    hosts: [{ ip: '172.16.4.1', name: 'gw-tamu', mac: '48-8f-5a-04-00-01', ttl: 64, web: 'router' }],
+const mkEnv = (id: EnvId, vlan: number, label: string, net: string, prefix: number, suffix: string, adapter: string, wireless: boolean, hosts: Host[], pool: [number, number], lease: number): Env => {
+  const b = parseIp(net)!, gw = ipStr(b + 1);
+  return {
+    id, vlan, label, net, prefix, gateway: gw, dns: [gw], suffix, adapter, wireless, hosts, internet: true, leases: new Map(),
+    dhcp: { start: ipStr(b + pool[0]), end: ipStr(b + pool[1]), gw, dns: [gw], lease },
+    dnsSrv: { allow: true, upstream: ['8.8.8.8', '1.1.1.1'], records: [] },
+  };
+};
+
+export const ENVS: Record<EnvId, Env> = {
+  lab: mkEnv('lab', 10, 'Lab TKJ (L1)', '192.168.10.0', 24, 'lab.smk.local', 'Realtek PCIe GbE Family Controller', false, [
+    { ip: '192.168.10.1', name: 'router-lab', mac: '48-8f-5a-10-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.10.2', name: 'sw-lab-01', mac: '00-1e-7a-10-00-02', ttl: 255 },
+    { ip: '192.168.10.10', name: 'srv-praktik', mac: '52-54-00-10-00-0a', ttl: 64, web: 'server' },
+  ], [100, 199], 24),
+  office: mkEnv('office', 20, 'Kantor (L2–L3)', '192.168.20.0', 24, 'kantor.local', 'Intel(R) Ethernet Connection I219-LM', false, [
+    { ip: '192.168.20.1', name: 'router-kantor', mac: '48-8f-5a-20-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.20.50', name: 'printer-l2', mac: '00-80-77-20-00-32', ttl: 64, web: 'printer' },
+    { ip: '192.168.20.10', name: 'nas-kantor', mac: '00-11-32-20-00-0a', ttl: 64 },
+  ], [100, 220], 8),
+  kasir: mkEnv('kasir', 30, 'Kasir & POS', '192.168.30.0', 24, 'kasir.local', 'Intel(R) Ethernet Connection I219-LM', false, [
+    { ip: '192.168.30.1', name: 'router-kasir', mac: '48-8f-5a-30-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.30.10', name: 'srv-pos', mac: '52-54-00-30-00-0a', ttl: 64, web: 'pos' },
+  ], [100, 160], 8),
+  guest: mkEnv('guest', 0, 'Wi-Fi Tamu Hotel', '172.16.4.0', 22, 'tamu.hotel', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
+    { ip: '172.16.4.1', name: 'gw-tamu', mac: '48-8f-5a-04-00-01', ttl: 64, web: 'router' },
+  ], [100, 1000], 2),
+  none: {
+    id: 'none', vlan: -1, label: 'Tidak ada jaringan (VLAN tanpa router)', net: '169.254.0.0', prefix: 16, gateway: '', dns: [], dhcp: null,
+    dnsSrv: { allow: false, upstream: [], records: [] }, suffix: '', hosts: [], internet: false, adapter: 'Intel(R) Ethernet Connection I219-LM', wireless: false, leases: new Map(),
   },
 };
+ENVS.lab.dhcp!.lease = 24;
+
+/** The router of a segment (first host). */
+export const routerOf = (env: Env) => env.hosts.find(h => h.web === 'router') ?? null;
+/** Change a router's LAN address: the segment's subnet follows the router. */
+export function setRouterLan(env: Env, ip: string, prefix: number) {
+  const r = routerOf(env); if (!r) return;
+  r.ip = ip; env.gateway = ip; env.prefix = prefix; env.net = ipStr(networkOf(parseIp(ip)!, prefix)); env.dns = [ip];
+}
 
 /** Internet names (fictional addresses inside the simulation). */
 export const INTERNET: Record<string, { ip: string; web: string }> = {
@@ -46,44 +67,135 @@ export const INTERNET: Record<string, { ip: string; web: string }> = {
   'youtube.com': { ip: '142.250.4.190', web: 'blocked' }, 'www.youtube.com': { ip: '142.250.4.190', web: 'blocked' },
   'dns.google': { ip: '8.8.8.8', web: 'search' }, 'one.one.one.one': { ip: '1.1.1.1', web: 'search' },
 };
-const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
+export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 
+// ---------------------------------------------------------------- switches
+export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string }
+export interface Switch { name: string; level: number; ip: string; ports: Port[]; vlans: Map<number, string>; dirty: boolean }
+export const SWITCHES: Switch[] = [];
+const PORT_OF = new Map<string, { sw: Switch; port: Port }>();
+export const portName = (n: number) => `Gi1/0/${n}`;
+export const outletOf = (pc: string) => { const p = PORT_OF.get(pc); return p ? `L${p.sw.level}-${String(p.port.n).padStart(2, '0')}` : '-'; };
+
+/** Build the floor switches and patch every wired PC to its own port (sorted, so the map is stable). */
+export function initSwitches(pcNames: string[]) {
+  SWITCHES.length = 0; PORT_OF.clear();
+  for (const lv of [1, 2, 3]) {
+    const vlan = lv === 1 ? 10 : 20;
+    const sw: Switch = { name: `SW-L${lv}`, level: lv, ip: lv === 1 ? '192.168.10.2' : `192.168.20.${lv}`, ports: [], vlans: new Map([[1, 'default'], [10, 'LAB'], [20, 'KANTOR']]), dirty: false };
+    if (lv > 1) sw.vlans.delete(10);
+    for (let n = 1; n <= 48; n++) sw.ports.push({ n, pc: null, shutdown: n > 44, vlan, desc: '' });
+    const mine = pcNames.filter(p => new RegExp(`_L${lv}_`).test(p)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    mine.forEach((pc, i) => { const port = sw.ports[i]; port.pc = pc; port.desc = pc.replace(/^PROP_/, ''); PORT_OF.set(pc, { sw, port }); });
+    SWITCHES.push(sw);
+  }
+}
+export const portOf = (pc: string) => PORT_OF.get(pc) ?? null;
+export const isWireless = (pc: string) => /_L[4-8]_/.test(pc);
+
+/** Which segment a PC is on right now. */
+export function envOf(pc: string): Env {
+  if (isWireless(pc)) return ENVS.guest;
+  const p = PORT_OF.get(pc);
+  if (!p) return /_L[2-3]_/.test(pc) ? ENVS.office : ENVS.lab;
+  if (!p.sw.vlans.has(p.port.vlan)) return ENVS.none;          // VLAN not created on the switch: port inactive
+  return Object.values(ENVS).find(e => e.vlan === p.port.vlan && !e.wireless) ?? ENVS.none;
+}
+/** Legacy name kept for callers that only need the default segment. */
+export function envForPc(name: string): EnvId { return envOf(name).id; }
+
+// ---------------------------------------------------------------- adapters
+export interface Lease { ip: string; t: number; prefix: number; gw: string; dns: string[]; env: EnvId; server: string }
 export interface Adapter {
-  dhcp: boolean; ip: string; mask: string; gw: string; dns1: string; dns2: string; dnsAuto: boolean;
-  cable: boolean; portDown?: boolean; enabled: boolean; lease?: { ip: string; t: number };
+  pc: string; dhcp: boolean; ip: string; mask: string; gw: string; dns1: string; dns2: string; dnsAuto: boolean;
+  cable: boolean; broken: boolean; enabled: boolean; lease?: Lease;
   mac: string; host: string; arp: Map<string, string>;
 }
-
-export function envForPc(name: string): Env['id'] {
-  if (/_L[2-3]_/.test(name)) return 'office';
-  if (/_L[4-8]_/.test(name)) return 'guest';
-  return 'lab';
-}
+export const ADAPTERS = new Map<string, Adapter>();
 
 let seq = 0;
 export function newAdapter(pcName: string): Adapter {
   const h = [...pcName].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
   const hex = (n: number) => (n & 255).toString(16).padStart(2, '0');
   const short = pcName.replace(/^PROP_/, '').replace(/_PC_|_LAPTOP_/, '-').toLowerCase().replace(/_/g, '-');
-  return { dhcp: true, ip: '', mask: '', gw: '', dns1: '', dns2: '', dnsAuto: true, cable: true, enabled: true, mac: ['00', 'e0', '4c', hex(h >> 16), hex(h >> 8), hex(h + seq++)].join('-'), host: short.slice(0, 15).toUpperCase(), arp: new Map() };
+  const a: Adapter = { pc: pcName, dhcp: true, ip: '', mask: '', gw: '', dns1: '', dns2: '', dnsAuto: true, cable: true, broken: false, enabled: true, mac: ['00', 'e0', '4c', hex(h >> 16), hex(h >> 8), hex(h + seq++)].join('-'), host: short.slice(0, 15).toUpperCase(), arp: new Map() };
+  ADAPTERS.set(pcName, a);
+  return a;
+}
+export function adapterOf(pc: string) { return ADAPTERS.get(pc) ?? newAdapter(pc); }
+
+/** Physical layer: is there a link light on the NIC? */
+export function linkUp(a: Adapter) {
+  if (isWireless(a.pc)) return true;
+  const p = PORT_OF.get(a.pc);
+  return a.cable && !a.broken && !(p && p.port.shutdown);
+}
+/** Media state as Windows reports it (link + adapter enabled). */
+export const mediaOk = (a: Adapter) => linkUp(a);
+
+/** Link went down/up or adapter re-enabled: Windows forgets the lease state and asks DHCP again. */
+export function bounce(a: Adapter) {
+  if (a.lease?.ip) releaseLease(a);
+  a.lease = undefined; a.arp.clear();
+}
+export function releaseLease(a: Adapter) {
+  for (const e of Object.values(ENVS)) if (e.leases.get(a.mac) === a.lease?.ip) e.leases.delete(a.mac);
+}
+
+/** Is the DHCP pool usable (inside the router's subnet, ordered, not network/broadcast)? Returns an error text or ''. */
+export function poolProblem(env: Env, d: DhcpCfg | null = env.dhcp): string {
+  if (!d) return 'DHCP server disabled';
+  const s = parseIp(d.start), e = parseIp(d.end), g = parseIp(env.gateway);
+  if (s === null || e === null) return 'alamat pool tidak valid';
+  if (g === null) return 'router belum punya alamat LAN';
+  const p = env.prefix, net = networkOf(g, p), bc = broadcastOf(g, p);
+  if (networkOf(s, p) !== net || networkOf(e, p) !== net) return 'pool di luar subnet interface';
+  if (s > e) return 'awal pool lebih besar dari akhir';
+  if (s === net || e === bc) return 'pool memakai alamat network/broadcast';
+  return '';
+}
+function allocate(env: Env, a: Adapter): string | null {
+  if (!env.dhcp || poolProblem(env)) return null;
+  const s = parseIp(env.dhcp.start)!, e = parseIp(env.dhcp.end)!;
+  const prev = env.leases.get(a.mac);
+  const taken = new Set<string>([...env.hosts.map(h => h.ip), ...[...env.leases.entries()].filter(([m]) => m !== a.mac).map(([, ip]) => ip)]);
+  for (const o of ADAPTERS.values()) if (o !== a && !o.dhcp && envOf(o.pc) === env && linkUp(o) && o.enabled) taken.add(o.ip);   // server ping-checks before offering
+  if (prev && parseIp(prev)! >= s && parseIp(prev)! <= e && !taken.has(prev)) return prev;
+  const span = e - s + 1, off = parseInt(a.mac.replace(/-/g, '').slice(-4), 16) % span;
+  for (let k = 0; k < span; k++) { const ip = ipStr((s + ((off + k) % span)) >>> 0); if (!taken.has(ip)) { env.leases.set(a.mac, ip); return ip; } }
+  return null;
 }
 
 export interface Live { ip: string; prefix: number; gw: string; dns: string[]; apipa: boolean; ok: boolean; why?: string }
+const apipa = (a: Adapter): Live => ({ ip: `169.254.${(parseInt(a.mac.slice(-5, -3), 16) % 254) + 1}.${(parseInt(a.mac.slice(-2), 16) % 254) + 1}`, prefix: 16, gw: '', dns: [], apipa: true, ok: false, why: 'apipa' });
 
 /** The address the adapter is actually using right now. */
-export function live(a: Adapter, env: Env): Live {
+export function live(a: Adapter, env: Env = envOf(a.pc)): Live {
   if (!a.enabled) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'disabled' };
-  if (!a.cable || a.portDown) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'media' };
+  if (!linkUp(a)) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'media' };
   if (a.dhcp) {
-    if (!env.dhcp) { const ap = `169.254.${(parseInt(a.mac.slice(-5, -3), 16) % 254) + 1}.${(parseInt(a.mac.slice(-2), 16) % 254) + 1}`; return { ip: ap, prefix: 16, gw: '', dns: [], apipa: true, ok: false, why: 'apipa' }; }
-    if (!a.lease) { const base = parseIp(env.net)!; const span = env.dhcp.to - env.dhcp.from; const off = env.dhcp.from + (parseInt(a.mac.replace(/-/g, '').slice(-4), 16) % span); a.lease = { ip: ipStr((base + off) >>> 0), t: Date.now() }; }
+    if (!a.lease) {
+      const ip = allocate(env, a);
+      if (!ip) return apipa(a);
+      const d = env.dhcp!;
+      a.lease = { ip, t: Date.now(), prefix: env.prefix, gw: d.gw, dns: [...d.dns], env: env.id, server: env.gateway };
+    }
     if (!a.lease.ip) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'released' };
-    const dns = a.dnsAuto ? env.dns : [a.dns1, a.dns2].filter(Boolean);
-    return { ip: a.lease.ip, prefix: env.prefix, gw: env.gateway, dns, apipa: false, ok: true };
+    const dns = a.dnsAuto ? a.lease.dns : [a.dns1, a.dns2].filter(s => parseIp(s) !== null);
+    return { ip: a.lease.ip, prefix: a.lease.prefix, gw: a.lease.gw, dns, apipa: false, ok: true };
   }
   const p = parseMask(a.mask);
   if (!parseIp(a.ip) || p === null) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'noip' };
   return { ip: a.ip, prefix: p, gw: a.gw, dns: [a.dns1, a.dns2].filter(s => parseIp(s) !== null), apipa: false, ok: true };
+}
+
+/** A lease from a subnet this port is no longer on (renumbered router, moved VLAN): the client keeps it
+ *  until it renews. Returns true when the next renewal would be NAKed. */
+export function staleLease(a: Adapter) {
+  if (!a.dhcp || !a.lease?.ip) return false;
+  const env = envOf(a.pc);
+  if (a.lease.env !== env.id) return true;
+  return !env.gateway || networkOf(parseIp(a.lease.ip)!, env.prefix) !== networkOf(parseIp(env.gateway)!, env.prefix);
 }
 
 export type PingRes =
@@ -93,36 +205,51 @@ export type PingRes =
   | { kind: 'general' }
   | { kind: 'nohost'; name: string };
 
-const inNet = (ip: string, net: string, p: number) => networkOf(parseIp(ip)!, p) === networkOf(parseIp(net)!, p);
+const segNet = (env: Env) => (env.gateway ? networkOf(parseIp(env.gateway)!, env.prefix) : -1);
+const inEnv = (ip: string, env: Env) => !!env.gateway && networkOf(parseIp(ip)!, env.prefix) === segNet(env);
+
+/** Another device (host or PC) using this IP on the same segment. */
+export function conflict(l: Live, env: Env, self?: Adapter) {
+  if (!l.ip) return false;
+  if (env.hosts.some(h => h.ip === l.ip)) return true;
+  for (const o of ADAPTERS.values()) {
+    if (o === self || !o.enabled || !linkUp(o) || envOf(o.pc) !== env) continue;
+    const ol = live(o, env);
+    if (ol.ok && ol.ip === l.ip) return true;
+  }
+  return false;
+}
 
 /** Is my real address valid on this segment (right subnet, not network/broadcast, not taken)? */
-export function onSegment(l: Live, env: Env) {
-  if (!l.ok || l.apipa) return false;
-  const ip = parseIp(l.ip)!, base = parseIp(env.net)!;
-  if (networkOf(ip, env.prefix) !== networkOf(base, env.prefix)) return false;
-  if (ip === networkOf(base, env.prefix) || ip === broadcastOf(base, env.prefix)) return false;
-  return !conflict(l, env);
+export function onSegment(l: Live, env: Env, self?: Adapter) {
+  if (!l.ok || l.apipa || !env.gateway) return false;
+  const ip = parseIp(l.ip)!;
+  if (networkOf(ip, env.prefix) !== segNet(env) || l.prefix !== env.prefix) return false;
+  if (ip === segNet(env) || ip === broadcastOf(ip, env.prefix)) return false;
+  return !conflict(l, env, self);
 }
-export function conflict(l: Live, env: Env) { return !!l.ip && env.hosts.some(h => h.ip === l.ip); }
 
-/** Resolve a name like Windows' resolver (hosts first, then configured DNS). */
+/** Resolve a name like Windows' resolver (configured DNS servers in order). */
 export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: string } | null | 'timeout' {
   const n = name.toLowerCase().replace(/\.$/, '');
   if (parseIp(n) !== null) return { ip: n, via: '' };
   if (n === 'localhost') return { ip: '127.0.0.1', via: '' };
   const l = live(a, env);
   if (!l.ok || !l.dns.length) return null;
-  const short = n.replace(`.${env.suffix}`, '');
-  const local = env.hosts.find(h => h.name === short);
-  // pick the first DNS that answers
   for (const d of l.dns) {
-    const r = ping(a, env, d, true);
-    if (r.kind !== 'reply') continue;
-    const isLocalDns = env.hosts.some(h => h.ip === d);
-    if (local && isLocalDns) return { ip: local.ip, via: d };
-    const inet = INTERNET[n];
-    if (inet) return { ip: inet.ip, via: d };
-    return null;
+    if (ping(a, env, d, true).kind !== 'reply') continue;
+    const r = routerOf(env);
+    if (r && d === r.ip) {                                         // the segment router's DNS forwarder
+      if (!env.dnsSrv.allow) continue;                              // refuses remote requests
+      const short = n.endsWith(`.${env.suffix}`) ? n.slice(0, -env.suffix.length - 1) : n;
+      const rec = env.dnsSrv.records.find(x => x.name.toLowerCase() === n || x.name.toLowerCase() === short);
+      if (rec) return { ip: rec.ip, via: d };
+      const host = env.hosts.find(h => h.name === short);
+      if (host) return { ip: host.ip, via: d };
+      if (!env.dnsSrv.upstream.some(u => PUBLIC_DNS.includes(u))) return 'timeout';
+      return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null;
+    }
+    if (PUBLIC_DNS.includes(d)) return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null;   // public DNS knows no internal names
   }
   return 'timeout';
 }
@@ -133,26 +260,24 @@ export function ping(a: Adapter, env: Env, target: string, quiet = false): PingR
   if (target === '127.0.0.1') return { kind: 'reply', ip: target, ttl: 128, ms: () => 0 };
   if (!l.ok) return { kind: 'general' };
   if (target === l.ip) return { kind: 'reply', ip: target, ttl: 128, ms: () => 0 };
-  const t = parseIp(target)!;
+  const t = parseIp(target); if (t === null) return { kind: 'general' };
   const mine = parseIp(l.ip)!;
-  const sameMine = networkOf(t, l.prefix) === networkOf(mine, l.prefix);
-  const seg = onSegment(l, env);
-  if (sameMine) {
-    // ARP on the wire: works only if both really share the segment
+  const seg = onSegment(l, env, a);
+  if (networkOf(t, l.prefix) === networkOf(mine, l.prefix)) {
+    // on-link: ARP on the wire works only if both really share the segment
     const h = env.hosts.find(x => x.ip === target);
-    if (!seg || !h) return inNet(target, env.net, env.prefix) && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
-    if (!quiet) a.arp.set(h.ip, h.mac);
-    return { kind: 'reply', ip: h.ip, ttl: h.ttl, ms: () => (Math.random() < 0.8 ? 0 : 1) };
+    const pc = [...ADAPTERS.values()].find(o => o !== a && o.enabled && linkUp(o) && envOf(o.pc) === env && live(o, env).ip === target);
+    if (seg && (h || pc)) { if (!quiet) a.arp.set(target, h?.mac ?? pc!.mac); return { kind: 'reply', ip: target, ttl: h?.ttl ?? 128, ms: () => (Math.random() < 0.8 ? 0 : 1) }; }
+    return seg && inEnv(target, env) ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   }
-  // off-link: needs a default gateway inside my own subnet
+  // off-link: needs a default gateway inside my own subnet that is the real router
   if (!l.gw || parseIp(l.gw) === null || networkOf(parseIp(l.gw)!, l.prefix) !== networkOf(mine, l.prefix)) return { kind: 'general' };
   const gwHost = env.hosts.find(x => x.ip === l.gw);
-  if (!seg || !gwHost || l.gw !== env.gateway) return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
+  if (!seg || !gwHost || gwHost.web !== 'router') return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
-  // another internal network routed by the building core
-  for (const e of Object.values(ENVS)) if (e !== env && inNet(target, e.net, e.prefix)) {
+  for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && inEnv(target, e)) {
     const h = e.hosts.find(x => x.ip === target);
-    if (!h || env.id === 'guest' || e.id === 'guest') return { kind: 'timeout' };    // guest Wi-Fi is isolated
+    if (!h || env.id === 'guest' || e.id === 'guest' || env.id === 'kasir' || e.id === 'kasir') return { kind: 'timeout' };    // guest & POS segments are firewalled
     return { kind: 'reply', ip: h.ip, ttl: h.ttl - 1, ms: () => 1 + Math.round(Math.random() * 2) };
   }
   if (!env.internet) return { kind: 'timeout' };
@@ -163,11 +288,29 @@ export function ping(a: Adapter, env: Env, target: string, quiet = false): PingR
 
 export function hopsTo(a: Adapter, env: Env, target: string): string[] {
   const l = live(a, env);
-  const internal = Object.values(ENVS).some(e => inNet(target, e.net, e.prefix));
+  const internal = Object.values(ENVS).some(e => e.id !== 'none' && inEnv(target, e));
   if (networkOf(parseIp(target)!, l.prefix || 32) === networkOf(parseIp(l.ip || '0.0.0.0')!, l.prefix || 32)) return [target];
   if (internal) return [env.gateway, target];
   return [env.gateway, '10.20.0.1', '180.252.1.17', '61.5.115.9', '72.14.215.85', target];
 }
 
+/** Full connectivity from this adapter: valid address, gateway answers, DNS resolves, internet answers. */
+export function healthy(a: Adapter, env: Env = envOf(a.pc)) {
+  const l = live(a, env);
+  if (!l.ok || !onSegment(l, env, a)) return false;
+  if (ping(a, env, l.gw || '0.0.0.0', true).kind !== 'reply') return false;
+  const r = resolve(a, env, 'cari.id');
+  return !!r && r !== 'timeout' && ping(a, env, r.ip, true).kind === 'reply';
+}
+
+/** Windows retries DHCP on its own: a client whose lease was NAKed (stale subnet) or that sits on APIPA
+ *  asks again. Called on a slow timer by the game (≈ every 60 s), never for an explicit /release. */
+export function dhcpHousekeeping() {
+  for (const a of ADAPTERS.values()) {
+    if (!a.dhcp || !a.enabled || !linkUp(a)) continue;
+    if (staleLease(a)) { releaseLease(a); a.lease = undefined; }
+  }
+}
+
 export const maskStr = (p: number) => ipStr(prefixToMask(p));
-export { parseIp, parseMask, ipStr };
+export { parseIp, parseMask, ipStr, networkOf, broadcastOf, prefixToMask };

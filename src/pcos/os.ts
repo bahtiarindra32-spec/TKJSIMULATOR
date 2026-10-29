@@ -1,6 +1,6 @@
 // "Jendela 11": a Windows 11 lookalike shell for in-game PCs (own branding, same layout & behaviour).
 import './pcos.css';
-import { ENVS, type Env, type Adapter, newAdapter, envForPc, live, ping, resolve, hopsTo, onSegment, conflict, maskStr, parseIp, parseMask, ipStr, INTERNET } from './net';
+import { ENVS, type Env, type Adapter, adapterOf, envOf, live, ping, resolve, hopsTo, onSegment, conflict, maskStr, parseIp, parseMask, ipStr, INTERNET, mediaOk, bounce, releaseLease, routerOf, setRouterLan, poolProblem, networkOf as netOf, PUBLIC_DNS } from './net';
 import { networkOf, broadcastOf, prefixToMask } from '../game/missionLogic';
 
 type Attrs = Record<string, any>;
@@ -45,9 +45,9 @@ const I = {
 const OSNAME = 'Jendela', CORP = 'Nusa Corporation', BUILD = '10.0.22631.4317';
 
 interface Win { id: string; el: HTMLElement; body: HTMLElement; title: string; icon: string; task: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }
-interface PcState { a: Adapter; env: Env; signed: boolean; notes: string; history: string[] }
+interface PcState { a: Adapter; readonly env: Env; signed: boolean; notes: string; history: string[] }
 
-export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd'; pc: string; detail: any }
+export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg'; pc: string; detail: any }
 
 export class PcOS {
   readonly root: HTMLElement;
@@ -76,7 +76,7 @@ export class PcOS {
   isOpen() { return this.root.classList.contains('open'); }
   state(name: string) {
     let s = this.pcs.get(name);
-    if (!s) { const env = ENVS[envForPc(name)]; s = { a: newAdapter(name), env, signed: false, notes: '', history: [] }; this.pcs.set(name, s); }
+    if (!s) { const a = adapterOf(name); s = { a, get env() { return envOf(name); }, signed: false, notes: '', history: [] }; this.pcs.set(name, s); }
     return s;
   }
   /** for missions/tests */
@@ -370,7 +370,7 @@ export class PcOS {
   private ipconfig(al: string[], t: any, c: any) {
     const s = this.cur!, a = s.a, env = s.env; let l = c.l;
     const head = `\n${OSNAME} IP Configuration\n`;
-    const disc = !a.enabled ? null : !(a.cable && !a.portDown);
+    const disc = !a.enabled ? null : !mediaOk(a);
     const sum = (full: boolean) => {
       l = live(a, env);
       if (!a.enabled) return '';
@@ -380,13 +380,13 @@ export class PcOS {
       if (full) lines.push(`${c.dot('Description')}${env.adapter}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`);
       lines.push(`${c.dot('Link-local IPv6 Address')}${c.ll6}${full ? '(Preferred)' : ''}`);
       if (l.ok) {
-        const dup = conflict(l, env);
+        const dup = conflict(l, env, a);
         lines.push(`${c.dot(l.apipa ? 'Autoconfiguration IPv4 Address' : 'IPv4 Address')}${l.ip}${full ? (dup ? '(Duplicate)' : '(Preferred)') : ''}`, `${c.dot('Subnet Mask')}${maskStr(l.prefix)}`);
-        if (full && a.dhcp && !l.apipa && a.lease) { lines.push(`${c.dot('Lease Obtained')}${c.fmtDate(new Date(a.lease.t))}`, `${c.dot('Lease Expires')}${c.fmtDate(new Date(a.lease.t + env.dhcp!.lease * 3600e3))}`); }
+        if (full && a.dhcp && !l.apipa && a.lease) { lines.push(`${c.dot('Lease Obtained')}${c.fmtDate(new Date(a.lease.t))}`, `${c.dot('Lease Expires')}${c.fmtDate(new Date(a.lease.t + (env.dhcp?.lease ?? 8) * 3600e3))}`); }
       }
       lines.push(`${c.dot('Default Gateway')}${l.ok ? l.gw : ''}`);
       if (full) {
-        if (a.dhcp && l.ok && !l.apipa) lines.push(`${c.dot('DHCP Server')}${env.gateway}`);
+        if (a.dhcp && l.ok && !l.apipa) lines.push(`${c.dot('DHCP Server')}${a.lease?.server ?? env.gateway}`);
         lines.push(`${c.dot('DNS Servers')}${l.dns.length ? l.dns.join('\n' + ' '.repeat(39)) : (l.ok ? 'fec0:0:0:ffff::1%1' : '')}`, `${c.dot('NetBIOS over Tcpip')}Enabled`);
       }
       return lines.join('\n');
@@ -401,8 +401,8 @@ export class PcOS {
       if (!a.enabled) { t.print(head + '\nThe operation failed as no adapter is in the state permissible for\nthis operation.'); return; }
       if (disc) { t.print(head + `\nNo operation can be performed on ${c.adName} while it has its media disconnected.`); return; }
       if (!a.dhcp) { t.print(head + '\nThe operation failed as no adapter is in the state permissible for\nthis operation.'); return; }
-      if (sw === '/release') { a.lease = { ip: '', t: Date.now() }; a.arp.clear(); this.refreshTray(); t.print(head + sum(false)); return; }
-      return t.seq(['\u0000'], 0, 1200).then(() => { a.lease = undefined; this.refreshTray(); t.print(head + sum(false)); });
+      if (sw === '/release') { releaseLease(a); a.lease = { ip: '', t: Date.now(), prefix: 0, gw: '', dns: [], env: env.id, server: '' }; a.arp.clear(); this.emit('cmd', { line: 'ipconfig /release', release: true }); this.refreshTray(); t.print(head + sum(false)); return; }
+      return t.seq(['\u0000'], 0, 1200).then(() => { bounce(a); live(a, s.env); this.emit('cmd', { line: 'ipconfig /renew', renew: true }); this.refreshTray(); t.print(head + sum(false)); });
     }
     t.print(`\nError: unrecognized or incomplete command line.\n\nUSAGE:\n    ipconfig [/? | /all | /renew [adapter] | /release [adapter] | /flushdns]`);
   }
@@ -488,19 +488,19 @@ export class PcOS {
   openNcpa() {
     const s = this.cur!; const a = s.a, env = s.env;
     const items = h('div', { class: 'items' });
-    const body = h('div', { class: 'ncpa' }, h('div', { class: 'bar' }, h('span', { onclick: () => this.openStatus() }, 'View status of this connection'), h('span', { onclick: () => this.openProps() }, 'Change settings of this connection'), h('span', { onclick: () => { a.enabled = !a.enabled; render(); this.refreshTray(); } }, 'Disable / Enable this network device')), items);
+    const body = h('div', { class: 'ncpa' }, h('div', { class: 'bar' }, h('span', { onclick: () => this.openStatus() }, 'View status of this connection'), h('span', { onclick: () => this.openProps() }, 'Change settings of this connection'), h('span', { onclick: () => { a.enabled = !a.enabled; if (a.enabled) bounce(a); render(); this.refreshTray(); } }, 'Disable / Enable this network device')), items);
     const render = () => {
       items.innerHTML = '';
-      const st = !a.enabled ? 'Disabled' : !(a.cable && !a.portDown) ? 'Network cable unplugged' : (() => { const x = this.status(); return x === 'internet' ? env.suffix : x === 'local' ? 'Unidentified network' : live(a, env).apipa ? 'Unidentified network' : 'Unidentified network'; })();
+      const st = !a.enabled ? 'Disabled' : !mediaOk(a) ? 'Network cable unplugged' : (() => { const x = this.status(); return x === 'internet' ? env.suffix : x === 'local' ? 'Unidentified network' : live(a, env).apipa ? 'Unidentified network' : 'Unidentified network'; })();
       const nm = env.wireless ? 'Wi-Fi' : 'Ethernet';
       const card = h('div', { class: 'adp', tabindex: '0' }, h('div', { html: I.net, style: { opacity: a.enabled ? '1' : '.45', filter: a.enabled ? '' : 'grayscale(1)' } }), h('div', {}, h('b', {}, nm), h('small', {}, st), h('small', {}, env.adapter)));
       card.addEventListener('click', () => card.classList.add('sel'));
-      card.addEventListener('dblclick', () => (a.enabled ? this.openStatus() : (a.enabled = true, render(), this.refreshTray())));
+      card.addEventListener('dblclick', () => (a.enabled ? this.openStatus() : (a.enabled = true, bounce(a), render(), this.refreshTray())));
       card.addEventListener('contextmenu', (e: MouseEvent) => {
         e.preventDefault(); card.classList.add('sel');
         const r = this.mon.getBoundingClientRect();
         const m = h('div', { class: 'ctx', style: { left: `${e.clientX - r.left}px`, top: `${e.clientY - r.top}px` } },
-          h('div', { onclick: () => { a.enabled = !a.enabled; render(); this.refreshTray(); } }, a.enabled ? 'Disable' : 'Enable'),
+          h('div', { onclick: () => { a.enabled = !a.enabled; if (a.enabled) bounce(a); render(); this.refreshTray(); } }, a.enabled ? 'Disable' : 'Enable'),
           h('div', { onclick: () => this.openStatus() }, 'Status'),
           h('div', { onclick: () => this.openProps() }, h('b', {}, 'Properties')));
         this.mon.append(m); const off = () => { m.remove(); removeEventListener('mousedown', off2, true); }; const off2 = (ev: Event) => { if (!m.contains(ev.target as Node)) off(); else setTimeout(off, 0); }; addEventListener('mousedown', off2, true);
@@ -522,9 +522,9 @@ export class PcOS {
     let w: Win;
     const body = h('div', { class: 'dlg' }, h('div', { class: 'tabs' }, h('span', {}, 'General')),
       h('fieldset', {}, h('legend', {}, 'Connection'),
-        h('div', { class: 'row' }, 'IPv4 Connectivity:', h('span', {}, !(a.cable && !a.portDown) ? 'No network access' : st === 'internet' ? 'Internet' : st === 'local' ? 'No Internet access' : 'No network access')),
+        h('div', { class: 'row' }, 'IPv4 Connectivity:', h('span', {}, !mediaOk(a) ? 'No network access' : st === 'internet' ? 'Internet' : st === 'local' ? 'No Internet access' : 'No network access')),
         h('div', { class: 'row' }, 'IPv6 Connectivity:', h('span', {}, 'No network access')),
-        h('div', { class: 'row' }, 'Media State:', h('span', {}, (a.cable && !a.portDown) ? 'Enabled' : 'Media disconnected')),
+        h('div', { class: 'row' }, 'Media State:', h('span', {}, mediaOk(a) ? 'Enabled' : 'Media disconnected')),
         h('div', { class: 'row' }, 'Duration:', h('span', {}, '00:42:17')),
         h('div', { class: 'row' }, 'Speed:', h('span', {}, env.wireless ? '573.5 Mbps' : '1.0 Gbps')),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => this.openDetails() }, 'Details...'), '')),
@@ -536,10 +536,10 @@ export class PcOS {
   private diagnose() {
     const s = this.cur!; const l = live(s.a, s.env);
     let msg = 'Troubleshooting couldn\'t identify the problem.';
-    if (!(s.a.cable && !s.a.portDown)) msg = 'Problem found: An Ethernet cable is not properly plugged in or might be broken.';
+    if (!mediaOk(s.a)) msg = 'Problem found: An Ethernet cable is not properly plugged in or might be broken.';
     else if (l.apipa) msg = 'Problem found: Ethernet doesn\'t have a valid IP configuration (DHCP server tidak menjawab).';
-    else if (l.ok && conflict(l, s.env)) msg = `Problem found: The IP address ${l.ip} is already in use by another device on the network.`;
-    else if (l.ok && !onSegment(l, s.env)) msg = 'Problem found: Ethernet doesn\'t have a valid IP configuration (IP tidak satu jaringan dengan segmen ini).';
+    else if (l.ok && conflict(l, s.env, s.a)) msg = `Problem found: The IP address ${l.ip} is already in use by another device on the network.`;
+    else if (l.ok && !onSegment(l, s.env, s.a)) msg = 'Problem found: Ethernet doesn\'t have a valid IP configuration (IP tidak satu jaringan dengan segmen ini).';
     else if (l.ok && ping(s.a, s.env, '8.8.8.8', true).kind !== 'reply') msg = 'Problem found: The default gateway is not available.';
     else if (l.ok && (!l.dns.length || resolve(s.a, s.env, 'cari.id') === 'timeout')) msg = 'Problem found: Your computer appears to be correctly configured, but the device or resource (DNS server) is not responding.';
     this.msgBox('Network Diagnostics', msg, msg.startsWith('Problem') ? 'warn' : 'info');
@@ -549,8 +549,8 @@ export class PcOS {
     const rows: [string, string][] = [
       ['Connection-specific DN...', a.dhcp && l.ok && !l.apipa ? env.suffix : ''], ['Description', env.adapter], ['Physical Address', a.mac.toUpperCase()], ['DHCP Enabled', a.dhcp ? 'Yes' : 'No'],
       ['IPv4 Address', l.ip], ['IPv4 Subnet Mask', l.ok ? maskStr(l.prefix) : ''],
-      ...(a.dhcp && l.ok && !l.apipa && a.lease ? [['Lease Obtained', new Date(a.lease.t).toLocaleString('en-US')], ['Lease Expires', new Date(a.lease.t + env.dhcp!.lease * 3600e3).toLocaleString('en-US')]] as [string, string][] : []),
-      ['IPv4 Default Gateway', l.ok ? l.gw : ''], ['IPv4 DHCP Server', a.dhcp && l.ok && !l.apipa ? env.gateway : ''], ['IPv4 DNS Server', l.dns.join(', ')], ['IPv4 WINS Server', ''], ['NetBIOS over Tcpip En...', 'Yes'],
+      ...(a.dhcp && l.ok && !l.apipa && a.lease ? [['Lease Obtained', new Date(a.lease.t).toLocaleString('en-US')], ['Lease Expires', new Date(a.lease.t + (env.dhcp?.lease ?? 8) * 3600e3).toLocaleString('en-US')]] as [string, string][] : []),
+      ['IPv4 Default Gateway', l.ok ? l.gw : ''], ['IPv4 DHCP Server', a.dhcp && l.ok && !l.apipa ? (a.lease?.server ?? env.gateway) : ''], ['IPv4 DNS Server', l.dns.join(', ')], ['IPv4 WINS Server', ''], ['NetBIOS over Tcpip En...', 'Yes'],
     ];
     let w: Win;
     const tbl = h('div', { class: 'list', style: { height: '260px' } }, h('div', { style: { fontWeight: '600', background: '#f3f3f3' } }, h('span', { style: { width: '160px', display: 'inline-block' } }, 'Property'), 'Value'), ...rows.map(([k, v]) => h('div', {}, h('span', { style: { width: '160px', display: 'inline-block' } }, k), v)));
@@ -647,14 +647,14 @@ export class PcOS {
           const ans = await this.msgBox('Nusa TCP/IP', 'The default gateway is not on the same network segment (subnet) that is defined by the IP address and subnet mask. Do you want to save this configuration?', 'warn', ['Yes', 'No']);
           if (ans !== 'Yes') return;
         }
-        a.dhcp = false; a.ip = ipS; a.mask = ipStr(prefixToMask(p)); a.gw = gS; a.lease = undefined;
+        if (a.dhcp) releaseLease(a); a.dhcp = false; a.ip = ipS; a.mask = ipStr(prefixToMask(p)); a.gw = gS; a.lease = undefined;
       } else { const was = a.dhcp; a.dhcp = true; if (!was) a.lease = undefined; }
       a.dnsAuto = !dMan.checked; a.dns1 = dMan.checked ? d1.get() : ''; a.dns2 = dMan.checked ? d2.get() : '';
       a.arp.clear();
       this.closeWin(w); this.refreshNcpa();
       const nl = live(a, env);
-      if (nl.ok && conflict(nl, env)) this.notify(`${OSNAME} Network`, `Jendela mendeteksi konflik alamat IP: ${nl.ip} sudah dipakai perangkat lain di jaringan ini.`);
-      this.emit('ipset', { dhcp: a.dhcp, ip: nl.ip, prefix: nl.prefix, gw: nl.gw, dns: nl.dns, onSegment: onSegment(nl, env) });
+      if (nl.ok && conflict(nl, env, a)) this.notify(`${OSNAME} Network`, `Jendela mendeteksi konflik alamat IP: ${nl.ip} sudah dipakai perangkat lain di jaringan ini.`);
+      this.emit('ipset', { dhcp: a.dhcp, ip: nl.ip, prefix: nl.prefix, gw: nl.gw, dns: nl.dns, onSegment: onSegment(nl, env, a) });
       if ((valid as HTMLInputElement).checked) this.diagnose();
     };
     const body = h('div', { class: 'dlg' },
@@ -683,7 +683,7 @@ export class PcOS {
       const l = live(a, env); const st = this.status(); const nm = env.wireless ? 'Wi-Fi' : 'Ethernet';
       if (p === 'network') {
         main.append(h('h1', {}, 'Network & internet'),
-          h('div', { class: 'card', style: { padding: '20px 16px' } }, h('div', { html: st === 'none' ? I.noNet : env.wireless ? I.wifi : I.eth, style: { width: '40px', height: '40px' } }), h('div', { class: 'grow' }, h('b', { style: { fontSize: '16px' } }, nm), h('small', {}, !a.enabled ? 'Disabled' : !(a.cable && !a.portDown) ? 'Not connected' : st === 'internet' ? 'Connected, secured' : 'No internet'))),
+          h('div', { class: 'card', style: { padding: '20px 16px' } }, h('div', { html: st === 'none' ? I.noNet : env.wireless ? I.wifi : I.eth, style: { width: '40px', height: '40px' } }), h('div', { class: 'grow' }, h('b', { style: { fontSize: '16px' } }, nm), h('small', {}, !a.enabled ? 'Disabled' : !mediaOk(a) ? 'Not connected' : st === 'internet' ? 'Connected, secured' : 'No internet'))),
           h('div', { class: 'card' }, h('div', { class: 'grow' }, h('b', {}, `${nm} properties`), h('div', { class: 'kv', style: { marginTop: '10px' } },
             h('b', {}, 'IP assignment:'), h('span', {}, a.dhcp ? 'Automatic (DHCP)' : 'Manual'),
             h('b', {}, 'DNS server assignment:'), h('span', {}, a.dhcp && a.dnsAuto ? 'Automatic (DHCP)' : 'Manual'),
@@ -792,24 +792,106 @@ export class PcOS {
     if (kind === 'blocked') return h('div', { class: 'err' }, h('div', { html: I.warn, style: { width: '64px', height: '64px' } }), h('h1', {}, 'Situs diblokir oleh kebijakan jaringan'), h('ul', {}, h('li', {}, `${url.hostname} masuk daftar blokir pada router ${env.gateway} (filter konten jam belajar).`), h('li', {}, 'Hubungi admin jaringan jika situs ini dibutuhkan untuk tugas.')), h('code', {}, 'BLOCKED_BY_ADMINISTRATOR'));
     if (kind === 'server') return h('div', { class: 'web', style: { maxWidth: '820px', margin: '24px auto', border: '1px solid #ccc' } }, h('div', { style: { background: '#d14836', color: '#fff', padding: '14px 18px', fontSize: '22px', fontWeight: '700' } }, 'Debian-style Default Page'), h('div', { style: { padding: '14px 18px' } }, h('h2', { style: { textAlign: 'center' } }, 'It works!'), h('p', {}, `Ini halaman default web server di srv-praktik (${ip}). Kalau kamu bisa melihat halaman ini, berarti PC kamu sudah bisa berkomunikasi dengan server di jaringan lab.`), h('p', {}, 'Konfigurasi utama ada di /etc/apache2/apache2.conf, dokumen web di /var/www/html.')));
     if (kind === 'printer') return h('div', { class: 'wf' }, h('aside', {}, h('div', { class: 'on' }, 'Status'), h('div', {}, 'Network'), h('div', {}, 'Supplies')), h('main', {}, h('h3', {}, 'Printer L2 · Embedded Web Server'), h('table', {}, h('tr', {}, h('th', {}, 'Item'), h('th', {}, 'Value')), ...[['Status', 'Ready'], ['IP Address', ip], ['Subnet Mask', maskStr(24)], ['Gateway', '192.168.20.1'], ['Toner Black', '62%'], ['Pages printed', '18.204']].map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))));
-    // router web UI (login, then status)
+    if (kind === 'pos') return h('div', { class: 'web' }, h('div', { style: { background: '#0f7a4a', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, 'KasirKu POS · srv-pos'), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Server POS online'), h('p', {}, `Terminal kasir ini terhubung ke server POS ${ip}. Transaksi QRIS dan struk tersinkron.`)));
+    if (kind === 'intranet') { const hostN = Object.values(ENVS).flatMap(e => e.hosts).find(x => x.ip === ip)?.name ?? url.hostname; return h('div', { class: 'web' }, h('div', { style: { background: '#5b2a86', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, `${hostN} · Intranet Nusantara Tech`), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Aplikasi internal berjalan'), h('p', {}, `Kamu membuka ${url.hostname} (${ip}). Nama ini diterjemahkan oleh DNS server jaringanmu.`))); }
+    const renv = Object.values(ENVS).find(e => routerOf(e)?.ip === ip) ?? env;
+    return this.routerUi(renv, ip);
+  }
+
+  // ---------------------------------------------------------------- router WebKonfig (editable)
+  private routerUi(env: Env, ip: string): HTMLElement {
+    const s = this.cur!;
+    const r = routerOf(env)!;
     const wrap = h('div', { style: { height: '100%' } });
     const user = h('input', { value: 'admin' }) as HTMLInputElement, pass = h('input', { type: 'password' }) as HTMLInputElement;
     const msg = h('div', { style: { color: '#c00', minHeight: '16px' } });
+    let page = 'dhcp';
+    const inp = (v: string, w = '150px') => { const e = h('input', { value: v, spellcheck: 'false', style: { width: w } }) as HTMLInputElement; return e; };
+    const row = (label: string, el: HTMLElement) => h('label', { class: 'frow' }, h('span', {}, label), el);
+    const note = (t: string, ok = false) => h('div', { class: ok ? 'fok' : 'ferr' }, t);
+    const reachable = () => ping(s.a, s.env, r.ip, true).kind === 'reply';
+    const lost = () => { wrap.innerHTML = ''; wrap.append(h('div', { class: 'err' }, h('div', { html: I.noNet, style: { width: '64px', height: '64px' } }), h('h1', {}, 'Koneksi ke router terputus'), h('ul', {}, h('li', {}, `Router sekarang beralamat ${r.ip}/${env.prefix}.`), h('li', {}, `PC ini memakai ${live(s.a, s.env).ip || 'alamat lain'}, jadi tidak satu subnet lagi dengan router.`), h('li', {}, 'Sesuaikan IP PC (atau ipconfig /renew setelah DHCP benar), lalu buka lagi alamat router yang baru.')), h('code', {}, 'ERR_CONNECTION_RESET'))); };
+    const render = () => {
+      if (!reachable()) { lost(); return; }
+      wrap.innerHTML = '';
+      const nav = ['Interfaces', 'IP › Addresses', 'IP › DHCP Server', 'IP › DNS', 'IP › Routes'];
+      const ids = ['if', 'addr', 'dhcp', 'dns', 'routes'];
+      const main = h('main', {}, h('h3', {}, `RuteOS WebKonfig · ${r.name}`));
+      wrap.append(h('div', { class: 'wf' }, h('aside', {}, ...nav.map((x, i) => h('div', { class: ids[i] === page ? 'on' : '', style: { cursor: 'pointer' }, onclick: () => { page = ids[i]; render(); } }, x))), main));
+      if (page === 'if') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Type'), h('th', {}, 'Running')), h('tr', {}, h('td', {}, 'ether1-isp'), h('td', {}, 'Ethernet'), h('td', {}, 'R')), h('tr', {}, h('td', {}, env.wireless ? 'wlan-tamu' : `vlan${env.vlan}-lan`), h('td', {}, env.wireless ? 'Wireless' : 'VLAN'), h('td', {}, 'R'))));
+      if (page === 'routes') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Dst. Address'), h('th', {}, 'Gateway'), h('th', {}, 'Distance')), h('tr', {}, h('td', {}, '0.0.0.0/0'), h('td', {}, '100.64.12.1 (ether1-isp)'), h('td', {}, '1')), h('tr', {}, h('td', {}, `${env.net}/${env.prefix}`), h('td', {}, `vlan${env.vlan}-lan (connected)`), h('td', {}, '0'))));
+      if (page === 'addr') {
+        const a1 = inp(`${r.ip}/${env.prefix}`, '170px'); a1.name = 'lan-addr';
+        const out = h('div');
+        const apply = () => {
+          const m = /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/.exec(a1.value.trim());
+          const n = m ? parseIp(m[1]) : null, p = m ? +m[2] : 0;
+          if (!m || n === null || p < 8 || p > 30) { out.replaceChildren(note('invalid value for argument address (contoh: 192.168.10.1/24)')); return; }
+          const nw = netOf(n, p), bc = (nw | (~(0xffffffff << (32 - p)) >>> 0)) >>> 0;
+          if (n === nw || n === bc) { out.replaceChildren(note('alamat itu adalah network/broadcast, pilih alamat host')); return; }
+          setRouterLan(env, m[1], p);
+          this.emit('cfg', { kind: 'lan', env: env.id, ip: m[1], prefix: p });
+          render();
+        };
+        main.append(h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${r.ip}/${env.prefix}`), h('td', {}, env.net), h('td', {}, env.wireless ? 'wlan-tamu' : `vlan${env.vlan}-lan`)), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
+          h('p', {}, h('b', {}, 'Ubah alamat LAN')), row('Address', a1), h('button', { class: 'btn', name: 'apply-addr', onclick: apply }, 'Apply'), out,
+          h('p', { class: 'fnote' }, 'Mengubah alamat LAN memindahkan subnet seluruh segmen ini. PC yang memakai alamat lama akan terputus sampai disesuaikan.'));
+      }
+      if (page === 'dhcp') {
+        const d = env.dhcp ?? (env as any)._dhcpOff ?? { start: '', end: '', gw: r.ip, dns: [r.ip], lease: 8 };
+        const on = h('input', { type: 'checkbox', name: 'dhcp-on' }) as HTMLInputElement; on.checked = !!env.dhcp;
+        const st = inp(d.start); st.name = 'dhcp-start'; const en = inp(d.end); en.name = 'dhcp-end';
+        const gw = inp(d.gw); gw.name = 'dhcp-gw'; const dn = inp(d.dns.join(', '), '220px'); dn.name = 'dhcp-dns'; const ls = inp(String(d.lease), '60px'); ls.name = 'dhcp-lease';
+        const out = h('div');
+        const apply = () => {
+          const dns = dn.value.split(/[,\s]+/).filter(Boolean);
+          const cand = { start: st.value.trim(), end: en.value.trim(), gw: gw.value.trim(), dns, lease: Math.max(1, Math.min(168, parseInt(ls.value) || 8)) };
+          if (!on.checked) { (env as any)._dhcpOff = cand; env.dhcp = null; this.emit('cfg', { kind: 'dhcp', env: env.id, on: false }); render(); return; }
+          if (parseIp(cand.gw) === null || dns.some(x => parseIp(x) === null) || !dns.length) { out.replaceChildren(note('gateway / DNS server harus alamat IPv4 yang valid')); return; }
+          const prob = poolProblem(env, cand);
+          if (prob) { out.replaceChildren(note(`ditolak: ${prob}`)); return; }
+          env.dhcp = cand; (env as any)._dhcpOff = undefined;
+          this.emit('cfg', { kind: 'dhcp', env: env.id, on: true, ...cand });
+          render();
+        };
+        const leases = [...env.leases.entries()].map(([mac, lip]) => { const ad = [...this.pcs.values()].find(p => p.a.mac === mac)?.a; return [lip, mac.toUpperCase(), ad?.host ?? '-', 'bound']; });
+        main.append(h('p', {}, h('b', {}, `DHCP Server · vlan${env.vlan}-lan`)), row('Enabled', on), row('Address pool (awal)', st), row('Address pool (akhir)', en), row('Gateway (option 3)', gw), row('DNS servers (option 6)', dn), row('Lease time (jam)', ls),
+          h('button', { class: 'btn', name: 'apply-dhcp', onclick: apply }, 'Apply'), out,
+          !env.dhcp ? note('DHCP server sedang mati: klien akan dapat 169.254.x.x (APIPA).') : poolProblem(env) ? note(`DHCP tidak membagi alamat: ${poolProblem(env)}`) : note(`Aktif · interface ${r.ip}/${env.prefix}`, true),
+          h('p', {}, h('b', {}, 'Leases')), h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'MAC Address'), h('th', {}, 'Host Name'), h('th', {}, 'Status')), ...leases.map(x => h('tr', {}, ...x.map(c => h('td', {}, c))))));
+      }
+      if (page === 'dns') {
+        const up = inp(env.dnsSrv.upstream.join(', '), '220px'); up.name = 'dns-up';
+        const al = h('input', { type: 'checkbox', name: 'dns-allow' }) as HTMLInputElement; al.checked = env.dnsSrv.allow;
+        const rn = inp('', '200px'); rn.name = 'rec-name'; rn.placeholder = 'nama (mis. absensi.kantor.local)';
+        const ri = inp('', '130px'); ri.name = 'rec-ip'; ri.placeholder = 'alamat IP';
+        const out = h('div');
+        const apply = () => {
+          const ups = up.value.split(/[,\s]+/).filter(Boolean);
+          if (ups.some(x => parseIp(x) === null)) { out.replaceChildren(note('server upstream harus alamat IPv4')); return; }
+          env.dnsSrv.upstream = ups; env.dnsSrv.allow = al.checked;
+          this.emit('cfg', { kind: 'dns', env: env.id, upstream: ups, allow: al.checked }); render();
+        };
+        const add = () => {
+          const nm = rn.value.trim().toLowerCase(), rip = ri.value.trim();
+          if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(nm)) { out.replaceChildren(note('nama record tidak valid')); return; }
+          if (parseIp(rip) === null) { out.replaceChildren(note('alamat record tidak valid')); return; }
+          env.dnsSrv.records = env.dnsSrv.records.filter(x => x.name !== nm); env.dnsSrv.records.push({ name: nm, ip: rip });
+          this.emit('cfg', { kind: 'dnsrec', env: env.id, name: nm, ip: rip }); render();
+        };
+        main.append(h('p', {}, h('b', {}, 'IP › DNS (forwarder)')), row('Servers (upstream)', up), row('Allow Remote Requests', al), h('button', { class: 'btn', name: 'apply-dns', onclick: apply }, 'Apply'), out,
+          h('p', {}, h('b', {}, 'Static (record A)')), h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Address'), h('th', {}, '')),
+            ...env.dnsSrv.records.map(x => h('tr', {}, h('td', {}, x.name), h('td', {}, x.ip), h('td', {}, h('button', { class: 'btn', onclick: () => { env.dnsSrv.records = env.dnsSrv.records.filter(y => y !== x); this.emit('cfg', { kind: 'dnsdel', env: env.id, name: x.name }); render(); } }, 'Hapus'))))),
+          row('Name', rn), row('Address', ri), h('button', { class: 'btn', name: 'add-rec', onclick: add }, 'Tambah record'),
+          h('p', { class: 'fnote' }, `Nama pendek juga dikenali dengan akhiran domain ${env.suffix}. Klien harus memakai DNS router ini (${r.ip}) supaya record lokal terbaca.`));
+      }
+    };
     const login = () => {
       if (user.value !== 'admin' || pass.value !== '') { msg.textContent = 'ERROR: wrong username or password'; return; }
-      const l = live(s.a, env);
-      const leases = env.dhcp ? [...env.hosts.filter(x => x.ttl === 128).map(x => [x.ip, x.mac.toUpperCase(), x.name, 'bound']), ...(s.a.dhcp && s.a.lease?.ip ? [[s.a.lease.ip, s.a.mac.toUpperCase(), s.a.host, 'bound']] : [])] : [];
-      wrap.innerHTML = '';
-      wrap.append(h('div', { class: 'wf' }, h('aside', {}, ...['Interfaces', 'IP › Addresses', 'IP › DHCP Server', 'IP › DNS', 'IP › Routes', 'System'].map((x, i) => h('div', { class: i === 2 ? 'on' : '' }, x))),
-        h('main', {}, h('h3', {}, `RuteOS WebKonfig · ${env.hosts[0].name}`),
-          h('p', {}, h('b', {}, 'IP › Addresses')), h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${env.gateway}/${env.prefix}`), h('td', {}, env.net), h('td', {}, env.wireless ? 'wlan-tamu' : 'bridge-lan')), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
-          h('p', {}, h('b', {}, 'IP › DHCP Server › Leases')), h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'MAC Address'), h('th', {}, 'Host Name'), h('th', {}, 'Status')), ...leases.map(r => h('tr', {}, ...r.map(c => h('td', {}, c))))),
-          h('p', {}, h('b', {}, 'IP › DNS')), h('table', {}, h('tr', {}, h('th', {}, 'Servers'), h('th', {}, 'Allow Remote Requests')), h('tr', {}, h('td', {}, '8.8.8.8, 1.1.1.1'), h('td', {}, 'yes'))),
-          h('p', { style: { color: '#555' } }, `Kamu login dari ${l.ip}. Mode baca-saja di simulasi ini.`))));
+      render();
     };
     pass.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
-    wrap.append(h('div', { class: 'login' }, h('div', { style: { fontSize: '18px', fontWeight: '700', marginBottom: '10px', color: '#2e3b4e' } }, 'RuteOS WebKonfig'), h('div', {}, `Router ${env.hosts[0].name} (${ip})`), h('br'), 'Login:', user, 'Password:', pass, msg, h('button', { class: 'btn', onclick: login }, 'Login'), h('p', { style: { color: '#777' } }, 'Default lab: admin / (kosong)')));
+    wrap.append(h('div', { class: 'login' }, h('div', { style: { fontSize: '18px', fontWeight: '700', marginBottom: '10px', color: '#2e3b4e' } }, 'RuteOS WebKonfig'), h('div', {}, `Router ${r.name} (${ip})`), h('br'), 'Login:', user, 'Password:', pass, msg, h('button', { class: 'btn', name: 'login', onclick: login }, 'Login'), h('p', { style: { color: '#777' } }, 'Default: admin / (kosong)')));
     return wrap;
   }
 }

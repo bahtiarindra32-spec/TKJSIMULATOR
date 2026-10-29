@@ -14,8 +14,8 @@ import { buildStreetProps } from './world/props';
 import { Signals, Traffic, Pedestrians } from './game/traffic';
 import { MISSIONS } from './game/missions';
 import * as ND from './assets/netdevices';
-import { MissionSystem, hotelAnchorsWorld } from './game/missionSystem';
-import { MissionUI } from './ui/missionUI';
+import { hotelAnchorsWorld } from './game/missionSystem';
+import { initSwitches, portOf } from './pcos/net';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
 
 import { buildWayfinding } from './world/wayfinding';
@@ -70,7 +70,9 @@ hotel.updateMatrixWorld(true);
 hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exec(o.name); if (m) PCS.push({ name: o.name, label: `${m[2] === 'PC' ? 'PC' : 'Laptop'} ${m[3].replace(/_/g, ' ')} · ${m[1]}`, p: new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) }); });
 const pcos = new PcOS();
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
-const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK);
+const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
+initSwitches(PCS.map(c => c.name));
+const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET);
 const { tls } = buildStreetProps(world);
 buildWayfinding(world);
 dressL1(hotel);
@@ -79,8 +81,9 @@ const signals = new Signals(tls);
 const gameLayer = new THREE.Group(); gameLayer.name = 'GAME_LAYER'; scene.add(gameLayer);
 const traffic = new Traffic(gameLayer, signals);
 const peds = new Pedestrians(gameLayer);
-const missions = new MissionSystem(hotelAnchorsWorld());
-const missionUI = new MissionUI(missions, { hudVisible: false, below: $('hud-loc') });
+// The old linear quiz chain is retired: all work now comes from the NOC work board (game/noc.ts).
+const missions = { isModalOpen: () => false, hintFor: (_a: string | null): string | null => null, interact: (_a: string | null) => false, onModalChange: (_f: (o: boolean) => void) => {}, setPlayerPos: (_x: number, _z: number) => {}, current: () => ({ targetPos: null as { x: number; z: number } | null, targetY: 0, place: '' }), start: () => {} };
+const missionUI = { setHudVisible: (_v: boolean) => {} };
 const waypoint = createWaypoint();
 const missionMarker = createAnchorMarker(); gameLayer.add(missionMarker.group);
 buildAutoColliders(world); buildGrid();
@@ -156,7 +159,7 @@ const uiBlocked = () => missions.isModalOpen() || pcos.isOpen() || noc.isModalOp
 function enterWalk() {
   mode = 'walk'; document.body.classList.add('entered'); document.body.classList.remove('viewing'); setCutaway(false); controls.enabled = false; tween = null;
   player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1;
-  $('hints').textContent = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · V kamera · F interaksi · T tiket NOC · C cek fisik · E/Q tangga · M peta · Esc keluar';
+  $('hints').textContent = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · V kamera · F interaksi · T papan kerja · C cek fisik · E/Q tangga · M peta · Esc keluar';
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
   try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ }
   missionUI.setHudVisible(true); noc.setHudVisible(true);
@@ -296,11 +299,10 @@ pcos.onClose = () => { keys.clear(); last = performance.now(); };
 function interact() {
   if (uiBlocked()) return;
   const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y);
-  if (door && !(nearAnchor && missions.hintFor(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
+  if (door && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
   if (!nearAnchor && nearPc) { keys.clear(); if (document.pointerLockElement) document.exitPointerLock(); pcos.open(nearPc.name, nearPc.label); return; }
   if (!nearAnchor) return;
-  if (missions.interact(nearAnchor)) return;
-  if (nearAnchor === 'ANCHOR_IT_NOC_01') { noc.openBoard(); return; }
+  if (noc.interactAnchor(nearAnchor)) return;
   const m = MISSIONS[nearAnchor]; toast(m ? `${m.title}: ${m.desc}` : nearAnchor, 5000);
 }
 let toastT = 0;
@@ -398,12 +400,12 @@ function updateWalk(dt: number) {
     let best = 1.5;
     for (const c of PCS) { if (Math.abs(c.p.y - (player.pos.y + 0.9)) > 1.2) continue; const d = Math.hypot(player.pos.x - c.p.x, player.pos.z - c.p.z); if (d < best) { best = d; nearPc = c; } }
     // an anchor with no active mission step does not hide the computer in front of you
-    if (nearPc && nearAnchor && !missions.hintFor(nearAnchor)) nearAnchor = null;
+    if (nearPc && nearAnchor && !noc.anchorHint(nearAnchor)) nearAnchor = null;
   }
   const dr = insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y) : null;
-  if (dr && !(nearAnchor && missions.hintFor(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { $('hudHint').textContent = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; return; }
+  if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { $('hudHint').textContent = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; return; }
   const nh = noc.hintAt(nearPc?.name ?? null, nearRack());
-  $('hudHint').textContent = (nh ? nh + ' · ' : '') + (nearPc && !nearAnchor ? `[F] Nyalakan ${nearPc.label}` : nearAnchor ? (missions.hintFor(nearAnchor) ?? `[F] ${MISSIONS[nearAnchor]?.title ?? nearAnchor}`) : inVertical(player.pos.x, player.pos.z) && insideHotel(player.pos.x, player.pos.z) ? '[E] naik · [Q] turun lantai' : '') + (nearAnchor === 'ANCHOR_IT_NOC_01' && !missions.hintFor(nearAnchor) ? ' · [F] Papan tiket NOC' : '');
+  $('hudHint').textContent = (nh ? nh + ' · ' : '') + (nearPc && !nearAnchor ? `[F] Nyalakan ${nearPc.label}` : nearAnchor ? (noc.anchorHint(nearAnchor) ?? `[F] ${MISSIONS[nearAnchor]?.title ?? nearAnchor}`) : inVertical(player.pos.x, player.pos.z) && insideHotel(player.pos.x, player.pos.z) ? '[E] naik · [Q] turun lantai' : '') + '';
 }
 
 function locationName(x: number, z: number): string {
@@ -533,6 +535,7 @@ requestAnimationFrame(() => { frame(); const l = $('loading'); l.style.opacity =
     const o1 = d.open; toggleDoor(d); for (let i = 0; i < 90; i++) updateDoors(1 / 60, 1e6, 1e6, 0, null);
     return `opened=${o1.toFixed(2)} closed=${d.open.toFixed(2)} total=${(window as any).__doorCount ?? '?'}`;
   },
+  portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   noc, missions, pcos, pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: walkability grid of a hotel level (local metres, -1..31 x -1..21). 0 blocked, 1 standable+reachable from seed, 2 standable but unreachable */
