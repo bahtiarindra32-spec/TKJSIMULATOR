@@ -1,0 +1,11 @@
+import { chromium } from 'playwright'; import http from 'http'; import fs from 'fs'; import path from 'path';
+const root = '/workspace/work/integ-dist', out = '/workspace/work/mshots';
+const srv = http.createServer((q, r) => { let p = path.join(root, q.url.split('?')[0]); if (p.endsWith('/')) p += 'index.html'; fs.readFile(p, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[path.extname(p)] || 'application/octet-stream' }); r.end(d); }); }).listen(5481);
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+await p.goto('http://localhost:5481/index.html'); await p.waitForFunction(() => window.__kota, null, { timeout: 120000 }); await p.waitForTimeout(1000);
+await p.evaluate(() => { localStorage.clear(); window.__kota.pause(true); window.__kota.enterWalk(); window.__kota.missions.jumpTo(4); window.__kota.teleport(246.7, 188.5, 1, 0); });
+await p.evaluate(() => window.__kota.step(3));
+console.log(await p.evaluate(() => { const m = window.__kota.scene.getObjectByName('MISSION_MARKER'); const wp = new m.position.constructor(); m.getWorldPosition(wp); return { vis: m.visible, pos: wp.toArray(), parentVis: m.parent.visible, kids: m.children.length }; }));
+await p.screenshot({ path: `${out}/g_dbg_server.png` });
+await b.close(); srv.close();

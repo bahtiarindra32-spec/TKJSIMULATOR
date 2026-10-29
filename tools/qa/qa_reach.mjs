@@ -1,0 +1,11 @@
+import { chromium } from 'playwright'; import fs from 'fs';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 640, height: 400 } });
+p.on('pageerror', e => console.log('PAGEERROR', e.message.slice(0,200)));
+await p.goto('http://127.0.0.1:8787/', { waitUntil: 'commit', timeout: 60000 });
+await p.waitForFunction(() => window.__kota && window.__kota.reach, null, { timeout: 90000 });
+await p.evaluate(() => window.__kota.pause(true));
+const out = {};
+for (const lv of (process.argv[2]||'1,2,4').split(',').map(Number)) out[lv] = await p.evaluate(l => window.__kota.reach(l), lv);
+fs.writeFileSync('/workspace/work/reach.json', JSON.stringify(out));
+await b.close(); console.log('ok');

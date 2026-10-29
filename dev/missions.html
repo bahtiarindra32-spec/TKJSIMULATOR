@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dev · Mission System</title>
+  <style>
+    #dev { position: fixed; right: 12px; top: 12px; z-index: 7; width: 270px; max-height: calc(100vh - 24px); overflow: auto; padding: 10px; background: rgba(10,14,18,.9); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; font: 12px system-ui; color: #ddd; }
+    #dev h4 { margin: 8px 0 4px; font: 600 11px monospace; letter-spacing: .12em; color: #2bd46b; }
+    #dev button { display: block; width: 100%; margin: 3px 0; min-height: 30px; padding: 4px 8px; text-align: left; background: #1d252c; color: #eee; border: 1px solid #333; border-radius: 3px; cursor: pointer; font: 12px system-ui; }
+    #dev button.cur { border-color: #ffd400; color: #ffd400; }
+    #devState { font: 11px/1.4 monospace; white-space: pre-wrap; color: #9ab; }
+    #devToggle { position: fixed; right: 12px; bottom: 12px; z-index: 7; min-height: 36px; }
+    #dev.closed { display: none; }
+    @media (max-width: 720px) { #dev { top: auto; bottom: 56px; width: 220px; max-height: 50vh; } }
+  </style>
+</head>
+<body class="entered">
+  <div id="app"></div>
+  <aside id="dev">
+    <h4>STATUS</h4><div id="devState"></div>
+    <h4>DATANG KE ANCHOR + F</h4><div id="devAnchors"></div>
+    <h4>LAINNYA</h4>
+    <button id="devSpawn" type="button">Ke spawn (lobi)</button>
+    <button id="devStart" type="button">ms.start() (masuk mode jalan)</button>
+    <button id="devReset" type="button">Reset progres</button>
+    <div id="devJump"></div>
+  </aside>
+  <button id="devToggle" type="button">Dev panel</button>
+  <script type="module" src="./missions.ts"></script>
+</body>
+</html>

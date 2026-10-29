@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const url = process.argv[2]; const gl = process.argv[3] === 'gl';
+const args = gl ? ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] : ['--disable-gpu','--disable-webgl','--disable-3d-apis'];
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args });
+const p = await b.newPage();
+p.on('pageerror', e => console.log('PAGEERROR', e.message.slice(0,300)));
+p.on('console', m => { if (m.type()==='error'||m.type()==='warning') console.log('CONSOLE', m.type(), m.text().slice(0,300)); });
+await p.goto(url, { waitUntil: 'commit', timeout: 60000 });
+await p.waitForTimeout(25000);
+console.log('styles', await p.evaluate(() => document.querySelectorAll('style').length), 'canvas', await p.evaluate(() => !!document.querySelector('canvas')));
+await p.screenshot({ path: '/workspace/work/shots/tunnel_'+(gl?'gl':'nogl')+'.png' });
+await b.close();

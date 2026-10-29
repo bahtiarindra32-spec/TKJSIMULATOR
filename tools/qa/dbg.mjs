@@ -1,0 +1,12 @@
+import { chromium } from 'playwright'; import http from 'http'; import fs from 'fs'; import path from 'path';
+const root='/workspace/projects/b057e655-c0c1-4cdc-b187-cf16e7554199/kota-nusantara/dist';
+const srv=http.createServer((q,r)=>{let p=path.join(root,q.url.split('?')[0]); if(p.endsWith('/'))p+='index.html'; fs.readFile(p,(e,d)=>{if(e){r.writeHead(404);r.end();return;} r.writeHead(200,{'content-type':{'.html':'text/html','.js':'text/javascript','.css':'text/css'}[path.extname(p)]||'x'}); r.end(d);});}).listen(5198);
+const b=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const p=await b.newPage({viewport:{width:640,height:400}}); p.on('pageerror',e=>console.log('ERR',e.message)); p.on('console',m=>console.log('C',m.text()));
+await p.goto('http://localhost:5198/index.html',{waitUntil:'domcontentloaded'}); await p.waitForFunction(()=>window.__kota,null,{timeout:90000}); await p.waitForTimeout(1500);
+const el = await p.evaluate(()=>{const r=document.getElementById('enter').getBoundingClientRect(); const e=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return e.id+'|'+e.tagName;}); console.log('top element at button:', el);
+await p.evaluate(()=>{document.getElementById('enter').addEventListener('click',()=>console.log('CLICKED'),{capture:true}); window.addEventListener('keydown',e=>console.log('KEY',e.code));}); const fps=await p.evaluate(()=>new Promise(res=>{let n=0;const t0=performance.now();function f(){n++; if(performance.now()-t0<4000) requestAnimationFrame(f); else res(n/((performance.now()-t0)/1000));} requestAnimationFrame(f);})); console.log('fps',fps);
+const bb=await p.locator('#enter').boundingBox(); console.log('bb',JSON.stringify(bb)); await p.mouse.move(bb.x+bb.width/2,bb.y+bb.height/2); await p.mouse.down(); await p.waitForTimeout(100); await p.mouse.up(); await p.waitForTimeout(6000); await p.keyboard.press('KeyZ'); await p.waitForTimeout(4000); console.log('zones btn', await p.evaluate(()=>document.getElementById('btnZones').className));
+console.log('after click', await p.evaluate(()=>document.body.className)); await p.waitForTimeout(800);
+console.log('body:', await p.evaluate(()=>document.body.className));
+await b.close(); srv.close();
