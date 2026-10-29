@@ -1,6 +1,6 @@
 // Console session to a floor switch (Cisco IOS-like subset) shown on the technician laptop.
 // Every command changes the shared switch state in net.ts, so the PCs feel it immediately.
-import { SWITCHES, ADAPTERS, portName, linkUp, bounce, stormOn, type Switch, type Port } from './net';
+import { SWITCHES, ADAPTERS, portName, linkUp, bounce, stormOn, portLink, type Switch, type Port } from './net';
 
 type Mode = 'user' | 'priv' | 'config' | 'if' | 'vlan';
 const el = (tag: string, cls = '', txt = '') => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt) e.textContent = txt; return e; };
@@ -122,7 +122,7 @@ export class SwitchCli {
             p.shutdown = false;
             const a = p.pc ? ADAPTERS.get(p.pc) : undefined;
             if (a) bounce(a);
-            const up = this.up(p) ? this.sw.uplink!.cable : this.sw.loop?.includes(p.n) ? true : !!a && linkUp(a) && a.enabled;
+            const up = this.up(p) ? this.sw.uplink!.cable : this.sw.loop?.includes(p.n) ? true : p.pc?.startsWith('AP-') ? portLink(this.sw, p) : !!a && linkUp(a) && a.enabled;
             this.print(`%LINK-3-UPDOWN: Interface ${portName(p.n)}, changed state to ${up ? 'up' : 'down'}\n`);
             if (up) this.print(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${portName(p.n)}, changed state to up\n`);
           }
@@ -156,6 +156,13 @@ export class SwitchCli {
           }
           return this.bad(t[1]);
         }
+        if (kw(t[0], 'power', 2) && kw(t[1], 'inline', 2)) {
+          if (!t[2]) return this.incomplete();
+          if (this.ifs.some(p => this.up(p))) { this.print('% PoE tidak tersedia di port SFP uplink.\n'); return; }
+          const on = kw(t[2], 'auto', 2) ? true : kw(t[2], 'never', 2) ? false : null; if (on === null) return this.bad(t[2]);
+          for (const p of this.ifs) { const was = p.poe !== false; p.poe = on; if (was !== on && p.pc?.startsWith('AP-')) this.print(on ? `%ILPOWER-5-POWER_GRANTED: Interface ${portName(p.n)}: Power granted\n%LINK-3-UPDOWN: Interface ${portName(p.n)}, changed state to up\n` : `%ILPOWER-5-IEEE_DISCONNECT: Interface ${portName(p.n)}: PD removed\n%LINK-3-UPDOWN: Interface ${portName(p.n)}, changed state to down\n`); }
+          this.sw.dirty = true; return;
+        }
         if (kw(t[0], 'description', 3)) { for (const p of this.ifs) p.desc = t.slice(1).join(' ').slice(0, 24); this.sw.dirty = true; return; }
         if (kw(t[0], 'no', 2) && kw(t[1], 'description', 3)) { for (const p of this.ifs) p.desc = ''; return; }
         return this.bad(t[0]);
@@ -168,7 +175,7 @@ export class SwitchCli {
       user: '  enable      Turn on privileged commands\n  exit        Exit from the EXEC\n  show        Show running system information',
       priv: '  configure   Enter configuration mode\n  copy        Copy from one file to another\n  disable     Turn off privileged commands\n  exit        Exit from the EXEC\n  show        Show running system information\n  write       Write running configuration to memory',
       config: '  do          To run exec commands in config mode\n  end         Exit from configure mode\n  exit        Exit from configure mode\n  interface   Select an interface to configure\n  no          Negate a command or set its defaults\n  vlan        Vlan commands',
-      if: '  description Interface specific description\n  do          To run exec commands\n  end         Exit from configure mode\n  exit        Exit from interface configuration mode\n  no          Negate a command or set its defaults\n  shutdown    Shutdown the selected interface\n  switchport  Set switching mode characteristics',
+      if: '  description Interface specific description\n  do          To run exec commands\n  end         Exit from configure mode\n  exit        Exit from interface configuration mode\n  no          Negate a command or set its defaults\n  power       Power configuration (power inline auto|never)\n  shutdown    Shutdown the selected interface\n  switchport  Set switching mode characteristics',
       vlan: '  end         Exit from configure mode\n  exit        Apply changes, bump revision number, and exit mode\n  name        Ascii name of the VLAN',
     };
     this.print(`${m[this.mode]}\n\n`);
@@ -178,8 +185,7 @@ export class SwitchCli {
     if (p.shutdown) return 'disabled';
     if (this.up(p)) return this.sw.uplink!.cable ? 'connected' : 'notconnect';
     if (this.sw.loop?.includes(p.n)) return 'connected';
-    const a = p.pc ? ADAPTERS.get(p.pc) : undefined;
-    if (!a || !a.cable || a.broken) return 'notconnect';
+    if (!portLink(this.sw, p)) return 'notconnect';
     if (!this.sw.vlans.has(p.vlan)) return 'inactive';
     return 'connected';
   }
@@ -209,6 +215,13 @@ export class SwitchCli {
       this.print(`${portName(q.n).replace('Gi', 'GigabitEthernet')} is ${q.shutdown ? 'administratively down' : st === 'connected' || st === 'inactive' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : st === 'inactive' ? 'up (inactive)' : `down (${st})`}\n  Description: ${q.desc}\n  Switchport: Enabled · Administrative Mode: static access · Access Mode VLAN: ${q.vlan} (${sw.vlans.get(q.vlan) ?? 'Inactive'})\n\n`);
       return;
     }
+    if (kw(t[0], 'power', 2)) {
+      let s = 'Module   Available     Used     Remaining\n          (Watts)     (Watts)    (Watts)\n------   ---------   --------   ---------\n';
+      const pd = sw.ports.filter(p => p.pc?.startsWith('AP-') && p.poe !== false && portLink(sw, p));
+      s += `1           370.0${(pd.length * 13.4).toFixed(1).padStart(11)}${(370 - pd.length * 13.4).toFixed(1).padStart(12)}\nInterface Admin  Oper       Power   Device              Class Max\n                           (Watts)\n--------- ------ ---------- ------- ------------------- ----- ----\n`;
+      for (const p of sw.ports) { const link = p.poe !== false && portLink(sw, p) && !!p.pc?.startsWith('AP-'); s += `${portName(p.n).padEnd(10)}${(p.poe === false ? 'off' : 'auto').padEnd(7)}${(p.poe === false ? 'off' : link ? 'on' : 'off').padEnd(11)}${(link ? '13.4' : '0.0').padStart(7)} ${(link ? 'NusaAP AX1800' : 'n/a').padEnd(20)}${(link ? '4' : 'n/a').padEnd(6)}30.0\n`; }
+      this.print(s + '\n'); return;
+    }
     if (kw(t[0], 'vlan', 1)) {
       let s = 'VLAN Name                             Status    Ports\n---- -------------------------------- --------- -------------------------------\n';
       for (const [id, name] of [...sw.vlans.entries()].sort((a, b) => a[0] - b[0])) {
@@ -230,7 +243,7 @@ export class SwitchCli {
       if (this.mode === 'user') return this.bad(t[0]);
       let s = `Building configuration...\n\nCurrent configuration:\n!\nhostname ${sw.name}\n!\n`;
       for (const [id, name] of sw.vlans) if (id !== 1) s += `vlan ${id}\n name ${name}\n!\n`;
-      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
+      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.poe === false) s += ' power inline never\n'; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
       if (sw.uplink) { s += `interface GigabitEthernet1/0/49\n description ${sw.upPort.desc}\n switchport mode trunk\n`; if (sw.uplink.allowed) s += ` switchport trunk allowed vlan ${sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none'}\n`; if (sw.upPort.shutdown) s += ' shutdown\n'; s += '!\n'; }
       s += `interface Vlan1\n ip address ${sw.ip} 255.255.255.0\n!\nend\n`;
       this.print(s + '\n'); return;

@@ -253,7 +253,10 @@ function buildL1(root: THREE.Object3D) {
   // D2 slab + walls
   const fl = group(L, 'L1_FLOOR');
   box(fl, X(0), y, Z(0), 30, 0.12, 20, texMat(TEX.floorTile, 30 / 2.4, 20 / 2.4), 'L1_SLAB');
-  box(fl, X(23), y + 0.12, Z(12), 7, 0.3, 8, texMat(TEX.raised, 7 / 1.2, 8 / 1.2), 'L1_SERVER_RAISED_FLOOR'); // raised floor 0.3
+  // raised floor 0.3 m; the first 1.2 m inside the door is a ramp so the door opening keeps its full 2.1 m headroom
+  box(fl, X(23), y + 0.12, Z(13.2), 7, 0.3, 6.8, texMat(TEX.raised, 7 / 1.2, 6.8 / 1.2), 'L1_SERVER_RAISED_FLOOR');
+  { const len = Math.hypot(1.2, 0.3), rp = new THREE.Mesh(new THREE.BoxGeometry(7, 0.04, len), texMat(TEX.raised, 7 / 1.2, 1)); rp.position.set(X(26.5), y + 0.12 + 0.15 - 0.02, Z(12.6)); rp.rotation.x = -Math.atan2(0.3, 1.2); rp.receiveShadow = true; rp.name = 'L1_SERVER_RAMP'; rp.userData.noCollide = true; fl.add(rp);
+    const nose = mat('#d8b31f', { roughness: 0.6 }); box(fl, X(23), y + 0.12 + 0.3, Z(13.17), 7, 0.012, 0.05, nose, undefined, false); }
   box(fl, X(14), y + 0.121, Z(0), 8, 0.01, 10, texMat(TEX.carpet, 4, 5), undefined, false); // carpet only in IT office; workshop keeps tile (ESD-friendly vinyl look)
   box(fl, X(22), y + 0.121, Z(0), 8, 0.01, 10, texMat(TEX.floorTile, 8 / 1.2, 10 / 1.2, { color: '#dfe6ea' }), undefined, false);
   // ext walls with D3/D4 openings (audit: lobby curtain wall trimmed to X1-5.4 / X8.6-13 so it does not collide with the 3 m main door at X5.5-8.5)
@@ -287,7 +290,7 @@ function buildL1(root: THREE.Object3D) {
   wall(L, 23, 12, 23, 20, 0.2, y, h, srvWallMat, [], 'L1_S10');
   wall(L, 23, 12, 30, 12, 0.2, y, h, srvWallMat, [{ c: 26.5, w: 1.0, b: 0, t: 2.1, kind: 'door', name: 'DOOR_L1_P10', mat: doorSteel }], 'L1_S11');
   // lift doors (stainless) on S4 at P08/P09 – shown closed-looking panels set back
-  for (const c of [20, 22]) { box(L, X(c - 0.55), y, Z(12.15), 1.1, 2.1, 0.04, M.metal, `LIFT_DOOR_${c === 20 ? 1 : 2}`); }
+  liftLanding(L, y, 1);
   // D5 zones
   for (const [n, x0, x1, z0, z1] of [['L1_LOBI', 0, 14, 0, 12], ['L1_LOUNGE', 0, 10, 12, 20], ['L1_IT_OFFICE', 14, 22, 0, 10], ['L1_WORKSHOP', 22, 30, 0, 10], ['L1_CORRIDOR', 14, 30, 10, 12], ['L1_TOILET_M', 10, 12.5, 12, 20], ['L1_TOILET_F', 12.5, 15, 12, 20], ['L1_STAIR', 15, 19, 12, 20], ['L1_LIFT', 19, 23, 12, 20], ['L1_SERVER', 23, 30, 12, 20]] as [string, number, number, number, number][]) zone(1, n, x0, x1, z0, z1);
   ceilingLights(L, y, h, 0, 14, 0, 12, 3); ceilingLights(L, y, h, 14, 30, 0, 10, 2.6); ceilingLights(L, y, h, 0, 10, 12, 20, 3); ceilingLights(L, y, h, 23, 30, 12, 20, 2.3);
@@ -452,6 +455,22 @@ function buildStair(p: THREE.Object3D, y: number, h: number, name: string) {
   box(g, X(17.47), y, Z(12.6), 0.08, h, steps * run, mat('#d9d5cc'));
 }
 
+/** landing doors of both lift shafts (two sliding stainless panels each, animated by game/vertical.ts),
+ *  a hall-call panel between the shafts and a floor indicator above each door */
+function liftLanding(L: THREE.Object3D, y: number, lv: number) {
+  for (const c of [20, 22]) {
+    for (const [side, x0] of [['A', c - 0.56], ['B', c]] as [string, number][]) {
+      const d = box(L, X(x0), y + 0.12, Z(12.1), 0.56, 2.08, 0.04, M.metal, `LIFT_DOOR_L${lv}_${c}_${side}`);
+      d.userData.noCollide = true; d.userData.x0 = d.position.x;
+    }
+    box(L, X(c - 0.6), y + 0.12 + 2.08, Z(12.08), 1.2, 0.06, 0.06, M.steel, undefined, false); // header
+    const ind = box(L, X(c - 0.14), y + 2.32, Z(11.92), 0.28, 0.12, 0.02, mat('#101418', { emissive: '#ff5a3c', emissiveIntensity: 0.35 }), `LIFT_IND_L${lv}_${c}`);
+    ind.userData.noCollide = true;
+  }
+  const call = box(L, X(20.9), y + 1.05, Z(11.92), 0.2, 0.32, 0.02, M.steel, `LIFT_CALL_L${lv}`); call.userData.noCollide = true;
+  for (const [k, dy] of [[0, 0.08], [1, -0.08]]) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.015, 14), mat('#e8eef2', { emissive: '#7fd0ff', emissiveIntensity: 0.25 })); b.rotation.x = Math.PI / 2; b.position.set(X(21), y + 1.21 + dy, Z(11.91)); b.name = `LIFT_BTN_L${lv}_${k ? 'DN' : 'UP'}`; L.add(b); }
+}
+
 function upperShell(L: THREE.Object3D, lv: number, kind: 'office' | 'hotel') {
   const { elev: y, h } = LEVELS[lv - 1];
   const tag = `L${lv}`;
@@ -473,7 +492,7 @@ function upperShell(L: THREE.Object3D, lv: number, kind: 'office' | 'hotel') {
   wall(L, 21, 12, 21, 20, 0.12, y, h, intWallMat, [], `${tag}_LIFT_SPLIT`);
   wall(L, 23, 12, 23, 20, 0.12, y, h, intWallMat, [], `${tag}_LIFT_E`);
   wall(L, 26.5, 12, 26.5, 20, 0.12, y, h, intWallMat, [], `${tag}_IDF_E`);
-  for (const c of [20, 22]) box(L, X(c - 0.55), y, Z(12.15), 1.1, 2.1, 0.04, M.metal);
+  liftLanding(L, y, lv);
   buildStair(L, y, h, `${tag}_STAIR_U`);
   // IDF rack (per floor) — TKJ: distribution switch per floor
   rack(L, y + 0.12, 23.4, 18.6, `PROP_${tag}_IDF_RACK_01`, 0.6, 0.8, 1.2);

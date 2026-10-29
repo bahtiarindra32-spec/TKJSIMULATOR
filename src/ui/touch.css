@@ -1,0 +1,44 @@
+/* touch controls (only when body.touch) */
+#touchui { display: none; }
+body.touch.entered #touchui { display: block; }
+body.touch.entered.pc-open #touchui, body.touch.entered.modal-open #touchui { display: none; }
+#touchui button { -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; -webkit-user-select: none; font: 700 15px/1 system-ui, -apple-system, Roboto, sans-serif; color: #f4f6f8; background: rgba(12,16,20,.52); border: 1px solid rgba(255,255,255,.22); border-radius: 50%; backdrop-filter: blur(4px); display: grid; place-items: center; align-content: center; gap: 2px; padding: 0; }
+#touchui button small { font: 600 9px/1 system-ui, sans-serif; opacity: .8; max-width: 90%; overflow: hidden; white-space: nowrap; }
+#touchui button.on { background: rgba(255,212,0,.55); color: #111; }
+#touchui button.lock { background: rgba(79,195,255,.55); }
+#t-stick { position: fixed; left: 0; bottom: 0; width: 45vw; height: 55vh; z-index: 40; touch-action: none; }
+#t-stick .ring { position: absolute; left: 90px; top: calc(100% - 100px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255,255,255,.28); background: rgba(12,16,20,.25); opacity: .55; transition: opacity .15s; pointer-events: none; }
+#t-stick .ring.on { opacity: 1; }
+#t-stick .ring i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(244,246,248,.8); }
+.tbtns { position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); width: 190px; height: 190px; z-index: 41; }
+.tbtns button { position: absolute; }
+.tbtns .big { width: 78px; height: 78px; right: 0; bottom: 0; font-size: 22px; }
+.tbtns .big.ready { background: rgba(255,212,0,.85); color: #111; border-color: #fff; }
+.tbtns .mid { width: 58px; height: 58px; font-size: 18px; }
+.tbtns .mid:nth-of-type(2) { right: 92px; bottom: 4px; }
+.tbtns .mid:nth-of-type(3) { right: 6px; bottom: 92px; }
+.tbtns .sm { width: 48px; height: 48px; }
+.tbtns .sm:nth-of-type(4) { right: 84px; bottom: 82px; }
+.tbtns .sm:nth-of-type(5) { right: 140px; bottom: 62px; }
+.ttop { position: fixed; right: calc(10px + env(safe-area-inset-right)); top: calc(10px + env(safe-area-inset-top)); display: flex; gap: 6px; z-index: 41; }
+.ttop button { border-radius: 8px !important; padding: 8px 10px !important; font-size: 12px !important; }
+/* the desktop-only chrome steps aside on touch */
+body.touch #hints, body.touch #crosshair, body.touch #toolbar #btnExport { display: none !important; }
+body.touch.entered #btnBack, body.touch.entered #toolbar { display: none !important; }
+body.touch.entered #compass { display: none; }
+body.touch.entered #ident { display: none; }
+body.touch.entered #hud-loc { top: calc(52px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); font-size: 11px; max-width: 55vw; }
+body.touch #noc-hud { width: min(240px, 42vw); font-size: 11px; top: calc(80px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); padding: 7px 9px; max-height: 40vh; overflow: hidden; }
+body.touch #iprompt .ip-row { font-size: 12px; }
+@media (orientation: portrait) {
+  .ttop { left: 10px; right: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  #t-stick { width: 55vw; height: 45vh; }
+  body.touch #noc-hud { top: calc(100px + env(safe-area-inset-top)); width: 60vw; }
+}
+html, body { overscroll-behavior: none; }
+body.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch input, body.touch textarea, body.touch #pcos .term, body.touch .swcli { -webkit-user-select: text; user-select: text; }
+body.touch .ms-tracker { left: auto; right: calc(10px + env(safe-area-inset-right)); top: calc(54px + env(safe-area-inset-top)); width: min(230px, 38vw); font-size: 11px; padding: 7px 9px; }
+body.touch #wifi-ana { right: auto; left: 50%; transform: translateX(-50%); bottom: auto; top: calc(56px + env(safe-area-inset-top)); width: min(320px, 70vw); }
+body.touch #minimap:not(.big) { display: none !important; }
+body.touch.entered #views { display: none !important; }

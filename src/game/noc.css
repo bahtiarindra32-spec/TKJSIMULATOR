@@ -80,3 +80,17 @@ body:not(.entered) #noc-hud { display: none !important; }
 .noc-box .tone { font-size: 14px; padding: 8px 10px; margin: 6px 0; background: #0d1a2e; border-radius: 6px; min-height: 20px; }
 .noc-box .tone:empty { display: none; }
 .noc-box .lbl-in { width: 80px; padding: 5px 6px; border-radius: 5px; border: 1px solid #456; background: #0d1a2e; color: #fff; font: inherit; text-transform: uppercase; }
+#wifi-ana { position: fixed; right: 14px; bottom: 120px; z-index: 30; width: 320px; background: rgba(10,16,20,.92); color: #dfe8ec; border: 1px solid #2f4450; border-radius: 10px; padding: 8px 10px; font: 11px/1.35 ui-monospace, Menlo, monospace; pointer-events: none; }
+#wifi-ana .ah { font: 600 12px system-ui, sans-serif; margin-bottom: 6px; display: flex; justify-content: space-between; }
+#wifi-ana .ah small { color: #8aa; font-weight: 400; }
+#wifi-ana canvas { width: 300px; height: 96px; display: block; border-radius: 4px; }
+#wifi-ana table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+#wifi-ana th, #wifi-ana td { text-align: left; padding: 1px 3px; white-space: nowrap; }
+#wifi-ana th { color: #8aa; font-weight: 400; }
+#wifi-ana td i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+#wifi-ana .af { margin-top: 5px; color: #ffd27a; }
+@media (pointer: coarse), (max-width: 760px), (max-height: 520px) {
+  .noc-box { width: 100vw; max-height: 100dvh; border-radius: 0; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); }
+  .noc-modal button { min-height: 38px; }
+  .noc-modal input, .noc-modal select { font-size: 16px; }
+}

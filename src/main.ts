@@ -6,7 +6,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { ZONES, ROADS, ROAD_SPEC, LEVELS, SPAWN, ANCHORS, HOTEL_ORIGIN, wx, wz } from './data/city';
 import { colliders, bakeStatic, setBakedVisible, type AABB } from './world/core';
 import { buildAutoColliders, buildGrid, resolveCircle, blocked } from './game/physics';
-import { createPerson, randomSpec, walkPose, idlePose, WALK_STRIDE } from './assets/people';
+import { createPerson, randomSpec, walkPose, idlePose, typingPose, WALK_STRIDE } from './assets/people';
 import { buildRoads } from './world/roads';
 import { buildGround, buildCity } from './world/buildings';
 import { buildHotel, updateDoors, closedDoorBoxes, nearestDoor, toggleDoor, blinkMaterials, insideHotel, zoneAt, verticalZones } from './world/hotel';
@@ -15,7 +15,9 @@ import { Signals, Traffic, Pedestrians } from './game/traffic';
 import { MISSIONS } from './game/missions';
 import * as ND from './assets/netdevices';
 import { hotelAnchorsWorld } from './game/missionSystem';
-import { initSwitches, portOf, panelOf } from './pcos/net';
+import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy } from './pcos/net';
+import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
+import { Vertical } from './game/vertical';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
 
 import { buildWayfinding } from './world/wayfinding';
@@ -23,12 +25,22 @@ import { dressL1, l1Lights } from './world/interiorDressing';
 import { Minimap } from './ui/minimap';
 import { PcOS } from './pcos/os';
 import { Noc } from './game/noc';
+import { setupTouch, touch, isTouch } from './ui/touch';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 const $ = (id: string) => document.getElementById(id)!;
+// ---------- stale-cache guard: if the server has a newer build than this page, reload it once with a cache-busting query ----------
+declare const __BUILD__: string;
+(window as any).__BUILD__ = __BUILD__;
+if (location.protocol.startsWith('http') && __BUILD__ !== 'dev') {
+  fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(v => {
+    const b = v?.build as string | undefined;
+    if (b && b !== __BUILD__ && sessionStorage.getItem('kn-reloaded') !== b) { sessionStorage.setItem('kn-reloaded', b); location.replace(`${location.pathname}?v=${b}`); }
+  }).catch(() => { /* offline / file:// */ });
+}
 const cityX = (x: number) => x + 200, cityZ = (z: number) => z + 150;
 
 // ---------- renderer / scene ----------
@@ -65,16 +77,19 @@ buildRoads(world);
 buildCity(world);
 const hotel = buildHotel(world);
 // usable computers (collected before static baking merges meshes)
-const PCS: { name: string; label: string; p: THREE.Vector3 }[] = [];
+const PCS: { name: string; label: string; p: THREE.Vector3; o: THREE.Object3D }[] = [];
 hotel.updateMatrixWorld(true);
-hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exec(o.name); if (m) PCS.push({ name: o.name, label: `${m[2] === 'PC' ? 'PC' : 'Laptop'} ${m[3].replace(/_/g, ' ')} · ${m[1]}`, p: new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) }); });
+hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exec(o.name); if (m) PCS.push({ name: o.name, label: `${m[2] === 'PC' ? 'PC' : 'Laptop'} ${m[3].replace(/_/g, ' ')} · ${m[1]}`, p: new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), o }); });
 const pcos = new PcOS();
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));
+// hotel-room laptops are Wi-Fi clients; guests already logged in to the captive portal
+for (const c of PCS) { const lv = +(/_L(\d)_/.exec(c.name)?.[1] ?? 1); if (lv >= 4) { registerClient(c.name, c.p.x, c.p.y, c.p.z, lv); AUTH.add(adapterOf(c.name).mac); } }
 // IDF wall racks of the office floors (one access switch + patch panel each); the player stands in front of them
-const IDFS = [2, 3].map(lv => { const o = hotel.getObjectByName(`PROP_L${lv}_IDF_RACK_01`); const c = o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : new THREE.Vector3(); return { id: `IDF-L${lv}`, level: lv, x: c.x, y: c.y, z: c.z - 0.9 }; });
+const IDFS = [2, 3, 4, 5, 6, 7, 8].map(lv => { const o = hotel.getObjectByName(`PROP_L${lv}_IDF_RACK_01`); const c = o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : new THREE.Vector3(); return { id: `IDF-L${lv}`, level: lv, x: c.x, y: c.y, z: c.z - 0.9 }; });
 const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET, IDFS);
+noc.onApVisual = ap => { const o = hotel.getObjectByName(`PROP_L${ap.level}_CORRIDOR_AP_${ap.lx}`); if (o) o.visible = ap.mounted; };
 const { tls } = buildStreetProps(world);
 buildWayfinding(world);
 dressL1(hotel);
@@ -83,6 +98,7 @@ const signals = new Signals(tls);
 const gameLayer = new THREE.Group(); gameLayer.name = 'GAME_LAYER'; scene.add(gameLayer);
 const traffic = new Traffic(gameLayer, signals);
 const peds = new Pedestrians(gameLayer);
+const vertical = new Vertical(hotel, gameLayer);
 // The old linear quiz chain is retired: all work now comes from the NOC work board (game/noc.ts).
 const missions = { isModalOpen: () => false, hintFor: (_a: string | null): string | null => null, interact: (_a: string | null) => false, onModalChange: (_f: (o: boolean) => void) => {}, setPlayerPos: (_x: number, _z: number) => {}, current: () => ({ targetPos: null as { x: number; z: number } | null, targetY: 0, place: '' }), start: () => {} };
 const missionUI = { setHudVisible: (_v: boolean) => {} };
@@ -93,7 +109,7 @@ const zoneOverlay = world.getObjectByName('ZONE_OVERLAY')!;
 // render batches: one per region; hotel per level so the cutaway can hide upper floors
 const batches = new THREE.Group(); batches.name = 'RENDER_BATCHES'; scene.add(batches);
 const hotelBatches = new Map<string, THREE.Object3D>();
-for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => o.name.startsWith('DOOR_')); batches.add(b); hotelBatches.set(lvName, b); }
+for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => /^(DOOR_|LIFT_|PROP_L\d_CORRIDOR_AP_)/.test(o.name)); batches.add(b); hotelBatches.set(lvName, b); }
 for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_')));
 batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_B', o => o.name === 'ZONE_OVERLAY'));
 const upperParts = ['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
@@ -147,7 +163,11 @@ const player = { pos: new THREE.Vector3(wx(SPAWN[0]), 0.15, wz(SPAWN[1])), yaw: 
 // smoothed view + velocity (player.yaw/pitch are the mouse targets)
 const view = { yaw: Math.PI, pitch: 0, head: new THREE.Vector3(), bodyYaw: Math.PI };
 const vel = new THREE.Vector2();
-let ride: { from: number; to: number; n: number; t: number; dur: number; lift: boolean; ax: number; az: number } | null = null;
+/** true while the player is under script control (lift, stair walk, sitting down at a PC) */
+let ride = false;
+/** sitting down at / standing up from a PC: the camera glides, the OS opens when seated */
+let seat: { phase: 'sit' | 'seated' | 'stand'; t: number; fp: THREE.Vector3; fyaw: number; fpitch: number; tp: THREE.Vector3; tyaw: number; tpitch: number; pc: { name: string; label: string }; foot: THREE.Vector3 } | null = null;
+const fx = { fov: 55, roll: 0, dip: 0, dipV: 0, wasGround: true, sway: 0 };
 // player avatar (seen in third-person view; V toggles)
 let thirdPerson = false;
 const avatar = createPerson(randomSpec(() => 0.42, 'student_m'));
@@ -161,9 +181,10 @@ const uiBlocked = () => missions.isModalOpen() || pcos.isOpen() || noc.isModalOp
 function enterWalk() {
   mode = 'walk'; document.body.classList.add('entered'); document.body.classList.remove('viewing'); setCutaway(false); controls.enabled = false; tween = null;
   player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1;
-  $('hints').textContent = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · V kamera · F interaksi · T papan kerja · C cek fisik · E/Q tangga · M peta · Esc keluar';
+  $('hints').textContent = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · V kamera · F interaksi · T papan kerja · C cek fisik · R Wi-Fi analyzer · E/Q tangga/lift · M peta · Esc keluar';
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
-  try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ }
+  if (!isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
+  touchUi?.onEnter();
   missionUI.setHudVisible(true); noc.setHudVisible(true);
   missions.start();
 }
@@ -174,6 +195,7 @@ function exitWalk() {
   missionUI.setHudVisible(false); noc.setHudVisible(false);
 }
 $('enter').onclick = enterWalk;
+const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => { player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3); } });
 $('btnBack').onclick = () => goView('overview');
 window.addEventListener('keydown', e => {
   if (pcos.isOpen() || noc.isModalOpen()) return;
@@ -185,18 +207,19 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyG') setQuality(!quality);
   if (mode === 'walk' && (e.code === 'KeyE' || e.code === 'KeyQ')) changeFloor(e.code === 'KeyE' ? 1 : -1);
   if (mode === 'walk' && e.code === 'KeyF') interact();
+  if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked()) noc.setAnalyzer(!noc.analyzerOn);
   if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) noc.openBoard();
   if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen()) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
   if (mode === 'walk' && e.code === 'Space') { e.preventDefault(); if (player.ground && !missions.isModalOpen()) { player.vy = 4.4; player.ground = false; } }
   if (mode === 'walk' && e.code === 'KeyV') { thirdPerson = !thirdPerson; toast(thirdPerson ? 'Kamera orang ketiga (V untuk ganti)' : 'Kamera orang pertama (V untuk ganti)', 1800); }
 });
 window.addEventListener('keyup', e => keys.delete(e.code));
-renderer.domElement.addEventListener('click', () => { if (mode === 'walk' && !uiBlocked() && !document.pointerLockElement) renderer.domElement.requestPointerLock?.(); });
+renderer.domElement.addEventListener('click', () => { if (mode === 'walk' && !isTouch() && !uiBlocked() && !document.pointerLockElement) renderer.domElement.requestPointerLock?.(); });
 let drag = false, lx = 0, ly = 0;
-renderer.domElement.addEventListener('pointerdown', e => { drag = true; lx = e.clientX; ly = e.clientY; });
+renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' && mode === 'walk') return; drag = true; lx = e.clientX; ly = e.clientY; });
 window.addEventListener('pointerup', () => (drag = false));
 window.addEventListener('pointermove', e => {
-  if (mode !== 'walk') return;
+  if (mode !== 'walk' || e.pointerType === 'touch') return;
   if (uiBlocked()) return;
   let dx = 0, dy = 0;
   if (document.pointerLockElement) { dx = e.movementX; dy = e.movementY; } else if (drag) { dx = e.clientX - lx; dy = e.clientY - ly; lx = e.clientX; ly = e.clientY; }
@@ -208,7 +231,7 @@ const RADIUS = 0.32;
 function feetHeight(x: number, z: number, prevY: number): number {
   if (insideHotel(x, z)) {
     const base = LEVELS[player.level - 1].elev + 0.12;
-    if (player.level === 1 && x > wx(HOTEL_ORIGIN[0] + 23) && z > wz(HOTEL_ORIGIN[1] + 12)) return base + 0.3; // raised floor
+    if (player.level === 1 && x > wx(HOTEL_ORIGIN[0] + 23) && z > wz(HOTEL_ORIGIN[1] + 12)) return base + 0.3 * THREE.MathUtils.clamp((z - wz(HOTEL_ORIGIN[1] + 12)) / 1.2, 0, 1); // raised floor, ramp at the door
     return base;
   }
   // JPO stairs & deck
@@ -238,73 +261,65 @@ function collide(p: THREE.Vector3, feet: number) {
     vehicleBoxes.push({ minX: o.x - (ew ? half : w), maxX: o.x + (ew ? half : w), minZ: o.z - (ew ? w : half), maxZ: o.z + (ew ? w : half), minY: 0, maxY: 3 });
   }
   closedDoorBoxes(p.x, p.z, vehicleBoxes);
+  vertical.closedBoxes(player.level, vehicleBoxes);
   resolveCircle(p, feet, RADIUS, vehicleBoxes);
 }
 function inVertical(x: number, z: number) {
   if (insideHotel(x, z) && cityZ(z) > HOTEL_ORIGIN[1] + 10.3 && cityZ(z) < HOTEL_ORIGIN[1] + 12.2 && cityX(x) > HOTEL_ORIGIN[0] + 15.5 && cityX(x) < HOTEL_ORIGIN[0] + 23) return true; // standing at the stair/lift doors
   return verticalZones.some(v => x > v.x0 && x < v.x1 && z > v.z0 && z < v.z1); }
 function changeFloor(d: number) {
-  if (!insideHotel(player.pos.x, player.pos.z) || !inVertical(player.pos.x, player.pos.z)) { toast('Naik/turun lantai hanya di tangga atau lift (core gedung).'); return; }
-  const n = THREE.MathUtils.clamp(player.level + d, 1, 8); if (n === player.level) return;
-  if (ride) return;
-  const inLift = player.pos.x > wx(HOTEL_ORIGIN[0] + 19);
-  // arrive in the corridor in front of the stair door (local X17) or lift doors (X20/22), facing north
-  const ax = wx(HOTEL_ORIGIN[0] + (inLift ? (player.pos.x > wx(HOTEL_ORIGIN[0] + 21) ? 22 : 20) : 17)), az = wz(HOTEL_ORIGIN[1] + 11.0);
-  const floors = Math.abs(n - player.level);
-  ride = { from: player.level, to: n, n, t: 0, dur: inLift ? 1.6 + floors * 0.9 : 0.9 + floors * 0.6, lift: inLift, ax, az };
+  if (vertical.busy() || seat) return;
+  if (!insideHotel(player.pos.x, player.pos.z) || !inVertical(player.pos.x, player.pos.z)) { toast('Naik/turun lantai hanya di depan pintu tangga atau lift (core gedung).'); return; }
   keys.clear(); vel.set(0, 0);
-  liftUI.show(inLift, player.level, n > player.level);
+  const err = vertical.start(player, d > 0 ? 1 : -1);
+  if (err && err !== 'busy') toast(err);
 }
-// ---------- lift / stair ride: doors close, floor counter runs, doors open on the new floor ----------
-const liftUI = (() => {
-  const st = document.createElement('style');
-  st.textContent = `#liftov{position:fixed;inset:0;z-index:40;pointer-events:none;opacity:0;transition:opacity .35s}#liftov.on{opacity:1}
-#liftov .ld{position:absolute;top:0;bottom:0;width:50%;background:linear-gradient(90deg,#8d959c,#c9cfd4 45%,#9aa2a8);transition:transform .7s cubic-bezier(.6,0,.3,1);box-shadow:inset 0 0 40px rgba(0,0,0,.35)}
-#liftov .ld.l{left:0;transform:translateX(-100%)}#liftov .ld.r{right:0;transform:translateX(100%)}#liftov.closed .ld.l,#liftov.closed .ld.r{transform:none}
-#liftov .panel{position:absolute;left:50%;top:18%;transform:translateX(-50%);background:#101418;color:#ff5a3c;font:700 44px/1 ui-monospace,monospace;padding:14px 26px;border-radius:8px;border:2px solid #333;text-align:center;min-width:120px;box-shadow:0 0 24px rgba(255,90,60,.25)}
-#liftov .panel small{display:block;font:600 12px/1.6 system-ui,sans-serif;color:#bbb;letter-spacing:.12em}
-#liftov.stair{background:rgba(10,12,14,.82)}#liftov.stair .ld{display:none}#liftov.stair .panel{color:#f2f2f2;border-color:#444;box-shadow:none}`;
-  document.head.appendChild(st);
-  const ov = document.createElement('div'); ov.id = 'liftov';
-  ov.innerHTML = '<div class="ld l"></div><div class="ld r"></div><div class="panel"><small>LIFT</small><span>1</span></div>';
-  document.body.appendChild(ov);
-  const num = ov.querySelector('span')!, cap = ov.querySelector('small')!;
-  return {
-    show(lift: boolean, from: number, up: boolean) {
-      ov.className = lift ? '' : 'stair'; cap.textContent = lift ? (up ? 'LIFT ▲' : 'LIFT ▼') : (up ? 'NAIK TANGGA' : 'TURUN TANGGA');
-      num.textContent = 'L' + from; void ov.offsetWidth; ov.classList.add('on'); if (lift) setTimeout(() => ov.classList.add('closed'), 30);
-    },
-    floor(n: number) { num.textContent = 'L' + n; },
-    open() { ov.classList.remove('closed'); setTimeout(() => ov.classList.remove('on'), 650); },
-  };
-})();
-function updateRide(dt: number) {
-  if (!ride) return;
-  ride.t += dt;
-  const doorT = ride.lift ? 0.7 : 0.3; // doors close / fade before moving
-  const k = THREE.MathUtils.clamp((ride.t - doorT) / (ride.dur - doorT * 2), 0, 1), e = k * k * (3 - 2 * k);
-  const lv = ride.from + (ride.to - ride.from) * e;
-  liftUI.floor(Math.round(lv));
-  if (k > 0) { player.pos.x = ride.ax; player.pos.z = ride.az; player.yaw = 0; view.yaw = 0; }
-  player.pos.y = THREE.MathUtils.lerp(LEVELS[ride.from - 1].elev, LEVELS[ride.to - 1].elev, e) + 0.12;
-  if (ride.t >= ride.dur) {
-    player.level = ride.to; player.pos.y = LEVELS[ride.to - 1].elev + 0.12; player.vy = 0; player.ground = true;
-    liftUI.open();
-    toast(`Lantai ${ride.to} · ${ride.to === 1 ? 'Lobi & TKJ' : ride.to <= 3 ? 'Kantor' : 'Kamar hotel'}`);
-    ride = null;
-  }
-}
+const liftInd = (() => { const e = document.createElement('div'); e.id = 'liftind'; document.body.appendChild(e); return e; })();
 let nearAnchor: string | null = null;
 let nearPc: (typeof PCS)[number] | null = null;
 let camDist = 2;
-pcos.onClose = () => { keys.clear(); last = performance.now(); };
+pcos.onClose = () => {
+  keys.clear(); last = performance.now();
+  if (seat) { seat.phase = 'stand'; seat.t = 0; seat.fp = seat.tp.clone(); seat.fyaw = seat.tyaw; seat.fpitch = seat.tpitch; seat.tp = new THREE.Vector3(player.pos.x, player.pos.y + 1.62, player.pos.z); seat.tpitch = -0.08; }
+};
+/** walk the camera down into the chair in front of a PC, then open its OS */
+function sitAt(pc: (typeof PCS)[number]) {
+  keys.clear(); vel.set(0, 0); if (document.pointerLockElement) document.exitPointerLock();
+  const q = new THREE.Quaternion(); pc.o.getWorldQuaternion(q);
+  const toMe = new THREE.Vector3(player.pos.x - pc.p.x, 0, player.pos.z - pc.p.z);
+  let n = new THREE.Vector3(0, 0, 1).applyQuaternion(q).setY(0);
+  if (n.lengthSq() < 1e-4) n = toMe.clone(); n.normalize(); if (n.dot(toMe) < 0) n.negate();
+  if (toMe.lengthSq() > 1e-4 && n.dot(toMe.clone().normalize()) < 0.35) n.copy(toMe).normalize();   // laptops/odd rotations: sit on the side you came from
+  const floor = player.pos.y, eye = pc.p.clone().addScaledVector(n, 0.66); eye.y = floor + 1.2;
+  const yaw = Math.atan2(n.x, n.z), pitch = Math.atan2(pc.p.y - eye.y, 0.66);
+  seat = { phase: 'sit', t: 0, fp: camera.position.clone(), fyaw: view.yaw, fpitch: view.pitch, tp: eye, tyaw: view.yaw + Math.atan2(Math.sin(yaw - view.yaw), Math.cos(yaw - view.yaw)), tpitch: pitch, pc, foot: pc.p.clone().addScaledVector(n, 0.78).setY(floor) };
+}
+function updateSeat(dt: number) {
+  if (!seat) return;
+  const S = seat, dur = S.phase === 'sit' ? 0.62 : S.phase === 'stand' ? 0.5 : 1;
+  if (S.phase !== 'seated') S.t = Math.min(1, S.t + dt / dur);
+  const k = S.t, e = k * k * (3 - 2 * k);
+  const p = S.phase === 'seated' ? S.tp : new THREE.Vector3().lerpVectors(S.fp, S.tp, e);
+  if (S.phase !== 'seated') p.y += Math.sin(Math.PI * k) * (S.phase === 'sit' ? 0.05 : 0.04);
+  const yaw = S.phase === 'seated' ? S.tyaw : S.fyaw + (S.tyaw - S.fyaw) * e, pitch = S.phase === 'seated' ? S.tpitch : S.fpitch + (S.tpitch - S.fpitch) * e;
+  camera.position.copy(p); camera.rotation.set(pitch, yaw, 0, 'YXZ');
+  avatar.root.visible = thirdPerson && S.phase !== 'seated';
+  if (thirdPerson) { avatar.root.position.copy(S.phase === 'stand' ? new THREE.Vector3().lerpVectors(S.foot, player.pos, e) : S.foot); avatar.root.rotation.y = S.tyaw + Math.PI; typingPose(avatar, performance.now() / 1000); }
+  if (S.phase === 'sit' && S.t >= 1) { S.phase = 'seated'; pcos.open(S.pc.name, S.pc.label); }
+  else if (S.phase === 'stand' && S.t >= 1) { player.yaw = view.yaw = S.tyaw; player.pitch = view.pitch = S.tpitch; seat = null; }
+}
+function nearSpot() {
+  for (const sp of noc.spots()) if (sp.level === player.level && Math.hypot(player.pos.x - sp.x, player.pos.z - sp.z) < 1.5) return sp;
+  return null;
+}
 function interact() {
-  if (uiBlocked()) return;
+  if (uiBlocked() || ride) return;
+  const sp = nearSpot(); if (sp) { noc.useSpot(sp.id); return; }
   const rk = nearRack();
   if (rk && rk !== 'MDF' && !nearPc) { keys.clear(); noc.openRack(rk); return; }
   const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y);
   if (door && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
-  if (!nearAnchor && nearPc) { keys.clear(); if (document.pointerLockElement) document.exitPointerLock(); pcos.open(nearPc.name, nearPc.label); return; }
+  if (!nearAnchor && nearPc) { sitAt(nearPc); return; }
   if (!nearAnchor) return;
   if (noc.interactAnchor(nearAnchor)) return;
   const m = MISSIONS[nearAnchor]; toast(m ? `${m.title}: ${m.desc}` : nearAnchor, 5000);
@@ -330,21 +345,23 @@ function nearRack(): string | null {
   return null;
 }
 function updateWalk(dt: number) {
-  const run = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.2 : 1;
-  if (keys.has('ArrowLeft')) player.yaw += 1.8 * dt; if (keys.has('ArrowRight')) player.yaw -= 1.8 * dt;
+  ride = vertical.busy();
+  const run = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run ? 2.2 : 1;
+  if (!ride) { if (keys.has('ArrowLeft')) player.yaw += 1.8 * dt; if (keys.has('ArrowRight')) player.yaw -= 1.8 * dt; }
   if (keys.has('ArrowUp')) player.pitch = Math.min(1.3, player.pitch + dt); if (keys.has('ArrowDown')) player.pitch = Math.max(-1.3, player.pitch - dt);
-  const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
-  // smooth look (mouse sets targets; view eases toward them) and smooth acceleration
-  const sm = 1 - Math.exp(-dt * 22);
-  if (Math.abs(player.yaw - view.yaw) > 2.5) view.yaw = player.yaw;
-  view.yaw += (player.yaw - view.yaw) * sm; view.pitch += (player.pitch - view.pitch) * sm;
+  const f = ride ? 0 : THREE.MathUtils.clamp((keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + touch.y, -1, 1), s = ride ? 0 : THREE.MathUtils.clamp((keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + touch.x, -1, 1);
+  // smooth look: the mouse sets targets, the view eases toward them (shortest way round, no snapping)
+  const sm = 1 - Math.exp(-dt * 24);
+  view.yaw += Math.atan2(Math.sin(player.yaw - view.yaw), Math.cos(player.yaw - view.yaw)) * sm; view.pitch += (player.pitch - view.pitch) * sm;
   const fwd = new THREE.Vector3(-Math.sin(view.yaw), 0, -Math.cos(view.yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x);
   const want = ride ? new THREE.Vector3() : fwd.multiplyScalar(f).add(right.multiplyScalar(s));
-  if (want.lengthSq() > 0) want.normalize().multiplyScalar(2.4 * run);
-  const rate = !player.ground ? 2.5 : want.lengthSq() > 0 ? 11 : 13;
+  if (want.lengthSq() > 0) { const mag = Math.min(1, want.length()); want.normalize().multiplyScalar(2.4 * run * mag); }
+  // acceleration: quick to start, a short glide to stop, little control in the air
+  const rate = !player.ground ? 2.5 : want.lengthSq() > 0 ? 9 : 11;
   const ka = 1 - Math.exp(-dt * rate);
   vel.x += (want.x - vel.x) * ka; vel.y += (want.z - vel.y) * ka;
   if (vel.lengthSq() < 1e-4 && want.lengthSq() === 0) vel.set(0, 0);
+  if (ride) vel.set(0, 0);
   const mv = ride ? new THREE.Vector3() : new THREE.Vector3(vel.x * dt, 0, vel.y * dt);
   const steps = Math.ceil(mv.length() / 0.2) || 1;
   for (let i = 0; i < steps && !ride; i++) {
@@ -352,52 +369,63 @@ function updateWalk(dt: number) {
     if (!insideHotel(player.pos.x, player.pos.z)) player.level = 1;
     const target = feetHeight(player.pos.x, player.pos.z, player.pos.y);
     if (!player.ground || target < player.pos.y - 0.6) {
-      // airborne: jump arc or walking off a ledge
       if (player.ground) { player.ground = false; player.vy = 0; }
       player.vy -= 13 * dt / steps; player.pos.y += player.vy * dt / steps;
-      if (player.pos.y <= target) { player.pos.y = target; player.vy = 0; player.ground = true; }
+      if (player.pos.y <= target) { fx.dipV = Math.min(fx.dipV, -Math.min(1.6, Math.abs(player.vy) * 0.35)); player.pos.y = target; player.vy = 0; player.ground = true; }
     } else player.pos.y += (target - player.pos.y) * Math.min(1, 12 * dt) + (Math.abs(target - player.pos.y) < 0.05 ? target - player.pos.y : 0);
     collide(player.pos, player.pos.y);
   }
-  if (!ride && !player.ground && mv.lengthSq() === 0) { // keep gravity running while standing still mid-air
+  if (!ride && !player.ground && mv.lengthSq() === 0) {
     const target = feetHeight(player.pos.x, player.pos.z, player.pos.y);
     if (player.pos.y <= target) { player.pos.y = target; player.vy = 0; player.ground = true; }
   }
   player.pos.x = THREE.MathUtils.clamp(player.pos.x, -200, 200); player.pos.z = THREE.MathUtils.clamp(player.pos.z, -150, 150);
-  // avatar pose
-  const moving = mv.lengthSq() > 1e-7;
-  if (thirdPerson && moving && vel.lengthSq() > 0.05) {
+  // avatar pose (a scripted walk in the lift/stairs animates too)
+  const scriptedWalk = ride ? vertical.walkSpeed * dt : 0;
+  const moving = mv.lengthSq() > 1e-7 || scriptedWalk > 0;
+  const speed = ride ? vertical.walkSpeed : vel.length();
+  if (thirdPerson && moving && !ride && vel.lengthSq() > 0.05) {
     const hd = Math.atan2(-vel.x, -vel.y); let dd = hd - view.bodyYaw; dd = Math.atan2(Math.sin(dd), Math.cos(dd));
     view.bodyYaw += dd * (1 - Math.exp(-dt * 10));
-  } else if (!thirdPerson) view.bodyYaw = view.yaw;
+  } else if (!thirdPerson || ride) view.bodyYaw = view.yaw;
   avatar.root.position.copy(player.pos); avatar.root.rotation.y = view.bodyYaw + Math.PI;
+  if (moving) player.phase = (player.phase + (scriptedWalk || mv.length()) / (WALK_STRIDE * avatar.scale)) % 1;
   if (thirdPerson) {
-    if (!player.ground) walkPose(avatar, 0.3, 0.9);
-    else if (moving) { player.phase = (player.phase + mv.length() / (WALK_STRIDE * avatar.scale)) % 1; walkPose(avatar, player.phase, Math.min(1, vel.length() / 1.2)); }
+    if (!player.ground && !ride) walkPose(avatar, 0.3, 0.9);
+    else if (moving) walkPose(avatar, player.phase, Math.min(1, speed / 1.2));
     else idlePose(avatar, performance.now() / 1000);
   }
   avatar.root.visible = thirdPerson;
-  const eyeY = player.pos.y + 1.62;
+  // camera feel: head bob + sway while walking, a dip when landing, wider FOV when running, slight lean on strafe
+  const amt = moving && (player.ground || ride) ? Math.min(1, speed / 2.4) : 0;
+  fx.dipV += (-fx.dip * 90 - fx.dipV * 14) * dt; fx.dip += fx.dipV * dt;
+  const running = run > 1 && moving && !ride;
+  const wantFov = running ? 61 : 55; fx.fov += (wantFov - fx.fov) * (1 - Math.exp(-dt * 6));
+  if (Math.abs(camera.fov - fx.fov) > 0.01) { camera.fov = fx.fov; camera.updateProjectionMatrix(); }
+  fx.roll += ((ride ? 0 : -s * 0.012) - fx.roll) * (1 - Math.exp(-dt * 8));
+  const bobY = Math.sin(player.phase * Math.PI * 4) * 0.026 * amt, bobX = Math.sin(player.phase * Math.PI * 2) * 0.016 * amt;
+  const eyeY = player.pos.y + 1.62 + fx.dip;
   if (!thirdPerson) {
-    camera.position.set(player.pos.x, eyeY + (moving && player.ground ? Math.sin(player.phase * Math.PI * 4) * 0.02 * Math.min(1, vel.length() / 2.4) : 0), player.pos.z);
-    camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
+    camera.position.set(player.pos.x + Math.cos(view.yaw) * bobX, eyeY + bobY, player.pos.z - Math.sin(view.yaw) * bobX);
+    camera.rotation.set(view.pitch, view.yaw, fx.roll, 'YXZ');
   } else {
-    // over-the-shoulder orbit camera that stops before walls/ceilings
+    // over-the-shoulder orbit camera that stops before walls/ceilings (and stays inside the lift car)
     const indoor = insideHotel(player.pos.x, player.pos.z);
-    const wantD = indoor ? 2.3 : 3.6, pitch = THREE.MathUtils.clamp(view.pitch, -1.0, 0.9);
+    const inCar = vertical.ride?.kind === 'lift' && player.pos.z > wz(HOTEL_ORIGIN[1] + 12.2);
+    const wantD = inCar ? 0.9 : indoor ? 2.3 : 3.6, pitch = THREE.MathUtils.clamp(view.pitch, -1.0, 0.9);
     view.head.lerp(new THREE.Vector3(player.pos.x, player.pos.y + 1.72, player.pos.z), view.head.distanceTo(player.pos) > 4 ? 1 : 1 - Math.exp(-dt * 18));
     const head = view.head;
     const back = new THREE.Vector3(Math.sin(view.yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(view.yaw) * Math.cos(pitch));
     const side = new THREE.Vector3(Math.cos(view.yaw), 0, -Math.sin(view.yaw)).multiplyScalar(0.35);
     let d = 0.3; const q = new THREE.Vector3();
-    const ceil = indoor ? LEVELS[player.level - 1].elev + LEVELS[player.level - 1].h - 0.35 : 1e9;
+    const ceil = indoor ? player.pos.y + 2.25 : 1e9;
     while (d < wantD) { q.copy(head).addScaledVector(back, d + 0.1).add(side); if (blocked(q.x, q.z, q.y, 0.12) || q.y > ceil || q.y < player.pos.y + 0.2) break; d += 0.1; }
     camDist += (d - camDist) * Math.min(1, (d < camDist ? 20 : 5) * dt);
     camera.position.copy(head).addScaledVector(back, camDist).add(side);
-    camera.position.y = Math.max(camera.position.y, player.pos.y + 0.25);
+    camera.position.y = Math.max(camera.position.y, player.pos.y + 0.25) + fx.dip * 0.5;
     camera.rotation.set(pitch, view.yaw, 0, 'YXZ');
   }
-  // anchors nearby
+  // what is in reach
   nearAnchor = null;
   if (insideHotel(player.pos.x, player.pos.z) && player.level === 1) {
     let best = 1.6;
@@ -407,14 +435,53 @@ function updateWalk(dt: number) {
   if (insideHotel(player.pos.x, player.pos.z)) {
     let best = 1.5;
     for (const c of PCS) { if (Math.abs(c.p.y - (player.pos.y + 0.9)) > 1.2) continue; const d = Math.hypot(player.pos.x - c.p.x, player.pos.z - c.p.z); if (d < best) { best = d; nearPc = c; } }
-    // an anchor with no active mission step does not hide the computer in front of you
     if (nearPc && nearAnchor && !noc.anchorHint(nearAnchor)) nearAnchor = null;
   }
-  const dr = insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y) : null;
-  if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { $('hudHint').textContent = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; return; }
-  const nh = noc.hintAt(nearPc?.name ?? null, nearRack());
-  $('hudHint').textContent = (nh ? nh + ' · ' : '') + (nearPc && !nearAnchor ? `[F] Nyalakan ${nearPc.label}` : nearAnchor ? (noc.anchorHint(nearAnchor) ?? `[F] ${MISSIONS[nearAnchor]?.title ?? nearAnchor}`) : inVertical(player.pos.x, player.pos.z) && insideHotel(player.pos.x, player.pos.z) ? '[E] naik · [Q] turun lantai' : '') + '';
+  let hint = '', at: THREE.Vector3 | null = null;
+  const sp = ride ? null : nearSpot();
+  const dr = !ride && !sp && insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y) : null;
+  if (ride) hint = '';
+  else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
+  else if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { hint = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; at = new THREE.Vector3(dr.cx, dr.y0 + 1.45, dr.cz); }
+  else {
+    const rk = nearRack(), nh = noc.hintAt(nearPc?.name ?? null, rk);
+    const vert = inVertical(player.pos.x, player.pos.z) && insideHotel(player.pos.x, player.pos.z);
+    const main = nearPc && !nearAnchor ? `[F] Nyalakan ${nearPc.label}` : nearAnchor ? (noc.anchorHint(nearAnchor) ?? `[F] ${MISSIONS[nearAnchor]?.title ?? nearAnchor}`) : vert ? (player.pos.x > wx(HOTEL_ORIGIN[0] + 19) ? '[E] Lift naik · [Q] Lift turun' : '[E] Naik tangga · [Q] Turun tangga') : '';
+    hint = (nh ? nh + ' · ' : '') + main;
+    if (nearPc && !nearAnchor) at = nearPc.p.clone().setY(nearPc.p.y + 0.35);
+    else if (nearAnchor) { const a = ANCHORS.find(x => x[0] === nearAnchor)!; at = new THREE.Vector3(wx(HOTEL_ORIGIN[0] + a[1]), player.pos.y + 1.5, wz(HOTEL_ORIGIN[1] + a[2])); }
+    else if (rk) { const d = IDFS.find(x => x.id === rk); at = d ? new THREE.Vector3(d.x, player.pos.y + 1.5, d.z + 0.9) : null; }
+    else if (vert) at = player.pos.x > wx(HOTEL_ORIGIN[0] + 19) ? new THREE.Vector3(wx(HOTEL_ORIGIN[0] + 21), player.pos.y + 1.15, wz(HOTEL_ORIGIN[1] + 11.9)) : new THREE.Vector3(wx(HOTEL_ORIGIN[0] + 17), player.pos.y + 1.6, wz(HOTEL_ORIGIN[1] + 12));
+  }
+  $('hudHint').textContent = hint;
+  prompt.show(hint, at);
 }
+/** floating key prompt next to the thing you can use ("[F] Buka pintu") */
+const prompt = (() => {
+  const el = document.createElement('div'); el.id = 'iprompt'; document.body.appendChild(el);
+  let last = '', sx = -1, sy = -1; const v = new THREE.Vector3();
+  return {
+    show(text: string, at: THREE.Vector3 | null) {
+      if (!text || uiBlocked()) { el.classList.remove('on'); last = ''; return; }
+      if (text !== last) {
+        last = text; el.innerHTML = '';
+        for (const part of text.split(' · ').slice(0, 3)) {
+          const m = /^\[(\w+)\]\s*(.*)$/.exec(part.trim());
+          const row = document.createElement('div'); row.className = 'ip-row';
+          if (m) { const k = document.createElement('kbd'); k.textContent = m[1]; row.append(k, document.createTextNode(m[2])); } else row.textContent = part;
+          el.appendChild(row);
+        }
+      }
+      let x = window.innerWidth / 2, y = window.innerHeight * 0.62;
+      if (at) { v.copy(at).project(camera); if (v.z < 1 && Math.abs(v.x) < 0.95 && Math.abs(v.y) < 0.95) { x = (v.x + 1) / 2 * window.innerWidth; y = (1 - v.y) / 2 * window.innerHeight; } }
+      x = THREE.MathUtils.clamp(x, 140, window.innerWidth - 140); y = THREE.MathUtils.clamp(y, 80, window.innerHeight - 140);
+      if (sx < 0 || !el.classList.contains('on')) { sx = x; sy = y; } else { sx += (x - sx) * 0.35; sy += (y - sy) * 0.35; }
+      el.style.transform = `translate(${Math.round(sx)}px, ${Math.round(sy)}px) translate(-50%, -100%)`;
+      el.classList.add('on');
+    },
+    hide() { el.classList.remove('on'); last = ''; },
+  };
+})();
 
 function locationName(x: number, z: number): string {
   if (insideHotel(x, z)) { const zn = zoneAt(x, z, player.level); return `BLD_HOTEL_NUSANTARA · L${player.level}${zn ? ' · ' + zn : ''}`; }
@@ -446,7 +513,7 @@ $('btnExport').onclick = () => {
 let last = performance.now(), elapsed = 0;
 const tmp = new THREE.Vector3();
 const lightBasis = new THREE.Matrix4(), lightBasisT = new THREE.Matrix4(), ZERO3 = new THREE.Vector3(), UP3 = new THREE.Vector3(0, 1, 0), sunNeg = new THREE.Vector3();
-let paused = false, fixedDt = 0, skipRender = false;
+let paused = false, fixedDt = 0, skipRender = false, anaT = 0;
 function frame() {
   const now = performance.now(); const dt = fixedDt || Math.min((now - last) / 1000, 0.05); last = now; elapsed += dt; const t = elapsed;
   if (mode === 'orbit') {
@@ -456,8 +523,12 @@ function frame() {
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6; if (camera.near !== wantNear) { camera.near = wantNear; camera.updateProjectionMatrix(); } }
   noc.update(dt);
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
-  if (mode !== 'walk') { /* orbit */ } else if (!uiBlocked()) { updateRide(dt); updateWalk(dt); }
-  else { camera.position.set(player.pos.x, player.pos.y + 1.62, player.pos.z); camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ'); }
+  if (mode !== 'walk') { /* orbit */ }
+  else if (seat) { updateSeat(dt); prompt.hide(); }
+  else if (!uiBlocked()) { vertical.update(dt, player); updateWalk(dt); }
+  else prompt.hide();
+  { const tx = mode === 'walk' ? vertical.hud() : ''; if (liftInd.textContent !== tx) liftInd.textContent = tx; liftInd.classList.toggle('on', !!tx); }
+  if (mode === 'walk' && noc.analyzerOn) { anaT -= dt; if (anaT <= 0) { anaT = 0.25; const inH = insideHotel(player.pos.x, player.pos.z); noc.renderAnalyzer(cityX(player.pos.x) - HOTEL_ORIGIN[0], cityZ(player.pos.z) - HOTEL_ORIGIN[1], player.pos.y + 1.2, inH ? player.level : 1, locationName(player.pos.x, player.pos.z).replace('BLD_HOTEL_NUSANTARA · ', '')); } }
   signals.update(t); traffic.update(dt, t, mode === 'walk' ? player.pos : null); peds.update(dt, t);
   for (const m of ND.blinkMats) { const b = (m.userData.base ??= m.emissiveIntensity) as number; m.emissiveIntensity = b * (0.88 + (Math.sin(t * 17 + b * 13) > 0.5 ? 0.25 : 0)); }
   for (const m of blinkMaterials) m.emissiveIntensity = 0.75 + Math.sin(t * 9) * 0.15 + (Math.sin(t * 23) > 0.6 ? 0.25 : 0);
@@ -536,6 +607,9 @@ requestAnimationFrame(() => { frame(); const l = $('loading'); l.style.opacity =
     out.unshift('checked ' + checked); return out;
   },
   liftPos: () => ({ x: HOTEL_ORIGIN[0] + 21.5, z: HOTEL_ORIGIN[1] + 15 }),
+  vertical: () => vertical.state(), seat: () => seat && { phase: seat.phase, t: seat.t }, prompt: () => { const e = document.getElementById('iprompt')!; return e.classList.contains('on') ? e.innerText.replace(/\n+/g, ' | ') : ''; },
+  wifi: { APS, CLIENTS, quality: wifiQuality, servingAp, AUTH, env: (n: string) => envOf(n).id, healthy: (n: string) => healthy(adapterOf(n)) },
+  fov: () => camera.fov,
   cam: () => ({ y: camera.position.y, py: player.pos.y, pitch: view.pitch }),
   doorTest: () => {
     const d = nearestDoor(player.pos.x, player.pos.z, player.pos.y, 50); if (!d) return 'none';

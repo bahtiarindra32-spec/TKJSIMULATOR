@@ -10,8 +10,10 @@
 import {
   ENVS, ADAPTERS, SWITCHES, envOf, live, healthy, adapterOf, linkUp, bounce, portOf, outletOf, portName, routerOf, setRouterLan,
   poolProblem, dhcpHousekeeping, isWireless, ipStr, parseIp, networkOf, maskStr, PUBLIC_DNS, type Env, type Switch,
-  panelOf, isWired, patchCord, repatch, stormOn, uplinkCarries, outletId,
+  panelOf, isWired, patchCord, repatch, stormOn, uplinkCarries, outletId, portLink, apPort, apPowered,
 } from '../pcos/net';
+import { APS, AUTH, CLIENTS, servingAp, quality, heardAt, channelClean, overlap, pctOf, type Ap, type Heard } from '../pcos/wifi';
+import { HOTEL_ORIGIN, LEVELS, wx, wz } from '../data/city';
 import type { PcOS, PcEvent } from '../pcos/os';
 import { SwitchCli } from '../pcos/switchcli';
 import './noc.css';
@@ -25,11 +27,13 @@ const mmss = (s: number) => `${s < 0 ? '-' : ''}${Math.floor(Math.abs(s) / 60)}:
 const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
 /** Wall label of a wired desk: true = printed and correct, false = missing/wrong, null = not a wired desk. */
 const wallOk = (pc: string) => { const q = panelOf(pc); return q ? q.pp.label.toUpperCase() === outletId(q.sw.level, q.pp.n) : null; };
+/** free addresses left in a DHCP pool */
+const poolSpace = (env: Env) => { if (!env.dhcp || poolProblem(env)) return 0; const a = parseIp(env.dhcp.start)!, b = parseIp(env.dhcp.end)!; const used = new Set([...env.leases.values(), ...env.hosts.map(x => x.ip)]); let n = 0; for (let k = a; k <= b; k++) if (!used.has(ipStr(k >>> 0))) n++; return n; };
 const hostIp = (env: Env, n: number) => ipStr((networkOf(parseIp(env.gateway)!, env.prefix) + n) >>> 0);
 
 // ---------------------------------------------------------------- faults (tickets)
-export type FaultId = 'cable' | 'cablebad' | 'port' | 'vlan' | 'disabled' | 'released' | 'wrongip' | 'conflict' | 'gateway' | 'dns' | 'patch' | 'uplink' | 'loop';
-interface FaultDef { cause: string; fix: string; symptom: string; hint: string; cp: string; wired: boolean; rank: number }
+export type FaultId = 'cable' | 'cablebad' | 'port' | 'vlan' | 'disabled' | 'released' | 'wrongip' | 'conflict' | 'gateway' | 'dns' | 'patch' | 'uplink' | 'loop' | 'portal' | 'appoe' | 'aprf' | 'dhcppool';
+interface FaultDef { cause: string; fix: string; symptom: string; hint: string; cp: string; wired: boolean; rank: number; wifi?: boolean }
 export const FAULTS: Record<FaultId, FaultDef> = {
   cable: { cause: 'Konektor RJ45 di PC lepas/longgar', fix: 'konektor dicolok ulang sampai terkunci', symptom: 'Ikon jaringan silang merah, internet mati total.', hint: 'Status adapter "Network cable unplugged" = lapisan fisik. Datangi PC, tekan C, periksa konektor.', cp: 'Fase E · Media transmisi', wired: true, rank: 0 },
   disabled: { cause: 'Adapter jaringan di-disable', fix: 'adapter di-enable lagi', symptom: 'Ikon jaringan hilang, PC tidak terhubung ke mana pun.', hint: 'Buka Network Connections. Adapter abu-abu = Disabled.', cp: 'Fase E · Konfigurasi klien', wired: false, rank: 0 },
@@ -43,19 +47,25 @@ export const FAULTS: Record<FaultId, FaultDef> = {
   patch: { cause: 'Patch cord di rak lantai tercabut dari switch', fix: 'patch cord dari port patch panel outlet itu dicolok lagi ke port switch', symptom: 'Kabel di meja terpasang dan lolos tes, tapi lampu link tetap mati.', hint: 'Kabel meja baik tapi link mati: ke rak lantai itu. Cari port patch panel outlet ini (dari label, atau pakai toner kalau labelnya hilang) dan periksa patch cord-nya.', cp: 'Fase E · Sistem pengkabelan terstruktur', wired: true, rank: 1 },
   uplink: { cause: 'Uplink switch lantai ke MDF terputus', fix: 'uplink dipulihkan', symptom: 'Satu lantai tidak bisa akses apa pun, padahal lampu link di PC menyala.', hint: 'Banyak PC satu lantai kena bersamaan = masalah di uplink switch lantai (rak IDF). Lihat LED uplink Gi1/0/49, lalu show interfaces trunk.', cp: 'Fase F · Trunk & uplink antar-switch', wired: true, rank: 2 },
   loop: { cause: 'Loop: ada kabel yang menyambung dua port switch yang sama (broadcast storm)', fix: 'kabel loop dicabut', symptom: 'Jaringan satu lantai lumpuh total, semua lampu switch berkedip cepat.', hint: 'Semua LED switch berkedip + log MAC flapping di console = loop. Cari kabel yang menyambung dua port switch di rak lantai itu dan cabut.', cp: 'Fase F · Loop & STP', wired: true, rank: 2 },
+  portal: { cause: 'Laptop tamu belum login captive portal (sesi Wi-Fi tamu habis setelah ganti kamar)', fix: 'login captive portal dengan nomor kamar + nama belakang', symptom: 'Wi-Fi tersambung, tapi tidak ada situs yang bisa dibuka.', hint: 'Wi-Fi tamu memakai captive portal: dapat IP dan DNS jalan, tapi internet ditahan sampai tamu login. Buka browser di laptop itu.', cp: 'Fase F · Jaringan nirkabel', wired: false, rank: 1, wifi: true },
+  appoe: { cause: 'AP koridor mati (tidak dapat daya PoE / link dari switch lantai)', fix: 'AP dinyalakan lagi dari switch lantai', symptom: 'Sinyal Wi-Fi di kamar tinggal 1–2 bar, internet putus-putus.', hint: 'Laptop pindah ke AP yang jauh = AP terdekat mati. Cek NusaWLC (status Offline) dan rak IDF lantai itu: show power inline, show interfaces status.', cp: 'Fase F · Jaringan nirkabel & PoE', wired: false, rank: 1, wifi: true },
+  aprf: { cause: 'Gangguan radio AP: kanal tumpang tindih dengan AP tetangga / daya pancar terlalu kecil', fix: 'kanal/daya AP diatur ulang di kontroler Wi-Fi', symptom: 'Wi-Fi kamar lemot sekali, ping naik-turun ratusan ms dan sering timeout.', hint: 'Bawa Wi-Fi analyzer (R) ke kamar itu: lihat AP mana yang melayani dan siapa yang memakai kanal sama/berdekatan. Atur kanal 1/6/11 atau daya TX di NusaWLC (http://192.168.10.20 dari PC IT).', cp: 'Fase F · Jaringan nirkabel', wired: false, rank: 2, wifi: true },
+  dhcppool: { cause: 'Pool DHCP Wi-Fi tamu terlalu kecil dan penuh (lease 24 jam)', fix: 'pool DHCP tamu diperbesar di router gw-tamu', symptom: 'Wi-Fi tersambung tapi "No internet", laptop dapat 169.254.x.x.', hint: 'APIPA di Wi-Fi = DHCP tidak menjawab. Router tamu (172.16.4.1) bisa dibuka dari PC IT (segmen lab boleh manajemen). Lihat DHCP › Leases: pool penuh?', cp: 'Fase F · DHCP', wired: false, rank: 2, wifi: true },
   vlan: { cause: 'Port switch masuk VLAN yang salah', fix: 'switchport access vlan dikembalikan', symptom: 'Lampu link nyala, tapi PC hanya dapat 169.254.x.x.', hint: 'Link ada tapi DHCP tidak sampai = cek VLAN port di switch (show vlan brief).', cp: 'Fase F · VLAN', wired: true, rank: 2 },
 };
 
 // ---------------------------------------------------------------- contract templates
-export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan';
+export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap';
 interface TplDef { name: string; rank: number; xp: number; sla: number; cp: string; brief: string[] }
-export const TEMPLATES: Record<TplId, TplDef> = {
+export const TEMPLATES = {
   static: { name: 'Pasang IP Statis', rank: 0, xp: 120, sla: 420, cp: 'Fase E · Pengalamatan IPv4', brief: ['Beberapa PC butuh alamat tetap (mis. dipakai aplikasi absensi). Alamatnya sudah ditentukan di surat kerja.', 'Di PC: Network Connections › Properties › IPv4 › "Use the following IP address". Isi IP, subnet mask, gateway, DNS persis seperti surat kerja.', 'Uji dari PC itu: ping gateway lalu ping/buka situs. Alamat yang sudah dipakai perangkat lain akan bentrok.'] },
   desk: { name: 'Sambungkan Meja Baru', rank: 0, xp: 170, sla: 780, cp: 'Fase E · Sistem pengkabelan terstruktur', brief: ['Meja baru belum tersambung. Alurnya: PC → patch cord → outlet dinding → kabel horizontal → port patch panel di rak lantai → patch cord → port switch.', 'Ambil 2 patch cord per meja, toner + probe, kabel console, dan laptop teknisi di Lemari Alat (Workshop TKJ, L1).', 'Di meja [C]: pasang patch cord PC → outlet. Label outletnya belum ada, jadi pasang toner di outlet itu.', 'Ke rak lantai itu (L1: ruang server; L2/L3: ruang IDF). Nyalakan probe dan sapu port patch panel: bunyi paling keras = port outlet tadi. Klik port itu, lalu klik port switch di surat kerja untuk memasang patch cord.', 'Console ke switch: enable › conf t › interface gi1/0/N › switchport access vlan V › no shutdown › end › write memory.', 'Kembali ke meja: tempel label outlet sesuai nomor patch panel (mis. L2-07), lalu uji ping/browser dari PC itu.'] },
   dns: { name: 'Nama untuk Server Intranet', rank: 1, xp: 180, sla: 540, cp: 'Fase F · DNS', brief: ['Server aplikasi baru sudah dipasang tim aplikasi. Karyawan mau membukanya pakai nama, bukan IP.', 'Buka router segmen itu dari browser PC (http://alamat-gateway, admin tanpa password) › IP › DNS › tambah record A: nama › IP server.', 'Klien harus memakai DNS router supaya nama lokal terbaca. DNS publik seperti 8.8.8.8 tidak mengenal nama internal.', 'Uji dengan membuka namanya di browser dari PC yang disebut di surat kerja.'] },
   renum: { name: 'Pasang Router Baru & DHCP', rank: 1, xp: 260, sla: 900, cp: 'Fase F · DHCP & pengalamatan', brief: ['Router segmen diganti unit baru yang masih setelan pabrik (192.168.88.1/24, DHCP mati). Jaringan pindah ke subnet baru di surat kerja.', 'PC dengan DHCP akan dapat 169.254.x.x. Untuk bisa membuka router pabrik, beri satu PC IP statis sementara di 192.168.88.0/24.', 'Di WebKonfig ganti dulu IP › Addresses ke alamat LAN baru. Koneksimu ke router akan putus: pindahkan PC tadi ke IP statis di subnet baru, buka lagi router di alamat barunya.', 'Lalu atur IP › DHCP Server (pool, gateway, DNS) dan IP › DNS (upstream + Allow Remote Requests).', 'Kembalikan PC tadi ke DHCP, ipconfig /renew, lalu uji dari setiap PC di surat kerja. PC yang memakai IP statis lama juga harus dipindah.'] },
   vlan: { name: 'Pindahkan Meja ke VLAN Kasir', rank: 2, xp: 220, sla: 720, cp: 'Fase F · VLAN', brief: ['Beberapa meja kantor dipakai tim kasir. Mereka harus masuk VLAN 30 (KASIR) yang punya router dan server POS sendiri.', 'Di rak ruang server L1, console ke switch lantainya: conf t › vlan 30 › name KASIR › interface gi1/0/N › switchport access vlan 30.', 'PC baru pindah subnet setelah minta alamat lagi: ipconfig /renew (atau tunggu klien mencoba ulang).', 'Uji dari setiap PC: harus dapat 192.168.30.x dan bisa membuka server POS 192.168.30.10. Simpan konfigurasi switch: write memory.'] },
-};
+} as Record<TplId, TplDef>;
+
+TEMPLATES.ap = { name: 'Ganti AP Koridor yang Rusak', rank: 2, xp: 300, sla: 1200, cp: 'Fase F · Jaringan nirkabel', brief: ['Satu AP koridor di lantai hotel rusak dan sudah diturunkan. Tamu di kamar sekitarnya mengeluh sinyal lemah.', 'Ambil AP pengganti, patch cord, kabel console + laptop, dan Wi-Fi analyzer di Lemari Alat. Pasang AP di bracket plafon koridor [F].', 'Di rak IDF lantai itu: patch outlet AP ke port switch di surat kerja, lalu console: interface gi1/0/N › switchport access vlan 40 › power inline auto › no shutdown › write memory.', 'Di PC Kantor IT, buka NusaWLC (http://192.168.10.20): adopsi AP. Lalu survei: berdiri di bawah AP, nyalakan analyzer [R], pilih kanal 1/6/11 yang tidak dipakai AP yang terdengar kuat di situ.', 'Selesai kalau laptop kamar di surat kerja bisa internet dengan sinyal bagus.'] };
 
 export const RANKS = [{ xp: 0, name: 'Magang' }, { xp: 500, name: 'Teknisi Junior' }, { xp: 1500, name: 'Teknisi' }, { xp: 3000, name: 'Network Engineer' }];
 const PRIO = { Tinggi: 240, Sedang: 420, Rendah: 600 } as const;
@@ -76,16 +86,34 @@ export interface Job {
   id: string; kind: 'ticket' | 'contract' | 'follow'; tpl: TplId | FaultId | 'follow'; title: string; who: string; prio: Prio;
   sla: number; age: number; status: 'open' | 'closed'; targets: Target[]; faults: FaultId[]; order: string[];
   envId: string; sw?: string; vlanName?: string; record?: { name: string; ip: string }; router?: { ip: string; prefix: number; start: string; end: string };
-  wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; swTouched?: boolean;
+  wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; swTouched?: boolean; apId?: string;
   /** legacy alias for the HUD/waypoint code: the next place to go */
   pc: PcInfo;
 }
-type Item = 'tester' | 'console' | 'laptop' | 'patch' | 'toner';
-const ITEM_NAME: Record<Item, string> = { toner: 'Toner generator + probe', tester: 'LAN tester', console: 'Kabel console USB–RJ45', laptop: 'Laptop teknisi', patch: 'Patch cord Cat6 (1 m)' };
+type Item = 'tester' | 'console' | 'laptop' | 'patch' | 'toner' | 'analyzer' | 'ap';
+const ITEM_NAME: Record<Item, string> = { toner: 'Toner generator + probe', tester: 'LAN tester', console: 'Kabel console USB–RJ45', laptop: 'Laptop teknisi', patch: 'Patch cord Cat6 (1 m)', analyzer: 'HP teknisi (Wi-Fi analyzer)', ap: 'AP pengganti NusaAP AX1800 (PoE)' };
+const apWorld = (ap: Ap) => ({ x: wx(HOTEL_ORIGIN[0] + ap.lx), z: wz(HOTEL_ORIGIN[1] + ap.lz), y: LEVELS[ap.level - 1].elev + LEVELS[ap.level - 1].h - 0.23 });
 
 interface Save { v: 1; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
 const KEY = 'kotaNusantara.noc.v1';
 const fresh = (): Save => ({ v: 1, xp: 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, seen: [], mastery: {} });
+
+/** read the progress save defensively: an old/corrupt save from an earlier build must never break the game */
+function loadSave(): Save {
+  let raw: string | null = null;
+  try { raw = localStorage.getItem(KEY); } catch { return fresh(); }
+  if (!raw) return fresh();
+  try {
+    const o = JSON.parse(raw); const f = fresh();
+    if (!o || typeof o !== 'object') throw new Error('bad');
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+    for (const k of ['xp', 'shifts', 'closed', 'slaMet', 'seq', 'contracts', 'stars'] as const) f[k] = num(o[k]);
+    const known = new Set<string>([...Object.keys(FAULTS), ...Object.keys(TEMPLATES)]);
+    f.seen = Array.isArray(o.seen) ? o.seen.filter((x: unknown) => typeof x === 'string' && known.has(x)) : [];
+    if (o.mastery && typeof o.mastery === 'object') for (const [k, v] of Object.entries(o.mastery)) { const m = v as { ok?: unknown; miss?: unknown }; if (known.has(k) && m && typeof m === 'object') f.mastery[k] = { ok: num(m.ok), miss: num(m.miss) }; }
+    return f;
+  } catch { try { localStorage.removeItem(KEY); } catch { /* ignore */ } return fresh(); }
+}
 
 interface Offer { tpl: TplId; seed: number; title: string; lines: string[]; envLabel: string }
 
@@ -95,7 +123,11 @@ export class Noc {
   mode: 'idle' | 'contract' | 'shift' = 'idle';
   shift = 0; trackedId: string | null = null;
   offers: Offer[] = [];
-  inv = { tester: false, console: false, laptop: false, toner: false, patch: 0 };
+  inv = { tester: false, console: false, laptop: false, toner: false, patch: 0, analyzer: false, ap: 0 };
+  analyzerOn = false;
+  private anaEl: HTMLElement | null = null;
+  /** world visuals of APs (mounted / taken down) */
+  onApVisual: (ap: Ap) => void = () => {};
   /** PC whose wall outlet has the toner generator plugged in */
   toneAt: string | null = null;
   private probing = false;
@@ -115,7 +147,7 @@ export class Noc {
   get active() { return this.mode !== 'idle'; }
 
   constructor(private pcos: PcOS, private pcs: PcInfo[], readonly rack: { x: number; z: number }, cabinet: { x: number; z: number } = rack, idfs: { id: string; level: number; x: number; y: number; z: number }[] = []) {
-    try { const raw = localStorage.getItem(KEY); if (raw) this.s = { ...fresh(), ...JSON.parse(raw) }; } catch { /* private mode */ }
+    this.s = loadSave();
     this.CABINET = { name: 'CABINET', label: 'Lemari Alat · Workshop TKJ', x: cabinet.x, y: 1.0, z: cabinet.z, level: 1 };
     this.RACKP = { name: 'RACK', label: 'Rak MDF · Ruang Server L1', x: rack.x, y: 1.4, z: rack.z, level: 1 };
     this.RACKS.MDF = this.RACKP;
@@ -148,6 +180,14 @@ export class Noc {
   private needs(j: Job): Item[] {
     const need: Item[] = [];
     const isC = j.kind === 'contract';
+    if (isC && j.tpl === 'ap') {
+      const ap = this.jobAp(j)!;
+      if (!ap.mounted && this.inv.ap < 1) need.push('ap');
+      if (this.unpatchedAp(j) && this.inv.patch < 1) need.push('patch');
+      for (const it of ['console', 'laptop', 'analyzer'] as Item[]) if (!this.inv[it as 'console']) need.push(it);
+      return need;
+    }
+    if (j.faults.includes('appoe')) { for (const it of ['console', 'laptop'] as Item[]) if (!this.inv[it as 'console']) need.push(it); return need; }
     const physical = (isC && (j.tpl === 'desk' || j.tpl === 'vlan')) || j.faults.some(f => f === 'port' || f === 'vlan' || f === 'cablebad');
     if (isC && j.tpl === 'desk') { const want = j.targets.filter(t => this.noCord.has(t.pc.name)).length + j.targets.filter(t => this.unpatched(j, t.pc.name) && !panelOf(t.pc.name)!.pp.hang).length; if (want && this.inv.patch < want) need.push('patch'); if (!this.inv.toner && j.targets.some(t => this.unpatched(j, t.pc.name) && !panelOf(t.pc.name)!.pp.label)) need.push('toner'); }
     else if (j.faults.includes('cablebad') && this.inv.patch < 1) need.push('patch');
@@ -159,7 +199,26 @@ export class Noc {
     if (j.kind !== 'contract') return false;
     if (j.tpl === 'vlan') return !!this.vlanProblem(j);
     if (j.tpl === 'desk') return j.targets.some(t => this.unpatched(j, t.pc.name) || portOf(t.pc.name)?.port.shutdown || envOf(t.pc.name).id !== j.envId);
+    if (j.tpl === 'ap') { const ap = this.jobAp(j)!, p = apPort(ap); return this.unpatchedAp(j) || !p || p.port.shutdown || p.port.vlan !== 40 || p.port.poe === false; }
     return false;
+  }
+  jobAp(j: Job): Ap | null { return j.apId ? APS.find(a => a.id === j.apId) ?? null : null; }
+  private unpatchedAp(j: Job) { const ap = this.jobAp(j); if (!ap) return false; const q = panelOf(ap.id); return !!q && q.pp.patch !== j.swPort?.[ap.id]; }
+  /** an IT office PC (lab segment) from which the WLC and the routers can be managed */
+  private itPc(): PcInfo { return this.pcs.find(p => p.level === 1 && /_IT_/.test(p.name) && healthy(adapterOf(p.name))) ?? this.pcs.find(p => p.level === 1 && /_IT_/.test(p.name)) ?? this.CABINET; }
+  private apSpot(ap: Ap): PcInfo { const w = apWorld(ap); return { name: `SPOT-${ap.id}`, label: `Bracket plafon ${ap.id} · koridor L${ap.level}`, x: w.x, y: w.y - 1.6, z: w.z, level: ap.level }; }
+  /** places in the world the board owns besides PCs/racks (AP mount brackets); main shows the prompt and calls useSpot */
+  spots(): { id: string; x: number; z: number; level: number; hint: string }[] {
+    const out: { id: string; x: number; z: number; level: number; hint: string }[] = [];
+    for (const j of this.openJobs()) { const ap = this.jobAp(j); if (ap && !ap.mounted) { const w = apWorld(ap); out.push({ id: ap.id, x: w.x, z: w.z, level: ap.level, hint: `[F] Pasang AP di bracket plafon (${ap.id})` }); } }
+    return out;
+  }
+  useSpot(id: string) {
+    const ap = APS.find(a => a.id === id); if (!ap || ap.mounted) return;
+    if (this.inv.ap < 1) { this.toast('Kamu tidak membawa AP pengganti. Ambil di Lemari Alat (Workshop TKJ).', 3500); return; }
+    this.inv.ap--; ap.mounted = true; this.onApVisual(ap);
+    this.logAll(`${ap.id}: AP baru dipasang di bracket plafon, kabel outlet plafon dicolok ke port LAN/PoE AP`);
+    this.toast(`${ap.id} terpasang. LED AP masih mati sampai port switch-nya memberi daya PoE.`, 3800); this.check(false);
   }
   /** desk job: the PC's panel port is not yet patched to the switch port of the work order */
   private unpatched(j: Job, pc: string) { const q = panelOf(pc); return !!j.swPort && !!q && q.pp.patch !== j.swPort[pc]; }
@@ -167,6 +226,14 @@ export class Noc {
   private labelMissing(j: Job) { return j.kind === 'contract' && j.tpl === 'desk' ? j.targets.find(t => wallOk(t.pc.name) === false) ?? null : null; }
   nextStop(j: Job): PcInfo {
     if (j.kind === 'contract' && this.needs(j).length) return this.CABINET;
+    if (j.kind === 'contract' && j.tpl === 'ap') {
+      const ap = this.jobAp(j)!;
+      if (!ap.mounted) return this.apSpot(ap);
+      if (this.switchPending(j)) return this.rackOf(j.sw);
+      if (!ap.adopted || !channelClean(ap) || !ap.radio) return this.itPc();
+    }
+    if (j.kind !== 'contract' && j.faults.includes('appoe') && this.needs(j).length) return this.CABINET;
+    if (j.kind !== 'contract' && j.faults.some(f => f === 'aprf' || f === 'dhcppool') && !j.targets.every(t => t.ok)) { const fixed = this.wifiFixed(j); if (!fixed) return this.itPc(); }
     if (j.kind === 'contract' && j.tpl === 'desk' && j.targets.some(t => this.noCord.has(t.pc.name))) return j.targets.find(t => this.noCord.has(t.pc.name))!.pc;
     if (j.kind === 'contract' && j.tpl === 'desk' && this.needsTone(j)) return this.needsTone(j)!.pc;
     if (j.kind === 'contract' && this.switchPending(j)) return this.rackOf(j.sw);
@@ -176,6 +243,16 @@ export class Noc {
   nextHint(j: Job): string {
     const n = this.needs(j);
     if (j.kind === 'contract' && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
+    if (j.kind === 'contract' && j.tpl === 'ap') {
+      const ap = this.jobAp(j)!, p = apPort(ap);
+      if (!ap.mounted) return `Pasang AP di bracket plafon koridor lantai ${ap.level} [F]`;
+      if (this.unpatchedAp(j)) return `Rak IDF lantai ${ap.level} [F]: patch PP-${panelOf(ap.id)!.pp.n} (outlet AP) ke ${portName(j.swPort![ap.id])}`;
+      if (this.switchPending(j)) return `Console ${j.sw}: ${portName(p!.port.n)} → ${p!.port.vlan !== 40 ? 'switchport access vlan 40 · ' : ''}${p!.port.poe === false ? 'power inline auto · ' : ''}${p!.port.shutdown ? 'no shutdown' : ''}`.replace(/ · $/, '');
+      if (!ap.adopted) return `PC Kantor IT: buka NusaWLC (http://192.168.10.20) dan adopsi ${ap.id}`;
+      if (!ap.radio) return `NusaWLC: nyalakan radio ${ap.id}`;
+      if (!channelClean(ap)) return `Survei kanal di bawah ${ap.id} pakai analyzer [R], lalu set kanal bersih (1/6/11) di NusaWLC`;
+    }
+    if (j.kind !== 'contract' && j.faults.includes('appoe') && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.kind === 'contract' && j.tpl === 'desk' && j.targets.some(t => this.noCord.has(t.pc.name))) return 'Pasang patch cord PC → outlet di meja baru [C]';
     if (j.kind === 'contract' && j.tpl === 'desk' && this.needsTone(j)) return `${this.needsTone(j)!.pc.label}: pasang toner di outlet [C]`;
     if (j.kind === 'contract' && j.tpl === 'desk' && j.targets.some(t => this.unpatched(j, t.pc.name))) return `Di ${this.rackName(j.sw)} [F]: cari port patch panel pakai probe, patch ke port switch`;
@@ -209,11 +286,13 @@ export class Noc {
       dns: `${env.label}: server aplikasi baru perlu nama domain lokal.`,
       renum: `${env.label}: router diganti unit baru, jaringan pindah subnet.`,
       vlan: 'Kantor: beberapa meja dipindah ke jaringan kasir (VLAN 30).',
+      ap: 'Hotel: satu AP koridor rusak, tamu di kamar sekitarnya mengeluh sinyal lemah.',
     };
     return { tpl, seed, title: t.name, lines: [lines[tpl]], envLabel: env.label };
   }
   private pickEnv(tpl: TplId, r: () => number): Env {
     if (tpl === 'vlan') return ENVS.office;
+    if (tpl === 'ap') return ENVS.guest;
     if (tpl === 'desk') return r() < 0.5 ? ENVS.lab : ENVS.office;
     return r() < 0.5 ? ENVS.lab : ENVS.office;
   }
@@ -231,6 +310,13 @@ export class Noc {
   }
   private target(pc: PcInfo, mode: Mode, extra: Partial<Target> = {}): Target { return { pc, mode, ok: false, tested: false, note: '', ...extra }; }
 
+  /** wireless ticket: is the root cause gone (so the next stop is the laptop again)? */
+  private wifiFixed(j: Job) {
+    const pc = j.targets[0].pc.name, q = quality(pc), env = ENVS.guest;
+    if (j.faults.includes('dhcppool') && poolSpace(env) < 20) return false;
+    if (j.faults.includes('aprf') && (!q || !q.ok)) return false;
+    return true;
+  }
   /** Accept a work order (QA can pass a template and a seed). */
   acceptContract(tpl: TplId, seed = Math.floor(Math.random() * 1e9)): Job | null {
     if (this.mode !== 'idle') { this.toast('Selesaikan pekerjaan yang sedang berjalan dulu.'); return null; }
@@ -297,6 +383,24 @@ export class Noc {
       for (const pc of dh) j.targets.push(this.target(pc, 'dhcp'));
       for (const p of this.wired()) if (envOf(p.name) === env && !adapterOf(p.name).dhcp && !j.targets.some(t => t.pc.name === p.name)) j.targets.push(this.target(p, 'any', { note: 'masih memakai IP statis subnet lama' }));
       j.order = [`Router baru (setelan pabrik 192.168.88.1/24, admin tanpa password, DHCP mati).`, `LAN baru: ${gw}/${prefix} · DHCP pool ${start} – ${end} · gateway ${gw} · DNS ${gw}`, `DNS router: upstream 8.8.8.8 dan Allow Remote Requests aktif.`, `Uji dari: ${j.targets.map(t => t.pc.label).join(', ')}`];
+    } else if (tpl === 'ap') {
+      const lv = 4 + Math.floor(r() * 5);
+      const ap = pick(APS.filter(a => a.level === lv), r);
+      const q = panelOf(ap.id)!, sw = q.sw;
+      // the broken AP was taken down: its old switch port is marked faulty, the patch cord went with it
+      const old = q.pp.patch; patchCord(sw, q.pp.n, null); q.pp.hang = false;
+      if (old) { sw.ports[old - 1].desc = 'RUSAK-JANGAN-PAKAI'; sw.ports[old - 1].shutdown = true; }
+      ap.mounted = false; ap.adopted = false; ap.radio = true; ap.power = 'Sedang'; this.onApVisual(ap);
+      // the replacement ships on the channel the strongest neighbour uses at that spot (so the survey matters)
+      const w = apWorld(ap), nb = heardAt(ap.lx, ap.lz, w.y - 0.3, ap.level).find(x => x.ap !== ap);
+      ap.ch = nb ? nb.ap.ch : 6;
+      const free = sw.ports.filter(x => x.n >= 5 && x.n <= 40 && !sw.panel.some(z => z.patch === x.n));
+      const port = pick(free, r); port.vlan = 1; port.shutdown = true; port.poe = true; port.desc = '';
+      j.swPort = { [ap.id]: port.n }; j.sw = sw.name; j.apId = ap.id;
+      // the rooms that lose most: laptops on that floor nearest to the AP
+      const lap = this.pcs.filter(p => p.level === lv && isWireless(p.name)).sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z)).slice(0, 2);
+      for (const pc of lap) j.targets.push(this.target(pc, 'any'));
+      j.order = [`AP: ${ap.id} (koridor lantai ${lv}, plafon) · outlet plafon ${outletOf(ap.id)} → PP-${q.pp.n} di rak IDF lantai ${lv}`, `Port switch lama ${old ? portName(old) : '-'} rusak: pakai ${portName(port.n)} di ${sw.name} → access VLAN 40 (TAMU), PoE aktif, no shutdown, simpan konfigurasi.`, `Adopsi AP di NusaWLC (http://192.168.10.20, dari PC Kantor IT), lalu atur kanal yang bersih (survei dengan Wi-Fi analyzer).`, `Uji dari: ${j.targets.map(t => t.pc.label).join(', ')}`];
     } else if (tpl === 'vlan') {
       const lv = r() < 0.5 ? 2 : 3;
       const onFloor = avail.filter(p => p.level === lv);
@@ -345,7 +449,8 @@ export class Noc {
         const mate = shuffle(this.pcs.filter(p => !used.has(p.name) && portOf(p.name)?.sw === sw && healthy(adapterOf(p.name))), rand)[0];
         if (mate) { used.add(mate.name); t.targets.push(this.target(mate, 'any')); }
         t.order = [`${t.who} · Lantai ${sw.level}: ${t.targets.map(x => x.pc.label).join(', ')} (dan PC lain di lantai itu)`, `Keluhan: “${FAULTS[f].symptom}”`];
-      } else t.order = [`${t.who} · ${pc.label}${isWired(pc.name) ? ` · outlet ${outletOf(pc.name)}` : ''}`, `Keluhan: “${FAULTS[f].symptom}”`];
+      } else if (isWireless(pc.name)) { const c = CLIENTS.get(pc.name); t.order = [`${t.who} · Kamar ${c?.room ?? '?'} (a.n. ${c?.guest ?? '-'}) · ${pc.label}`, `Keluhan: “${FAULTS[f].symptom}”`]; }
+      else t.order = [`${t.who} · ${pc.label}${isWired(pc.name) ? ` · outlet ${outletOf(pc.name)}` : ''}`, `Keluhan: “${FAULTS[f].symptom}”`];
       this.inject(t);
       this.jobs.push(t);
     }
@@ -359,11 +464,32 @@ export class Noc {
     const env = envOf(pc);
     const sw = portOf(pc)?.sw;
     const ids = (Object.keys(FAULTS) as FaultId[]).filter(id => FAULTS[id].rank <= rk && id !== not && !(FAULTS[id].wired && isWireless(pc)) && !(id === 'released' && !adapterOf(pc).dhcp) && !(id === 'conflict' && env.hosts.length < 2)
-      && !((id === 'uplink' || id === 'loop') && (swBusy || !sw || not !== undefined)) && !(id === 'uplink' && !sw?.uplink) && !(id === 'patch' && !isWired(pc)));
+      && !((id === 'uplink' || id === 'loop') && (swBusy || !sw || not !== undefined)) && !(id === 'uplink' && !sw?.uplink) && !(id === 'patch' && !isWired(pc))
+      && !(FAULTS[id].wifi && (!isWireless(pc) || not !== undefined || !this.bites(pc, id))) && !(id === 'dhcppool' && this.jobs.some(j => j.faults.includes('dhcppool'))));
     const w = ids.map(id => { const m = this.s.mastery[id] ?? { ok: 0, miss: 0 }; return Math.max(0.3, 1 + m.miss * 1.5 - Math.min(m.ok, 4) * 0.2); });
     let r = rand() * w.reduce((a, b) => a + b, 0);
     for (let i = 0; i < ids.length; i++) { r -= w[i]; if (r <= 0) return ids[i]; }
     return ids[ids.length - 1];
+  }
+  /** would this Wi-Fi fault really hurt this laptop? (tried and undone) */
+  private bites(pc: string, id: FaultId): boolean {
+    const ap = servingAp(pc); if (!ap) return false;
+    if (id === 'portal' || id === 'dhcppool') return true;
+    if (this.jobs.some(j => j.status !== 'closed' && j.targets.some(t => servingAp(t.pc.name) === ap))) return false;   // one ticket per AP
+    const p = apPort(ap); if (!p) return false;
+    const a = adapterOf(pc);
+    if (id === 'appoe') { p.port.poe = false; const bad = !healthy(a); p.port.poe = true; return bad; }
+    if (id === 'aprf') { const v = this.rfVariant(pc, ap); if (!v) return false; const keep = { ch: ap.ch, power: ap.power }; v.apply(); const bad = !healthy(a); ap.ch = keep.ch; ap.power = keep.power; return bad; }
+    return true;
+  }
+  private rfVariant(pc: string, ap: Ap): { apply: () => void; detail: string } | null {
+    const c = CLIENTS.get(pc)!;
+    const rival = heardAt(c.lx, c.lz, c.y, c.level).find(x => x.ap !== ap && !x.ap.ext);
+    const opts: { apply: () => void; detail: string }[] = [];
+    if (rival) opts.push({ apply: () => { ap.ch = rival.ap.ch; }, detail: `${ap.id} dipindah ke kanal ${rival.ap.ch}, sama dengan ${rival.ap.id} yang terdengar ${rival.rssi} dBm di kamar → kanal ${ap.id} dikembalikan ke kanal yang tidak tumpang tindih` });
+    opts.push({ apply: () => { ap.power = 'Rendah'; }, detail: `Daya TX ${ap.id} diset Rendah (8 dBm) → dinaikkan ke Sedang/Tinggi` });
+    const ok = opts.filter(o => { const keep = { ch: ap.ch, power: ap.power }; o.apply(); const bad = !healthy(adapterOf(pc)); ap.ch = keep.ch; ap.power = keep.power; return bad; });
+    return ok.length ? pick(ok) : null;
   }
   /** Break the PC so the fault really exists in the simulation. */
   private inject(t: Job) {
@@ -375,7 +501,7 @@ export class Noc {
       if (f === 'cable') { a.cable = false; bounce(a); }
       else if (f === 'cablebad') { a.broken = true; bounce(a); }
       else if (f === 'port' && p) p.port.shutdown = true;
-      else if (f === 'vlan' && p) { p.port.vlan = pick([99, 40, 1]); if (!p.sw.vlans.has(40) && p.port.vlan === 40) p.sw.vlans.set(40, 'CCTV'); if (p.port.vlan === 99) p.sw.vlans.delete(99); }
+      else if (f === 'vlan' && p) { p.port.vlan = pick([99, 50, 1]); if (!p.sw.vlans.has(50) && p.port.vlan === 50) p.sw.vlans.set(50, 'CCTV'); if (p.port.vlan === 99) p.sw.vlans.delete(99); }
       else if (f === 'disabled') a.enabled = false;
       else if (f === 'released') { a.dhcp = true; a.lease = { ip: '', t: Date.now(), prefix: 0, gw: '', dns: [], env: env.id, server: '' }; }
       else if (f === 'wrongip') { a.dhcp = false; a.ip = `192.168.1.${20 + Math.floor(Math.random() * 200)}`; a.mask = '255.255.255.0'; a.gw = '192.168.1.1'; a.dns1 = '192.168.1.1'; a.dns2 = ''; a.dnsAuto = false; }
@@ -389,6 +515,21 @@ export class Noc {
         else if (v === 'shut') { sw.upPort.shutdown = true; t.detail = 'Port uplink Gi1/0/49 di-shutdown → no shutdown'; }
         else { sw.uplink!.allowed = [...sw.vlans.keys()].filter(x => x !== p.port.vlan).sort((x, y) => x - y); t.detail = `VLAN ${p.port.vlan} tidak diizinkan lewat trunk uplink Gi1/0/49 → switchport trunk allowed vlan add ${p.port.vlan}`; }
         sw.dirty = false;
+      }
+      else if (f === 'portal') { AUTH.delete(a.mac); t.detail = 'Sesi captive portal laptop habis → login ulang dengan nomor kamar dan nama belakang'; }
+      else if (f === 'appoe') {
+        const ap = servingAp(name)!, q = apPort(ap)!, v = pick(['poe', 'shut', 'patch'] as const);
+        if (v === 'poe') { q.port.poe = false; t.detail = `${ap.id}: PoE ${portName(q.port.n)} di ${q.sw.name} dimatikan (power inline never) → power inline auto`; }
+        else if (v === 'shut') { q.port.shutdown = true; t.detail = `${ap.id}: ${portName(q.port.n)} di ${q.sw.name} shutdown → no shutdown`; }
+        else { const pp = panelOf(ap.id)!; patchCord(pp.sw, pp.pp.n, null); t.detail = `${ap.id}: patch cord PP-${pp.pp.n} → ${portName(q.port.n)} di rak IDF lantai ${ap.level} tercabut → dicolok lagi`; }
+        t.sw = q.sw.name;
+      }
+      else if (f === 'aprf') { const ap = servingAp(name)!; const v = this.rfVariant(name, ap); if (v) { v.apply(); t.detail = v.detail; } }
+      else if (f === 'dhcppool') {
+        const g = ENVS.guest, base = parseIp(g.gateway)!;
+        g.dhcp = { ...g.dhcp!, start: ipStr(base + 99), end: ipStr(base + 159), lease: 24 };
+        let k = 0; for (let n = 99; n <= 159; n++) { const ip = ipStr(base + n); if (![...g.leases.values()].includes(ip)) g.leases.set(`ee-${String(k++).padStart(4, '0')}-phantom`, ip); }
+        bounce(a); t.detail = `Pool DHCP gw-tamu hanya ${ipStr(base + 99)}–${ipStr(base + 159)} (61 alamat) dengan lease 24 jam, semuanya terpakai → pool diperbesar (mis. .100–172.16.7.232) dan lease diperpendek`;
       }
       else if (f === 'loop' && p) {
         const sw = p.sw;
@@ -468,6 +609,19 @@ export class Noc {
     if (j.tpl === 'renum') return this.routerProblem(j);
     if (j.tpl === 'dns') return this.recordProblem(j);
     if (j.tpl === 'vlan') return this.vlanProblem(j);
+    if (j.tpl === 'ap') return this.apProblem(j);
+    return '';
+  }
+  private apProblem(j: Job): string {
+    const ap = this.jobAp(j)!, p = apPort(ap);
+    if (!ap.mounted) return 'AP belum dipasang';
+    if (this.unpatchedAp(j)) return `outlet AP belum di-patch ke ${portName(j.swPort![ap.id])}`;
+    if (!p || p.port.shutdown) return 'port switch AP masih shutdown';
+    if (p.port.vlan !== 40) return 'port AP belum di VLAN 40';
+    if (p.port.poe === false) return 'PoE port AP mati';
+    if (!ap.adopted) return 'AP belum diadopsi di NusaWLC';
+    if (!ap.radio) return 'radio AP mati';
+    if (!channelClean(ap)) return `kanal ${ap.ch} tumpang tindih dengan AP lain di lokasi AP`;
     return '';
   }
 
@@ -526,13 +680,15 @@ export class Noc {
     const list = h('div', 'inv');
     const row = (it: Item, have: boolean | number, take: () => void, put: () => void, extra = '') => {
       const r = h('div', 'inv-row', `<span><b>${ITEM_NAME[it]}</b> ${extra}</span>`);
-      r.append(btn(it === 'patch' ? 'Ambil 1' : have ? 'Kembalikan' : 'Ambil', () => { if (it !== 'patch' && have) put(); else take(); this.openCabinet(); }, 'btn', `take-${it}`));
+      r.append(btn(it === 'patch' || it === 'ap' ? 'Ambil 1' : have ? 'Kembalikan' : 'Ambil', () => { if (it !== 'patch' && it !== 'ap' && have) put(); else take(); this.openCabinet(); }, 'btn', `take-${it}`));
       list.append(r);
     };
     row('toner', this.inv.toner, () => { this.inv.toner = true; }, () => { this.inv.toner = false; if (this.toneAt) { this.toast('Toner generator ikut diambil dari outlet.'); this.toneAt = null; } }, this.inv.toner ? '· dibawa' : '');
     row('tester', this.inv.tester, () => { this.inv.tester = true; }, () => { this.inv.tester = false; }, this.inv.tester ? '· dibawa' : '');
     row('console', this.inv.console, () => { this.inv.console = true; }, () => { this.inv.console = false; }, this.inv.console ? '· dibawa' : '');
     row('laptop', this.inv.laptop, () => { this.inv.laptop = true; }, () => { this.inv.laptop = false; }, this.inv.laptop ? '· dibawa' : '');
+    row('analyzer', this.inv.analyzer, () => { this.inv.analyzer = true; }, () => { this.inv.analyzer = false; this.setAnalyzer(false); }, this.inv.analyzer ? '· dibawa (tekan R untuk membuka)' : '');
+    if (this.jobs.some(j => j.status !== 'closed' && j.tpl === 'ap') || this.inv.ap) row('ap', this.inv.ap, () => { if (this.inv.ap < 1) this.inv.ap++; }, () => {}, `· dibawa ${this.inv.ap}`);
     row('patch', this.inv.patch, () => { if (this.patchStock > 0) { this.patchStock--; this.inv.patch++; } else this.toast('Stok patch cord habis.'); }, () => {}, `· dibawa ${this.inv.patch} · stok ${this.patchStock}`);
     box.append(list);
     const j = this.tracked();
@@ -641,7 +797,7 @@ export class Noc {
       const card = h('div', 'swcard');
       const storm = stormOn(sw);
       const upSt = !sw.uplink ? '' : sw.upPort.shutdown ? 'off' : !sw.uplink.cable ? 'nolink' : 'up';
-      card.append(h('div', 'swhead', `<b>${sw.name}</b> <small>C2960X-48 · Lantai ${sw.level} · ${sw.ip}${sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`));
+      card.append(h('div', 'swhead', `<b>${sw.name}</b> <small>${sw.level >= 4 ? 'C2960X-48FPD (PoE+)' : 'C2960X-48'} · Lantai ${sw.level} · ${sw.ip}${sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`));
       card.append(h('div', 'pp-title', `Patch panel PP-L${sw.level} · Cat6 48 port`));
       const pp = h('div', 'ports pp');
       for (const q of sw.panel) {
@@ -660,10 +816,11 @@ export class Noc {
       for (const p of sw.ports) {
         const a = p.pc ? ADAPTERS.get(p.pc) : undefined;
         const inLoop = !!sw.loop?.includes(p.n);
-        const st = p.shutdown ? 'off' : storm ? 'storm' : inLoop ? 'up' : !a || !linkUp(a) ? 'nolink' : !sw.vlans.has(p.vlan) ? 'inact' : 'up';
+        const isAp = !!p.pc?.startsWith('AP-');
+        const st = p.shutdown ? 'off' : storm ? 'storm' : inLoop ? 'up' : (isAp ? !portLink(sw, p) : !a || !linkUp(a)) ? 'nolink' : !sw.vlans.has(p.vlan) ? 'inact' : 'up';
         const isSel = this.sel?.sw === sw.name && this.sel.swp === p.n;
         const b = btn(String(p.n), () => this.clickSwitchPort(sw, p.n, id), `pl ${st} ${inLoop ? 'loopc' : ''} ${isSel ? 'sel' : ''}`, `swp-${sw.name}-${p.n}`);
-        b.title = `${portName(p.n)} ${p.desc}`;
+        b.title = `${portName(p.n)} ${p.desc}${isAp ? ` · PoE ${p.poe === false ? 'mati' : st === 'up' ? 'aktif 13.4 W' : 'siap'}` : ''}`;
         ports.append(b);
       }
       card.append(ports);
@@ -737,6 +894,37 @@ export class Noc {
     box.append(rw);
     this.show(box, false);
     this.cli.focus();
+  }
+  // ---------------------------------------------------------------- Wi-Fi analyzer (technician phone)
+  setAnalyzer(on: boolean) {
+    if (on && !this.inv.analyzer) { this.toast('Ambil HP teknisi (Wi-Fi analyzer) di Lemari Alat dulu.', 3200); return; }
+    this.analyzerOn = on;
+    if (!on) { this.anaEl?.remove(); this.anaEl = null; return; }
+    if (!this.anaEl) { this.anaEl = h('div'); this.anaEl.id = 'wifi-ana'; document.body.append(this.anaEl); }
+  }
+  /** redraw with what the phone hears at the player's spot (hotel-local coords) */
+  renderAnalyzer(lx: number, lz: number, y: number, level: number, where: string) {
+    if (!this.analyzerOn || !this.anaEl) return;
+    const list: Heard[] = level >= 4 || lx < -5 || lx > 35 ? heardAt(lx, lz, y, Math.max(level, 1)) : heardAt(lx, lz, y, level).filter(x => x.ap.ext || Math.abs(x.ap.level - level) <= 1);
+    const cv = document.createElement('canvas'); cv.width = 300; cv.height = 96;
+    const g = cv.getContext('2d')!; g.fillStyle = '#0d1418'; g.fillRect(0, 0, 300, 96);
+    const X = (ch: number) => 14 + (ch - 1) * 21.5, Y = (dbm: number) => 86 - Math.max(0, dbm + 95) * 1.35;
+    g.strokeStyle = '#26343c'; g.fillStyle = '#7b8d96'; g.font = '9px monospace';
+    for (let c = 1; c <= 13; c++) { g.beginPath(); g.moveTo(X(c), 6); g.lineTo(X(c), 86); g.stroke(); g.fillText(String(c), X(c) - 3, 95); }
+    for (const d of [-90, -70, -50]) { g.fillText(String(d), 0, Y(d) + 3); }
+    const cols = ['#4fc3f7', '#ffb74d', '#81c784', '#e57373', '#ba68c8', '#fff176', '#90a4ae', '#f06292'];
+    list.slice(0, 8).forEach((x, i) => {
+      g.strokeStyle = cols[i % cols.length]; g.lineWidth = i === 0 ? 2.2 : 1.3; g.beginPath();
+      for (let k = -2.2; k <= 2.2; k += 0.2) { const yy = Y(-95) - (Y(-95) - Y(x.rssi)) * (1 - (k / 2.2) ** 2); k === -2.2 ? g.moveTo(X(x.ap.ch + k), yy) : g.lineTo(X(x.ap.ch + k), yy); }
+      g.stroke();
+    });
+    const rows = list.slice(0, 8).map((x, i) => `<tr><td><i style="background:${cols[i % cols.length]}"></i>${x.ap.ssid}</td><td>${x.ap.ext ? x.ap.mac.slice(-8) : x.ap.id}</td><td>${x.ap.ch}</td><td>${x.rssi} dBm</td><td>${pctOf(x.rssi)}%</td></tr>`).join('');
+    const top = list.find(x => !x.ap.ext);
+    const clash = top ? list.filter(x => x !== top && overlap(x.ap.ch, top.ap.ch) && x.rssi >= -80) : [];
+    this.anaEl.innerHTML = `<div class="ah">Wi-Fi Analyzer · ${esc(where)} <small>[R] tutup</small></div>`;
+    this.anaEl.append(cv);
+    this.anaEl.insertAdjacentHTML('beforeend', `<table><tr><th>SSID</th><th>BSSID/AP</th><th>Ch</th><th>RSSI</th><th>%</th></tr>${rows || '<tr><td colspan=5>Tidak ada sinyal</td></tr>'}</table>` +
+      (top ? `<div class="af">${clash.length ? `⚠ Kanal ${top.ap.ch}: tumpang tindih dengan ${clash.map(x => `${x.ap.ext ? x.ap.ssid : x.ap.id} (ch ${x.ap.ch}, ${x.rssi} dBm)`).join(', ')}` : `✓ Kanal ${top.ap.ch} bersih di titik ini`}</div>` : ''));
   }
   /** QA hook: type into the open console. */
   consoleType(line: string) { this.cli?.type(line); }

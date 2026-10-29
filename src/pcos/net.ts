@@ -4,6 +4,7 @@
 // DHCP server and DNS forwarder. Laptops on L4-L8 use the guest Wi-Fi. Everything the player sees in
 // ipconfig/ping/nslookup/browser is computed from this state, so faults and fixes are real, not scripted.
 import { parseIp, ipStr, prefixToMask, networkOf, broadcastOf, parseMask } from '../game/missionLogic';
+import { APS, servingAp, quality, AUTH, setApOnlineFn, type Ap } from './wifi';
 
 export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string }
 export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'none';
@@ -31,6 +32,7 @@ export const ENVS: Record<EnvId, Env> = {
     { ip: '192.168.10.1', name: 'router-lab', mac: '48-8f-5a-10-00-01', ttl: 64, web: 'router' },
     { ip: '192.168.10.2', name: 'sw-lab-01', mac: '00-1e-7a-10-00-02', ttl: 255 },
     { ip: '192.168.10.10', name: 'srv-praktik', mac: '52-54-00-10-00-0a', ttl: 64, web: 'server' },
+    { ip: '192.168.10.20', name: 'wlc', mac: '00-27-22-10-00-14', ttl: 64, web: 'wlc' },
   ], [100, 199], 24),
   office: mkEnv('office', 20, 'Kantor (L2–L3)', '192.168.20.0', 24, 'kantor.local', 'Intel(R) Ethernet Connection I219-LM', false, [
     { ip: '192.168.20.1', name: 'router-kantor', mac: '48-8f-5a-20-00-01', ttl: 64, web: 'router' },
@@ -41,7 +43,7 @@ export const ENVS: Record<EnvId, Env> = {
     { ip: '192.168.30.1', name: 'router-kasir', mac: '48-8f-5a-30-00-01', ttl: 64, web: 'router' },
     { ip: '192.168.30.10', name: 'srv-pos', mac: '52-54-00-30-00-0a', ttl: 64, web: 'pos' },
   ], [100, 160], 8),
-  guest: mkEnv('guest', 0, 'Wi-Fi Tamu Hotel', '172.16.4.0', 22, 'tamu.hotel', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
+  guest: mkEnv('guest', 40, 'Wi-Fi Tamu Hotel', '172.16.4.0', 22, 'tamu.hotel', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
     { ip: '172.16.4.1', name: 'gw-tamu', mac: '48-8f-5a-04-00-01', ttl: 64, web: 'router' },
   ], [100, 1000], 2),
   none: {
@@ -73,7 +75,7 @@ export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 // Each floor follows TIA-568 structured cabling: wall outlet -> horizontal cable -> patch panel port in the
 // floor rack -> patch cord -> switch port. L1's rack in the server room is the MDF (core); L2/L3 have an IDF
 // rack in the IDF room with their own access switch, uplinked to the MDF on Gi1/0/49 (802.1Q trunk).
-export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string }
+export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string; poe?: boolean }
 /** A patch-panel port: `pc` = the desk whose wall outlet is wired to it, `label` = what is printed on that
  *  wall outlet ('' = missing), `patch` = switch port its patch cord goes to, `hang` = a cord hangs unplugged. */
 export interface PanelPort { n: number; pc: string | null; label: string; patch: number | null; hang: boolean }
@@ -116,14 +118,20 @@ export function patchCord(sw: Switch, ppN: number, swN: number | null): string {
 /** Build the floor switches and wire every PC: outlet n -> panel port n -> switch port n (sorted, stable). */
 export function initSwitches(pcNames: string[]) {
   SWITCHES.length = 0; PANEL_OF.clear();
-  for (const lv of [1, 2, 3]) {
-    const vlan = lv === 1 ? 10 : 20;
+  for (const lv of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const hotel = lv >= 4;
+    const vlan = lv === 1 ? 10 : hotel ? 40 : 20;
     const sw: Switch = {
-      name: `SW-L${lv}`, level: lv, ip: lv === 1 ? '192.168.10.2' : `192.168.20.${lv}`, ports: [], vlans: new Map([[1, 'default'], [10, 'LAB'], [20, 'KANTOR']]), dirty: false,
+      name: `SW-L${lv}`, level: lv, ip: lv === 1 ? '192.168.10.2' : `192.168.20.${lv}`, ports: [], vlans: hotel ? new Map([[1, 'default'], [40, 'TAMU'], [50, 'CCTV']]) : new Map([[1, 'default'], [10, 'LAB'], [20, 'KANTOR']]), dirty: false,
       panel: [], uplink: lv === 1 ? null : { cable: true, allowed: null }, upPort: { n: 49, pc: null, shutdown: false, vlan: 1, desc: lv === 1 ? '' : 'UPLINK-MDF' }, loop: null, rack: lv === 1 ? 'MDF' : `IDF-L${lv}`,
     };
-    if (lv > 1) sw.vlans.delete(10);
-    for (let n = 1; n <= 48; n++) { sw.ports.push({ n, pc: null, shutdown: n > 44, vlan, desc: '' }); sw.panel.push({ n, pc: null, label: '', patch: null, hang: false }); }
+    if (lv > 1 && !hotel) sw.vlans.delete(10);
+    for (let n = 1; n <= 48; n++) { sw.ports.push({ n, pc: null, shutdown: n > 44, vlan, desc: '', poe: true }); sw.panel.push({ n, pc: null, label: '', patch: null, hang: false }); }
+    if (hotel) {
+      // hotel floors: the corridor ceiling APs are the wired devices (PoE, access VLAN 40 = guest Wi-Fi)
+      APS.filter(a => a.level === lv).forEach((ap, i) => { const pp = sw.panel[i]; pp.pc = ap.id; pp.label = outletId(lv, pp.n); pp.patch = i + 1; sw.ports[i].desc = ap.id; PANEL_OF.set(ap.id, { sw, pp }); });
+      repatch(sw); SWITCHES.push(sw); continue;
+    }
     const mine = pcNames.filter(p => new RegExp(`_L${lv}_`).test(p)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
     // outlets are installed in blocks of four with a spare (unused, unpatched) outlet after each block,
     // so panel numbers and switch-port numbers differ, as on a real floor
@@ -138,6 +146,17 @@ export function portOf(pc: string) {
   return { sw: q.sw, port: q.sw.ports[q.pp.patch - 1] };
 }
 export const isWireless = (pc: string) => /_L[4-8]_/.test(pc);
+/** the switch port an AP is patched to (null = no patch cord) */
+export function apPort(ap: Ap) { return portOf(ap.id); }
+/** PoE delivered and patched: the AP boots */
+export function apPowered(ap: Ap) { const p = apPort(ap); return !!p && ap.mounted && !p.port.shutdown && p.port.poe !== false; }
+setApOnlineFn(apPowered);
+/** Is there a link on this switch port (a PC NIC, or a powered AP)? */
+export function portLink(sw: Switch, p: Port): boolean {
+  if (!p.pc) return false;
+  if (p.pc.startsWith('AP-')) { const ap = APS.find(a => a.id === p.pc); return !!ap && ap.mounted && p.poe !== false && !p.shutdown; }
+  const a = ADAPTERS.get(p.pc); return !!a && a.cable && !a.broken && !p.shutdown;
+}
 /** A cable between two ports of the same switch with no spanning tree: broadcast storm. */
 export const stormOn = (sw: Switch) => !!sw.loop && !sw.ports[sw.loop[0] - 1].shutdown && !sw.ports[sw.loop[1] - 1].shutdown;
 /** Uplink to the MDF carries this VLAN? */
@@ -149,7 +168,13 @@ export function uplinkCarries(sw: Switch, vlan: number) {
 
 /** Which segment a PC is on right now. */
 export function envOf(pc: string): Env {
-  if (isWireless(pc)) return ENVS.guest;
+  if (isWireless(pc)) {
+    // a laptop gets the VLAN of the switch port its AP is plugged into (the SSID is bridged to it)
+    const ap = servingAp(pc); if (!ap) return ENVS.none;
+    const p = apPort(ap); if (!p) return ENVS.none;
+    if (!p.sw.vlans.has(p.port.vlan) || stormOn(p.sw) || !uplinkCarries(p.sw, p.port.vlan)) return ENVS.none;
+    return Object.values(ENVS).find(e => e.vlan === p.port.vlan && e.id !== 'none') ?? ENVS.none;
+  }
   const q = PANEL_OF.get(pc);
   if (!q) return /_L[2-3]_/.test(pc) ? ENVS.office : ENVS.lab;
   const p = portOf(pc);
@@ -184,7 +209,7 @@ export function adapterOf(pc: string) { return ADAPTERS.get(pc) ?? newAdapter(pc
 
 /** Physical layer: is there a link light on the NIC? */
 export function linkUp(a: Adapter) {
-  if (isWireless(a.pc)) return true;
+  if (isWireless(a.pc)) return !!servingAp(a.pc);
   if (!PANEL_OF.has(a.pc)) return a.cable && !a.broken;
   const p = portOf(a.pc);
   return a.cable && !a.broken && !!p && !p.port.shutdown;
@@ -314,7 +339,16 @@ export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: 
 }
 
 /** One ICMP echo from this adapter to an IP. */
+/** One ICMP echo; over Wi-Fi a weak or congested link adds delay and drops packets. */
 export function ping(a: Adapter, env: Env, target: string, quiet = false): PingRes {
+  const r = pingRaw(a, env, target, quiet);
+  if (r.kind !== 'reply' || quiet || !isWireless(a.pc) || target === '127.0.0.1') return r;
+  const q = quality(a.pc); if (!q) return r;
+  if (q.busy) { if (Math.random() < 0.3) return { kind: 'timeout' }; return { ...r, ms: () => r.ms() + 60 + Math.round(Math.random() * 320) }; }
+  if (q.weak) { if (Math.random() < 0.15) return { kind: 'timeout' }; return { ...r, ms: () => r.ms() + 8 + Math.round(Math.random() * 45) }; }
+  return { ...r, ms: () => r.ms() + 2 + Math.round(Math.random() * 4) };
+}
+function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   const l = live(a, env);
   if (target === '127.0.0.1') return { kind: 'reply', ip: target, ttl: 128, ms: () => 0 };
   if (!l.ok) return { kind: 'general' };
@@ -336,10 +370,12 @@ export function ping(a: Adapter, env: Env, target: string, quiet = false): PingR
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
   for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && inEnv(target, e)) {
     const h = e.hosts.find(x => x.ip === target);
-    if (!h || env.id === 'guest' || e.id === 'guest' || env.id === 'kasir' || e.id === 'kasir') return { kind: 'timeout' };    // guest & POS segments are firewalled
+    const mgmt = env.id === 'lab' && h?.web === 'router';                                          // IT/NOC (lab segment) may manage every router
+    if (!h || (!mgmt && (env.id === 'guest' || e.id === 'guest' || env.id === 'kasir' || e.id === 'kasir'))) return { kind: 'timeout' };    // guest & POS segments are firewalled
     return { kind: 'reply', ip: h.ip, ttl: h.ttl - 1, ms: () => 1 + Math.round(Math.random() * 2) };
   }
   if (!env.internet) return { kind: 'timeout' };
+  if (env.id === 'guest' && !AUTH.has(a.mac)) return { kind: 'timeout' };          // captive portal: no internet before login
   const known = PUBLIC_DNS.includes(target) || Object.values(INTERNET).some(v => v.ip === target);
   if (!known) return { kind: 'timeout' };
   return { kind: 'reply', ip: target, ttl: target.startsWith('8.8') || target.startsWith('142.') ? 117 : 56, ms: () => 14 + Math.round(Math.random() * 18) };
@@ -357,6 +393,7 @@ export function hopsTo(a: Adapter, env: Env, target: string): string[] {
 export function healthy(a: Adapter, env: Env = envOf(a.pc)) {
   const l = live(a, env);
   if (!l.ok || !onSegment(l, env, a)) return false;
+  if (isWireless(a.pc)) { const q = quality(a.pc); if (!q || !q.ok) return false; }
   if (ping(a, env, l.gw || '0.0.0.0', true).kind !== 'reply') return false;
   const r = resolve(a, env, 'cari.id');
   return !!r && r !== 'timeout' && ping(a, env, r.ip, true).kind === 'reply';

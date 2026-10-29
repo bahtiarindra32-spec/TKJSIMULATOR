@@ -1,7 +1,7 @@
 // Shared QA helpers: real keyboard/mouse input on the single-file build.
 import { chromium } from 'playwright';
 export async function boot(save) {
-  const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
   const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
   const errs = []; p.on('pageerror', e => errs.push(e.message.slice(0, 300))); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push('console: ' + m.text().slice(0, 200)); });
   await p.goto('http://127.0.0.1:8787/', { waitUntil: 'commit', timeout: 60000 });
@@ -10,7 +10,8 @@ export async function boot(save) {
   await p.reload({ waitUntil: 'commit' });
   await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 120000 });
   await p.waitForTimeout(1200);
-  await p.click('#enter').catch(() => {}); await p.waitForTimeout(400);
+  await p.evaluate(() => window.__kota.pause(true)); await p.evaluate(() => document.getElementById('enter').click()); await p.waitForTimeout(200);
+  if ((await p.evaluate(() => window.__kota.state().mode)) !== 'walk') await p.evaluate(() => document.getElementById('enter').click());
   await p.evaluate(() => window.__kota.pause(true));
   const K = (f, a) => p.evaluate(f, a);
   const shot = async n => { await p.screenshot({ path: `/workspace/work/shots/${n}.png` }); };
@@ -25,7 +26,8 @@ export async function boot(save) {
   const goAnchor = async (which) => { const a = await K(w => { const n = window.__kota.noc[w]; return { x: n.x + 200, z: n.z + 150 }; }, which); for (const [dx, dz] of [[0, 1.0], [0, -1.0], [1.0, 0], [-1.0, 0], [0, .6], [.6, 0]]) { await go(a.x + dx, a.z + dz, 1); const h = await K(() => document.getElementById('hudHint')?.textContent ?? ''); if (/Lemari|Rak switch/.test(h)) return h; } return K(() => document.getElementById('hudHint')?.textContent); };
   const press = async k => { await p.keyboard.press(k); await p.waitForTimeout(120); await step(1); };
   const openPc = async (name) => {
-    await press('f'); await p.waitForTimeout(150);
+    await press('f'); await p.waitForTimeout(80);
+    for (let i = 0; i < 12 && !(await K(() => window.__kota.pcos.isOpen())); i++) await step(3);   // sit-down animation
     if (!(await K(() => window.__kota.pcos.isOpen()))) { console.log('  F did not open the PC (door/anchor closer) -> direct'); await K(n => window.__kota.pcos.open(n, n), name); }
     await K(() => document.querySelector('#pcos .lock button')?.click());
     await p.waitForTimeout(200);
@@ -35,7 +37,7 @@ export async function boot(save) {
   const cmd = async (c, wait = 700) => { await p.keyboard.type(c); await p.keyboard.press('Enter'); await p.waitForTimeout(wait); };
   const cmdText = () => K(() => document.querySelector('#pcos .cmd')?.innerText.slice(-900));
   const closeWins = () => K(() => { [...document.querySelectorAll('#pcos .win')].forEach(w => w.querySelector('.cb.x')?.click()); });
-  const closePc = async () => { await K(() => document.querySelector('#pcos .leave')?.click()); await step(2); await p.waitForTimeout(150); };
+  const closePc = async () => { await K(() => document.querySelector('#pcos .leave')?.click()); await step(2); for (let i = 0; i < 10 && (await K(() => window.__kota.seat())); i++) await step(3); await p.waitForTimeout(100); };
   /** Network Connections -> Properties -> IPv4 with real typing. cfg: null = DHCP + auto DNS; or {ip,mask,gw,dns} ; dnsOnly: {dns} keeps DHCP address */
   const ipv4 = async (cfg) => {
     await dbl('#pcos .di[title="Network Connections"]'); await p.waitForTimeout(200);

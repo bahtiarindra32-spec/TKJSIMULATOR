@@ -2,7 +2,7 @@
 
 Game 3D berbasis browser untuk siswa SMK TKJ kelas 10/11. Pemain magang di **Nusantara Tech Hotel & Office**, gedung 8 lantai di tengah kota fiktif bergaya Jakarta (400 × 300 m), lalu mengerjakan misi jaringan komputer yang diselaraskan dengan CP TKJ Fase E/F.
 
-**▶ Main langsung di browser:** https://bahtiarindra32-spec.github.io/TKJSIMULATOR/
+**▶ Main langsung di browser:** https://tkjsimulator.my.id/ (cadangan: https://bahtiarindra32-spec.github.io/TKJSIMULATOR/)
 
 README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 29 Oktober 2026).
 
@@ -65,7 +65,10 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
 | G atau `?low` | Mode grafis ringan |
+| R | Wi-Fi analyzer (RSSI, kanal, AP tetangga) di lantai hotel L4–L8 |
 | Esc | Keluar dari mode jalan / tutup jendela |
+
+**HP / tablet:** joystick di kiri, geser layar untuk menoleh, tombol F (label berubah sesuai objek), Lompat, Lari, E/Q, dan bar atas Kerja/Cek/Wi-Fi/Kamera/Peta/Full/Keluar. Android langsung full layar saat MASUK KOTA. iPhone: Bagikan → "Tambah ke Layar Utama", lalu buka dari ikon supaya tanpa search bar.
 
 ## 5. Yang sudah dibuat ✅
 
@@ -131,7 +134,18 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Toner + probe: pasang toner di outlet meja, nyalakan probe di rak, sapu port patch panel. Port yang benar berbunyi keras, port sebelahnya samar (induksi), dan nadanya melemah kalau port itu sudah tersambung ke port switch yang aktif.
 - Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop.
 
+### Wi-Fi hotel L4–L8 (`src/pcos/wifi.ts`)
+- ✅ AP koridor ber-PoE di switch lantai, VLAN 40, SSID `Nusantara-Guest`, RSSI dan tumpang-tindih kanal (termasuk AP tetangga luar).
+- ✅ Wi-Fi analyzer (R), `netsh wlan show interfaces`, kontroler NusaWLC di `http://192.168.10.20` (adopsi AP, kanal, daya), captive portal nomor kamar + nama belakang.
+- ✅ Tiket portal, PoE/port AP, RF/kanal, pool DHCP penuh, dan surat kerja pasang/ganti AP.
+
 ### Kamera, gerak, grafik
+- ✅ Prompt interaksi melayang di dekat objek ("[F] Buka pintu", "[F] Nyalakan PC", lift, rak).
+- ✅ Animasi duduk/berdiri di kursi PC; PC terbuka setelah duduk.
+- ✅ Lift dengan kabin, pintu buka/tutup, dan indikator lantai yang bergerak halus (tanpa kedip); tangga dengan animasi naik/turun.
+- ✅ Ruang server punya ramp di pintu, tidak lagi terjebak di dalam.
+- ✅ Kontrol sentuh dan tata letak HP (landscape dan portrait), jendela PC otomatis penuh di layar kecil, PWA manifest.
+- ✅ Anti-cache: build ID + `version.json`, halaman reload sendiri kalau ada versi baru; save rusak/format lama dibersihkan.
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
 - ✅ Kolisi otomatis untuk semua mesh padat ≥ 25 cm (audit: 76 gedung kota dan 30 properti jalan tertutup kolider).
 - ✅ Anti-flicker (shadow frustum di-snap, near/far kamera dinamis, polygonOffset lantai/marka), GTAO, dan mode ringan.
@@ -173,5 +187,6 @@ Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordina
 Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
 
 ## 8. Validasi terakhir (29 Okt 2026)
+- Update mobile/lift/Wi-Fi: `tsc` lolos; playtest `tools/qa/qa_v6.mjs` lolos untuk keluar-masuk ruang server, prompt pintu, duduk/berdiri, lift L1→L2 (kabin naik halus 0,12→4,12 m tanpa teleport), dan pembersihan save; `qa_mobile.mjs` (sentuh, 844×390 dan 390×844) lolos: joystick menggerakkan pemain, tombol F membuka PC.
 - `npx tsc --noEmit` lolos, `vite build` lolos, build single-file lolos.
 - Playtest otomatis `tools/qa/qa_jobs.mjs` dengan input nyata (jalan ke lokasi, F/C, mengetik di CMD, form IPv4, WebKonfig, console switch): kelima surat kerja selesai bintang 3; shift 4 tiket (konektor, patch cord rusak, port shutdown, VLAN salah) selesai; uji "sengaja merusak" (shutdown port PC lain) menurunkan bintang dan memunculkan keluhan susulan yang lalu diperbaiki. Tanpa page error.

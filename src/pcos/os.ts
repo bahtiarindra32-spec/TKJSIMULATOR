@@ -1,7 +1,9 @@
 // "Jendela 11": a Windows 11 lookalike shell for in-game PCs (own branding, same layout & behaviour).
 import './pcos.css';
-import { ENVS, type Env, type Adapter, adapterOf, envOf, live, ping, resolve, hopsTo, onSegment, conflict, maskStr, parseIp, parseMask, ipStr, INTERNET, mediaOk, bounce, releaseLease, routerOf, setRouterLan, poolProblem, networkOf as netOf, PUBLIC_DNS } from './net';
+import { ENVS, type Env, type Adapter, adapterOf, envOf, live, ping, resolve, hopsTo, onSegment, conflict, maskStr, parseIp, parseMask, ipStr, INTERNET, mediaOk, bounce, releaseLease, routerOf, setRouterLan, poolProblem, networkOf as netOf, PUBLIC_DNS, isWireless } from './net';
 import { networkOf, broadcastOf, prefixToMask } from '../game/missionLogic';
+import { APS, CLIENTS, AUTH, servingAp, quality, heardAt, pctOf, barsOf, channelClean, CHANNELS, type TxPower, type Heard } from './wifi';
+import { apPowered } from './net';
 
 type Attrs = Record<string, any>;
 function h(tag: string, a: Attrs = {}, ...kids: (Node | string | null | undefined | false)[]): HTMLElement {
@@ -47,7 +49,7 @@ const OSNAME = 'Jendela', CORP = 'Nusa Corporation', BUILD = '10.0.22631.4317';
 interface Win { id: string; el: HTMLElement; body: HTMLElement; title: string; icon: string; task: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }
 interface PcState { a: Adapter; readonly env: Env; signed: boolean; notes: string; history: string[] }
 
-export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg'; pc: string; detail: any }
+export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg' | 'wifi' | 'portal'; pc: string; detail: any }
 
 export class PcOS {
   readonly root: HTMLElement;
@@ -74,6 +76,7 @@ export class PcOS {
     this.root.addEventListener('contextmenu', e => e.preventDefault());
   }
   isOpen() { return this.root.classList.contains('open'); }
+  private get wl() { return isWireless(this.curName); }
   state(name: string) {
     let s = this.pcs.get(name);
     if (!s) { const a = adapterOf(name); s = { a, get env() { return envOf(name); }, signed: false, notes: '', history: [] }; this.pcs.set(name, s); }
@@ -133,6 +136,7 @@ export class PcOS {
       this.dicon(I.net, 'Network Connections', () => this.openNcpa()),
       this.dicon(I.web, 'Tepi', () => this.openBrowser()),
       this.dicon(I.note, 'Notepad', () => this.openNotepad()),
+      ...(isWireless(this.curName) ? [this.dicon(I.wifi, 'Wi-Fi', () => this.openWifi())] : []),
       this.dicon(I.folder, 'Lembar Kerja', () => this.openNotepad('LEMBAR KERJA TKJ\r\n\r\n1. Cek konfigurasi IP: ipconfig /all\r\n2. Uji koneksi ke gateway & server: ping\r\n3. Cek DNS: nslookup cari.id\r\n4. Lacak rute: tracert cari.id\r\n5. Atur IP statis lewat Network Connections > Ethernet > Properties > IPv4\r\n')),
     );
     this.mon.append(icons);
@@ -145,7 +149,7 @@ export class PcOS {
     for (const [ic, nm, fn] of [[I.folder, 'File Explorer', () => this.openNotepad()], [I.web, 'Tepi', () => this.openBrowser()], [I.cmd, 'Command Prompt', () => this.openCmd()], [I.gear, 'Settings', () => this.openSettings('network')]] as [string, string, () => void][]) {
       this.taskMid.append(h('div', { class: 'tbi pinned', title: nm, 'data-app': nm, onclick: () => { const w = this.wins.find(x => x.title.includes(nm)); if (w) this.toggleMin(w); else fn(); } }, svg(ic)));
     }
-    this.trayNet = h('div', { class: 'ti', title: '', onclick: () => this.openSettings('network') });
+    this.trayNet = h('div', { class: 'ti', title: '', name: 'trayNet', onclick: () => (this.wl ? this.openWifi() : this.openSettings('network')) });
     this.clockEl = h('div', { class: 'clk' });
     const tray = h('div', { class: 'tray' }, h('div', { class: 'ti', style: { fontSize: '12px' } }, '^'), h('div', { class: 'ti' }, this.trayNet, svg(I.vol)), h('div', { class: 'ti' }, this.clockEl));
     const tb = h('div', { class: 'tb' }, this.taskMid, tray);
@@ -156,7 +160,7 @@ export class PcOS {
     this.root.append(this.mon);
     this.refreshTray();
   }
-  private dicon(ic: string, name: string, fn: () => void) { return h('div', { class: 'di', ondblclick: fn, title: name }, svg(ic), name); }
+  private dicon(ic: string, name: string, fn: () => void) { return h('div', { class: 'di', ondblclick: fn, onclick: () => { if (matchMedia('(pointer: coarse)').matches) fn(); }, title: name }, svg(ic), name); }
   private buildStart() {
     const inp = h('input', { placeholder: 'Search for apps, settings, and documents' }) as HTMLInputElement;
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = inp.value.trim(); inp.value = ''; this.startEl.classList.remove('show'); if (!this.runCommand(v)) this.openBrowser(`cari.id/search?q=${encodeURIComponent(v)}`); } });
@@ -189,9 +193,9 @@ export class PcOS {
   }
   refreshTray() {
     if (!this.trayNet || !this.cur) return;
-    const st = this.status(), wl = this.cur.env.wireless;
+    const st = this.status(), wl = this.wl;
     this.trayNet.innerHTML = st === 'none' ? I.noNet : st === 'internet' ? (wl ? I.wifi : I.eth) : I.globe;
-    this.trayNet.title = st === 'none' ? 'Not connected' : st === 'internet' ? `${wl ? 'Wi-Fi Tamu' : 'Network'}\nInternet access` : 'Network\nNo internet';
+    this.trayNet.title = st === 'none' ? 'Not connected' : st === 'internet' ? `${wl ? (CLIENTS.get(this.curName)?.want ?? 'Wi-Fi') : 'Network'}\nInternet access` : `${wl ? (CLIENTS.get(this.curName)?.want ?? 'Wi-Fi') : 'Network'}\nNo internet`;
   }
   notify(title: string, msg: string) {
     this.ntfEl.innerHTML = ''; this.ntfEl.append(h('b', {}, title), msg); this.ntfEl.classList.add('show');
@@ -211,6 +215,7 @@ export class PcOS {
   }
 
   // ---------------------------------------------------------------- window manager
+  private get small() { return matchMedia('(pointer: coarse)').matches || innerWidth < 760 || innerHeight < 520; }
   private win(o: { title: string; icon: string; w: number; h: number; body: HTMLElement; dark?: boolean; task?: boolean; dialog?: boolean; noMax?: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }): Win {
     const mw = this.mon.clientWidth || innerWidth, mh = (this.mon.clientHeight || innerHeight) - 48;
     const W = Math.min(o.w, mw - 20), H = Math.min(o.h, mh - 20);
@@ -223,6 +228,8 @@ export class PcOS {
       !o.dialog && !o.noMax && h('div', { class: 'cb', title: 'Maximize', onclick: () => el.classList.toggle('max') }, '▢'),
       h('div', { class: 'cb x', title: 'Close', onclick: close }, '✕'));
     bar.addEventListener('dblclick', () => { if (!o.dialog && !o.noMax) el.classList.toggle('max'); });
+    if (this.small && !o.dialog) el.classList.add('max');
+    if (this.small && o.dialog) { el.style.left = `${Math.max(4, (mw - W) / 2)}px`; el.style.top = `${Math.max(4, (mh - H) / 2)}px`; }
     bar.addEventListener('mousedown', (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.cb') || el.classList.contains('max')) return;
       const sx = e.clientX, sy = e.clientY, l0 = el.offsetLeft, t0 = el.offsetTop;
@@ -317,8 +324,8 @@ export class PcOS {
     if (!line) return;
     const parts = line.split(/\s+/); const cmd = parts[0].toLowerCase(); const args = parts.slice(1); const al = args.map(x => x.toLowerCase());
     this.emit('cmd', { line });
-    const adName = env.wireless ? 'Wi-Fi' : 'Ethernet';
-    const adHead = `${env.wireless ? 'Wireless LAN adapter' : 'Ethernet adapter'} ${adName}:`;
+    const adName = this.wl ? 'Wi-Fi' : 'Ethernet';
+    const adHead = `${this.wl ? 'Wireless LAN adapter' : 'Ethernet adapter'} ${adName}:`;
     const l = live(a, env);
     const mm = a.mac.split('-'); const ll6 = `fe80::${(parseInt(mm[0], 16) ^ 2).toString(16).padStart(2, '0')}${mm[1]}:${mm[2]}ff:fe${mm[3]}:${mm[4]}${mm[5]}%12`.replace(/::0+/, '::');
     const dot = (k: string) => { if (k === 'Connection-specific DNS Suffix') return '   Connection-specific DNS Suffix  . : '; let x = k; for (let i = k.length; i < 34; i++) x += i % 2 === 0 ? '.' : ' '; return `   ${x}: `; };
@@ -357,6 +364,7 @@ export class PcOS {
         return;
       }
       case 'netsh': {
+        if (al[0] === 'wlan') { t.print(this.netshWlan(al.slice(1), args.slice(1))); this.refreshTray(); return; }
         if (al.join(' ').startsWith('interface ip show config') || al.join(' ').startsWith('int ip show config')) {
           t.print(`\nConfiguration for interface "${adName}"\n    DHCP enabled:                         ${a.dhcp ? 'Yes' : 'No'}\n    IP Address:                           ${l.ip || '-'}\n    Subnet Prefix:                        ${l.ok ? `${ipStr(networkOf(parseIp(l.ip)!, l.prefix))}/${l.prefix} (mask ${maskStr(l.prefix)})` : '-'}\n    Default Gateway:                      ${l.gw || '-'}\n    Gateway Metric:                       0\n    InterfaceMetric:                      25\n    ${a.dhcp && a.dnsAuto ? 'DNS servers configured through DHCP:' : 'Statically Configured DNS Servers:'}  ${l.dns.join('\n                                          ') || 'None'}`);
         } else t.print('The following command was not found: ' + args.join(' ') + '.');
@@ -375,9 +383,9 @@ export class PcOS {
       l = live(a, env);
       if (!a.enabled) return '';
       const lines = [`\n${c.adHead}\n`];
-      if (disc) { lines.push(`${c.dot('Media State')}Media disconnected`, `${c.dot('Connection-specific DNS Suffix')}`); if (full) lines.push(`${c.dot('Description')}${env.adapter}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`); return lines.join('\n'); }
+      if (disc) { lines.push(`${c.dot('Media State')}Media disconnected`, `${c.dot('Connection-specific DNS Suffix')}`); if (full) lines.push(`${c.dot('Description')}${(this.wl ? ENVS.guest.adapter : env.adapter)}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`); return lines.join('\n'); }
       lines.push(`${c.dot('Connection-specific DNS Suffix')}${a.dhcp && l.ok && !l.apipa ? env.suffix : ''}`);
-      if (full) lines.push(`${c.dot('Description')}${env.adapter}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`);
+      if (full) lines.push(`${c.dot('Description')}${(this.wl ? ENVS.guest.adapter : env.adapter)}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`);
       lines.push(`${c.dot('Link-local IPv6 Address')}${c.ll6}${full ? '(Preferred)' : ''}`);
       if (l.ok) {
         const dup = conflict(l, env, a);
@@ -492,10 +500,11 @@ export class PcOS {
     const render = () => {
       items.innerHTML = '';
       const st = !a.enabled ? 'Disabled' : !mediaOk(a) ? 'Network cable unplugged' : (() => { const x = this.status(); return x === 'internet' ? env.suffix : x === 'local' ? 'Unidentified network' : live(a, env).apipa ? 'Unidentified network' : 'Unidentified network'; })();
-      const nm = env.wireless ? 'Wi-Fi' : 'Ethernet';
-      const card = h('div', { class: 'adp', tabindex: '0' }, h('div', { html: I.net, style: { opacity: a.enabled ? '1' : '.45', filter: a.enabled ? '' : 'grayscale(1)' } }), h('div', {}, h('b', {}, nm), h('small', {}, st), h('small', {}, env.adapter)));
+      const nm = this.wl ? 'Wi-Fi' : 'Ethernet';
+      const card = h('div', { class: 'adp', tabindex: '0' }, h('div', { html: I.net, style: { opacity: a.enabled ? '1' : '.45', filter: a.enabled ? '' : 'grayscale(1)' } }), h('div', {}, h('b', {}, nm), h('small', {}, st), h('small', {}, (this.wl ? ENVS.guest.adapter : env.adapter))));
       card.addEventListener('click', () => card.classList.add('sel'));
       card.addEventListener('dblclick', () => (a.enabled ? this.openStatus() : (a.enabled = true, bounce(a), render(), this.refreshTray())));
+      card.addEventListener('click', (e: MouseEvent) => { if (matchMedia('(pointer: coarse)').matches) card.dispatchEvent(new MouseEvent('contextmenu', { clientX: e.clientX, clientY: e.clientY, bubbles: true })); });
       card.addEventListener('contextmenu', (e: MouseEvent) => {
         e.preventDefault(); card.classList.add('sel');
         const r = this.mon.getBoundingClientRect();
@@ -518,7 +527,7 @@ export class PcOS {
     const s = this.cur!; const a = s.a, env = s.env;
     if (!a.enabled) { this.msgBox('Network Connections', 'This network device is disabled.', 'info'); return; }
     const st = this.status(); const l = live(a, env);
-    const nm = env.wireless ? 'Wi-Fi' : 'Ethernet';
+    const nm = this.wl ? 'Wi-Fi' : 'Ethernet';
     let w: Win;
     const body = h('div', { class: 'dlg' }, h('div', { class: 'tabs' }, h('span', {}, 'General')),
       h('fieldset', {}, h('legend', {}, 'Connection'),
@@ -526,7 +535,7 @@ export class PcOS {
         h('div', { class: 'row' }, 'IPv6 Connectivity:', h('span', {}, 'No network access')),
         h('div', { class: 'row' }, 'Media State:', h('span', {}, mediaOk(a) ? 'Enabled' : 'Media disconnected')),
         h('div', { class: 'row' }, 'Duration:', h('span', {}, '00:42:17')),
-        h('div', { class: 'row' }, 'Speed:', h('span', {}, env.wireless ? '573.5 Mbps' : '1.0 Gbps')),
+        h('div', { class: 'row' }, 'Speed:', h('span', {}, this.wl ? '573.5 Mbps' : '1.0 Gbps')),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => this.openDetails() }, 'Details...'), '')),
       h('fieldset', {}, h('legend', {}, 'Activity'), h('div', { class: 'row' }, h('span', {}, 'Bytes:'), h('span', {}, l.ok ? '1.284.533   |   9.442.871' : '0   |   0'))),
       h('div', { class: 'row', style: { justifyContent: 'flex-start' } }, h('button', { class: 'btn', onclick: () => { this.closeWin(w); this.openProps(); } }, 'Properties'), h('button', { class: 'btn', onclick: () => { a.enabled = false; this.closeWin(w); this.refreshNcpa(); } }, 'Disable'), h('button', { class: 'btn', onclick: () => this.diagnose() }, 'Diagnose')),
@@ -547,7 +556,7 @@ export class PcOS {
   private openDetails() {
     const s = this.cur!; const a = s.a, env = s.env; const l = live(a, env);
     const rows: [string, string][] = [
-      ['Connection-specific DN...', a.dhcp && l.ok && !l.apipa ? env.suffix : ''], ['Description', env.adapter], ['Physical Address', a.mac.toUpperCase()], ['DHCP Enabled', a.dhcp ? 'Yes' : 'No'],
+      ['Connection-specific DN...', a.dhcp && l.ok && !l.apipa ? env.suffix : ''], ['Description', (this.wl ? ENVS.guest.adapter : env.adapter)], ['Physical Address', a.mac.toUpperCase()], ['DHCP Enabled', a.dhcp ? 'Yes' : 'No'],
       ['IPv4 Address', l.ip], ['IPv4 Subnet Mask', l.ok ? maskStr(l.prefix) : ''],
       ...(a.dhcp && l.ok && !l.apipa && a.lease ? [['Lease Obtained', new Date(a.lease.t).toLocaleString('en-US')], ['Lease Expires', new Date(a.lease.t + (env.dhcp?.lease ?? 8) * 3600e3).toLocaleString('en-US')]] as [string, string][] : []),
       ['IPv4 Default Gateway', l.ok ? l.gw : ''], ['IPv4 DHCP Server', a.dhcp && l.ok && !l.apipa ? (a.lease?.server ?? env.gateway) : ''], ['IPv4 DNS Server', l.dns.join(', ')], ['IPv4 WINS Server', ''], ['NetBIOS over Tcpip En...', 'Yes'],
@@ -571,13 +580,13 @@ export class PcOS {
     };
     draw();
     const body = h('div', { class: 'dlg' }, h('div', { class: 'tabs' }, h('span', {}, 'Networking'), h('span', { style: { background: '#f0f0f0' } }, 'Sharing')),
-      'Connect using:', h('div', { style: { border: '1px solid #c8c8c8', background: '#fff', padding: '4px 6px', margin: '4px 0 6px', display: 'flex', alignItems: 'center', gap: '6px' } }, h('span', { html: I.net, style: { width: '18px', height: '18px', display: 'inline-block' } }), env.adapter),
+      'Connect using:', h('div', { style: { border: '1px solid #c8c8c8', background: '#fff', padding: '4px 6px', margin: '4px 0 6px', display: 'flex', alignItems: 'center', gap: '6px' } }, h('span', { html: I.net, style: { width: '18px', height: '18px', display: 'inline-block' } }), (this.wl ? ENVS.guest.adapter : env.adapter)),
       h('div', { style: { textAlign: 'right' } }, h('button', { class: 'btn' }, 'Configure...')),
       'This connection uses the following items:', list,
       h('div', { class: 'row' }, h('button', { class: 'btn' }, 'Install...'), h('button', { class: 'btn' }, 'Uninstall'), h('button', { class: 'btn', onclick: () => { if (sel === 3) this.openIPv4(); else this.msgBox('Properties', 'Tidak ada pengaturan untuk komponen ini di simulasi.', 'info'); } }, 'Properties')),
       h('fieldset', {}, h('legend', {}, 'Description'), desc),
       h('div', { class: 'btns' }, h('button', { class: 'btn def', onclick: () => this.closeWin(w) }, 'OK'), h('button', { class: 'btn', onclick: () => this.closeWin(w) }, 'Cancel')));
-    w = this.win({ title: `${env.wireless ? 'Wi-Fi' : 'Ethernet'} Properties`, icon: I.net, w: 380, h: 500, body, dialog: true });
+    w = this.win({ title: `${this.wl ? 'Wi-Fi' : 'Ethernet'} Properties`, icon: I.net, w: 380, h: 500, body, dialog: true });
   }
   private ipField(val: string, nextFocus?: () => void) {
     const parts = (val || '').split('.');
@@ -680,18 +689,18 @@ export class PcOS {
     const show = (p: string) => {
       nav.querySelectorAll('.n').forEach(n => n.classList.toggle('on', (n as HTMLElement).dataset.p === p));
       main.innerHTML = '';
-      const l = live(a, env); const st = this.status(); const nm = env.wireless ? 'Wi-Fi' : 'Ethernet';
+      const l = live(a, env); const st = this.status(); const nm = this.wl ? 'Wi-Fi' : 'Ethernet';
       if (p === 'network') {
         main.append(h('h1', {}, 'Network & internet'),
-          h('div', { class: 'card', style: { padding: '20px 16px' } }, h('div', { html: st === 'none' ? I.noNet : env.wireless ? I.wifi : I.eth, style: { width: '40px', height: '40px' } }), h('div', { class: 'grow' }, h('b', { style: { fontSize: '16px' } }, nm), h('small', {}, !a.enabled ? 'Disabled' : !mediaOk(a) ? 'Not connected' : st === 'internet' ? 'Connected, secured' : 'No internet'))),
+          h('div', { class: 'card', style: { padding: '20px 16px' } }, h('div', { html: st === 'none' ? I.noNet : this.wl ? I.wifi : I.eth, style: { width: '40px', height: '40px' } }), h('div', { class: 'grow' }, h('b', { style: { fontSize: '16px' } }, nm), h('small', {}, !a.enabled ? 'Disabled' : !mediaOk(a) ? 'Not connected' : st === 'internet' ? 'Connected, secured' : 'No internet'))),
           h('div', { class: 'card' }, h('div', { class: 'grow' }, h('b', {}, `${nm} properties`), h('div', { class: 'kv', style: { marginTop: '10px' } },
             h('b', {}, 'IP assignment:'), h('span', {}, a.dhcp ? 'Automatic (DHCP)' : 'Manual'),
             h('b', {}, 'DNS server assignment:'), h('span', {}, a.dhcp && a.dnsAuto ? 'Automatic (DHCP)' : 'Manual'),
-            h('b', {}, 'Link speed (Receive/Transmit):'), h('span', {}, env.wireless ? '573/573 (Mbps)' : '1000/1000 (Mbps)'),
+            h('b', {}, 'Link speed (Receive/Transmit):'), h('span', {}, this.wl ? '573/573 (Mbps)' : '1000/1000 (Mbps)'),
             h('b', {}, 'IPv4 address:'), h('span', {}, l.ip || '—'),
             h('b', {}, 'IPv4 DNS servers:'), h('span', {}, l.dns.join(', ') || '—'),
-            h('b', {}, 'Manufacturer:'), h('span', {}, env.adapter.split(' ')[0].replace('(R)', '')),
-            h('b', {}, 'Description:'), h('span', {}, env.adapter),
+            h('b', {}, 'Manufacturer:'), h('span', {}, (this.wl ? ENVS.guest.adapter : env.adapter).split(' ')[0].replace('(R)', '')),
+            h('b', {}, 'Description:'), h('span', {}, (this.wl ? ENVS.guest.adapter : env.adapter)),
             h('b', {}, 'Physical address (MAC):'), h('span', {}, a.mac.toUpperCase()))),
             h('button', { class: 'btn11', onclick: () => this.openIPv4() }, 'Edit')),
           h('div', { class: 'card', onclick: () => this.openNcpa(), style: { cursor: 'default' } }, h('div', { class: 'grow' }, h('b', {}, 'Advanced network settings'), h('small', {}, 'More network adapter options · View all network adapters, network reset')), '›'),
@@ -755,6 +764,7 @@ export class PcOS {
       const host = url.hostname;
       const l = live(s.a, s.env);
       if (!l.ok) { err('You\'re not connected', 'ERR_INTERNET_DISCONNECTED', ['Check the network cables, modem, and router', 'Reconnect to Wi-Fi', 'Run Network Diagnostics'], host); return; }
+      if (s.env.id === 'guest' && !AUTH.has(s.a.mac) && host !== s.env.gateway) { set('Login Wi-Fi Tamu', this.portal(() => go(url.href, false))); addr.value = `http://portal.tamu.hotel/login?redirect=${encodeURIComponent(host)}`; return; }
       const r = resolve(s.a, s.env, host);
       if (r === 'timeout') { err('Hmmm… your Internet access is blocked', 'DNS_PROBE_FINISHED_NO_INTERNET', ['Checking the network cables, modem, and router', 'Checking the DNS server settings', 'Running Network Diagnostics'], host); return; }
       if (r === null) { err('Hmmm… can\'t reach this page', 'DNS_PROBE_FINISHED_NXDOMAIN', [`Check if there is a typo in ${host}.`, 'If spelling is correct, try running Network Diagnostics.', l.dns.length ? `DNS server ${l.dns[0]} tidak mengenal nama ini.` : 'Belum ada DNS server yang diatur.'], host); return; }
@@ -794,8 +804,143 @@ export class PcOS {
     if (kind === 'printer') return h('div', { class: 'wf' }, h('aside', {}, h('div', { class: 'on' }, 'Status'), h('div', {}, 'Network'), h('div', {}, 'Supplies')), h('main', {}, h('h3', {}, 'Printer L2 · Embedded Web Server'), h('table', {}, h('tr', {}, h('th', {}, 'Item'), h('th', {}, 'Value')), ...[['Status', 'Ready'], ['IP Address', ip], ['Subnet Mask', maskStr(24)], ['Gateway', '192.168.20.1'], ['Toner Black', '62%'], ['Pages printed', '18.204']].map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))));
     if (kind === 'pos') return h('div', { class: 'web' }, h('div', { style: { background: '#0f7a4a', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, 'KasirKu POS · srv-pos'), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Server POS online'), h('p', {}, `Terminal kasir ini terhubung ke server POS ${ip}. Transaksi QRIS dan struk tersinkron.`)));
     if (kind === 'intranet') { const hostN = Object.values(ENVS).flatMap(e => e.hosts).find(x => x.ip === ip)?.name ?? url.hostname; return h('div', { class: 'web' }, h('div', { style: { background: '#5b2a86', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, `${hostN} · Intranet Nusantara Tech`), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Aplikasi internal berjalan'), h('p', {}, `Kamu membuka ${url.hostname} (${ip}). Nama ini diterjemahkan oleh DNS server jaringanmu.`))); }
+    if (kind === 'wlc') return this.wlcUi();
     const renv = Object.values(ENVS).find(e => routerOf(e)?.ip === ip) ?? env;
     return this.routerUi(renv, ip);
+  }
+
+  // ---------------------------------------------------------------- Wi-Fi (hotel-room laptops)
+  private wifiBars(rssi: number) { const b = barsOf(rssi); return h('span', { class: 'bars' }, ...[1, 2, 3, 4].map(i => h('i', { class: i <= b ? 'on' : '', style: { height: `${i * 4}px` } }))); }
+  private wifiState() {
+    const pc = this.curName, c = CLIENTS.get(pc), a = this.cur!.a;
+    const ap = a.enabled ? servingAp(pc) : null, q = ap ? quality(pc) : null;
+    return { c, a, ap, q };
+  }
+  wifiConnect(ssid: string | null) {
+    const { c, a } = this.wifiState(); if (!c) return;
+    c.want = ssid; bounce(a);
+    this.emit('wifi', { ssid }); this.refreshTray();
+  }
+  openWifi() {
+    const old = this.wins.find(w => w.title === 'Wi-Fi'); if (old) this.closeWin(old);
+    const body = h('div', { class: 'wifi' });
+    const render = () => {
+      body.innerHTML = '';
+      const { c, a, ap, q } = this.wifiState(); if (!c) return;
+      if (!a.enabled) { body.append(h('p', { class: 'muted' }, 'Adapter Wi-Fi dimatikan. Aktifkan di Network Connections.')); return; }
+      const seen = new Map<string, Heard>();
+      for (const x of heardAt(c.lx, c.lz, c.y, c.level)) if (!seen.has(x.ap.ssid)) seen.set(x.ap.ssid, x);
+      if (!seen.size) body.append(h('p', { class: 'muted' }, 'No Wi-Fi networks found.'));
+      for (const [ssid, x] of seen) {
+        const mine = c.want === ssid && !!ap;
+        const l = mine ? live(a, this.cur!.env) : null;
+        const st = !mine ? (x.ap.ext ? 'Secured' : 'Open') : !l?.ok || l.apipa ? 'No internet, open' : this.cur!.env.id === 'guest' && !AUTH.has(a.mac) ? 'Connected, open · Login diperlukan (buka browser)' : this.status() === 'internet' ? 'Connected, open' : 'No internet, open';
+        const row = h('div', { class: `wrow${mine ? ' cur' : ''}` }, this.wifiBars(mine && q ? q.rssi : x.rssi), h('div', { class: 'wtx' }, h('b', {}, ssid), h('small', {}, st)));
+        if (mine) row.append(h('button', { class: 'btn', name: 'wifi-disconnect', onclick: () => { this.wifiConnect(null); render(); } }, 'Disconnect'));
+        else row.append(h('button', { class: 'btn', name: `wifi-connect-${ssid}`, onclick: async () => {
+          if (x.ap.ext) { await this.msgBox('Wi-Fi', `Can't connect to ${ssid}. Jaringan ini milik tetangga dan butuh kata sandi.`, 'warn'); return; }
+          this.wifiConnect(ssid); render();
+        } }, 'Connect'));
+        body.append(row);
+      }
+      body.append(h('p', { class: 'muted', style: { marginTop: '10px' } }, 'Tips: netsh wlan show interfaces · netsh wlan show networks mode=bssid'));
+    };
+    render();
+    this.win({ title: 'Wi-Fi', icon: I.wifi, w: 380, h: 360, body, dialog: true });
+  }
+  private netshWlan(al: string[], raw: string[]): string {
+    const { c, a, ap, q } = this.wifiState();
+    if (!c) return '\nThe Wireless AutoConfig Service (wlansvc) is not running.\n';
+    const verb = al.join(' ');
+    const rate = (r: number, busy: boolean) => { const v = r >= -60 ? 144.4 : r >= -67 ? 86.7 : r >= -75 ? 39 : 6.5; return busy ? Math.round(v / 3 * 10) / 10 : v; };
+    if (verb.startsWith('show interface')) {
+      const on = !!ap && !!q && a.enabled;
+      return `\nThere is 1 interface on the system:\n\n    Name                   : Wi-Fi\n    Description            : ${ENVS.guest.adapter}\n    Physical address       : ${a.mac.replace(/-/g, ':')}\n    State                  : ${!a.enabled ? 'disconnected (adapter disabled)' : on ? 'connected' : 'disconnected'}\n` +
+        (on ? `    SSID                   : ${ap!.ssid}\n    BSSID                  : ${ap!.mac}\n    Network type           : Infrastructure\n    Radio type             : 802.11n\n    Authentication         : Open\n    Cipher                 : None\n    Connection mode        : Auto Connect\n    Band                   : 2.4 GHz\n    Channel                : ${q!.ch}\n    Receive rate (Mbps)    : ${rate(q!.rssi, q!.busy)}\n    Transmit rate (Mbps)   : ${rate(q!.rssi - 3, q!.busy)}\n    Signal                 : ${q!.pct}%\n    Profile                : ${ap!.ssid}\n` : '') + '\n    Hosted network status  : Not available\n';
+    }
+    if (verb.startsWith('show network')) {
+      if (!a.enabled) return '\nThe wireless local area network interface is powered down and doesn\'t support the requested operation.\n';
+      const all = heardAt(c.lx, c.lz, c.y, c.level), bssid = verb.includes('bssid');
+      const ssids = [...new Set(all.map(x => x.ap.ssid))];
+      let o = `\nInterface name : Wi-Fi\nThere are ${ssids.length} networks currently visible.\n`;
+      ssids.forEach((ss, i) => {
+        const xs = all.filter(x => x.ap.ssid === ss), ext = xs[0].ap.ext;
+        o += `\nSSID ${i + 1} : ${ss}\n    Network type            : Infrastructure\n    Authentication          : ${ext ? 'WPA2-Personal' : 'Open'}\n    Encryption              : ${ext ? 'CCMP' : 'None'}\n`;
+        if (bssid) xs.forEach((x, k) => { o += `    BSSID ${k + 1}                 : ${x.ap.mac}\n         Signal             : ${pctOf(x.rssi)}%  \n         Radio type         : 802.11n\n         Band               : 2.4 GHz\n         Channel            : ${x.ap.ch}\n`; });
+        else o += `    Signal                  : ${pctOf(xs[0].rssi)}%\n`;
+      });
+      return o;
+    }
+    if (verb.startsWith('disconnect')) { this.wifiConnect(null); return '\nDisconnection request was completed successfully for interface "Wi-Fi".\n'; }
+    if (verb.startsWith('connect')) {
+      const nm = /name=("?)([^"]+)\1/i.exec(raw.join(' '))?.[2];
+      if (!nm) return '\nThe syntax supplied for this command is not valid. Check help for the correct syntax.\n\nUsage: connect [name=]<string> [[ssid=]<string>] [[interface=]<string>]\n';
+      if (!heardAt(c.lx, c.lz, c.y, c.level).some(x => x.ap.ssid === nm && !x.ap.ext)) return `\nThere is no profile "${nm}" assigned to the specified interface.\n`;
+      this.wifiConnect(nm); return '\nConnection request was completed successfully.\n';
+    }
+    return '\nThe following commands are available:\n\nconnect        - Connects to a wireless network.\ndisconnect     - Disconnects from a wireless network.\nshow interfaces - Shows a list of the wireless LAN interfaces on the system.\nshow networks  - Shows a list of networks visible on the system (mode=bssid).\n';
+  }
+  /** captive portal of the guest network: room number + surname as on the reservation */
+  private portal(done: () => void): HTMLElement {
+    const s = this.cur!, c = CLIENTS.get(this.curName);
+    const room = h('input', { name: 'room', placeholder: 'contoh: 507' }) as HTMLInputElement;
+    const name = h('input', { name: 'surname', placeholder: 'sesuai reservasi' }) as HTMLInputElement;
+    const ag = h('input', { type: 'checkbox', name: 'agree' }) as HTMLInputElement;
+    const msg = h('div', { class: 'pmsg' });
+    const go = () => {
+      if (!ag.checked) { msg.textContent = 'Setujui syarat penggunaan terlebih dulu.'; return; }
+      if (!c || room.value.trim() !== c.room || name.value.trim().toUpperCase() !== c.guest) { msg.textContent = 'Nomor kamar dan nama belakang tidak cocok dengan data reservasi.'; return; }
+      AUTH.add(s.a.mac); this.emit('portal', { room: c.room }); this.notify('Wi-Fi Tamu', 'Login berhasil. Selamat berselancar!'); this.refreshTray(); done();
+    };
+    return h('div', { class: 'web portal' },
+      h('div', { class: 'phead' }, 'Nusantara Tech Hotel · Wi-Fi Tamu'),
+      h('div', { class: 'pbody' }, h('h2', {}, 'Selamat datang'), h('p', {}, 'Untuk memakai internet, masuk dengan nomor kamar dan nama belakang pemesan kamar.'),
+        h('label', {}, 'Nomor kamar'), room, h('label', {}, 'Nama belakang'), name,
+        h('label', { class: 'chk' }, ag, ' Saya menyetujui syarat penggunaan Wi-Fi tamu'),
+        h('button', { class: 'btn def', name: 'portal-login', onclick: go }, 'Masuk'), msg,
+        h('p', { class: 'muted' }, c ? `Kartu kunci di meja: Kamar ${c.room} · a.n. ${c.guest}` : '')));
+  }
+  /** NusaWLC: the hotel's Wi-Fi controller (http://192.168.10.20, from the IT/NOC segment) */
+  private wlcUi(): HTMLElement {
+    const root = h('div', { class: 'wf wlc' });
+    let page = 'ap', floor = 0;
+    const render = () => {
+      root.innerHTML = '';
+      root.append(h('aside', {}, h('div', { style: { fontWeight: '700', padding: '6px 14px 12px' } }, 'NusaWLC'),
+        ...[['ap', 'Access Point'], ['client', 'Klien'], ['ssid', 'SSID']].map(([k, t]) => h('div', { class: page === k ? 'on' : '', name: `wlc-${k}`, onclick: () => { page = k; render(); } }, t))));
+      const main = h('main'); root.append(main);
+      if (page === 'ssid') {
+        main.append(h('h3', {}, 'SSID'), h('table', {}, h('tr', {}, h('th', {}, 'SSID'), h('th', {}, 'Keamanan'), h('th', {}, 'VLAN'), h('th', {}, 'Portal'), h('th', {}, 'Band')),
+          h('tr', {}, h('td', {}, 'Nusantara-Guest'), h('td', {}, 'Open'), h('td', {}, '40 (TAMU) · ditentukan VLAN port switch AP'), h('td', {}, 'Captive portal (kamar + nama)'), h('td', {}, '2.4 GHz'))),
+          h('p', {}, 'Rencana kanal 2.4 GHz: hanya 1, 6, 11 (tidak tumpang tindih). AP yang berdekatan, termasuk lantai atas/bawah, jangan memakai kanal yang sama.'));
+        return;
+      }
+      if (page === 'client') {
+        const rows = [...CLIENTS.values()].filter(c => !floor || c.level === floor).map(c => { const ap = servingAp(c.pc), q = ap ? quality(c.pc) : null; const mac = adapterOf(c.pc).mac; return h('tr', {}, h('td', {}, `Kamar ${c.room}`), h('td', {}, ap ? ap.id : '— (tidak terhubung)'), h('td', {}, q ? `${q.rssi} dBm` : '-'), h('td', {}, q ? String(q.ch) : '-'), h('td', {}, !q ? '-' : q.busy ? `Interferensi kanal (${q.cciAp?.id} ${q.cci} dBm)` : q.weak ? 'Sinyal lemah' : 'Baik'), h('td', {}, AUTH.has(mac) ? 'Login' : '')); });
+        main.append(h('h3', {}, 'Klien terhubung'), this.floorSel(floor, f => { floor = f; render(); }), h('table', {}, h('tr', {}, h('th', {}, 'Klien'), h('th', {}, 'AP'), h('th', {}, 'RSSI'), h('th', {}, 'Kanal'), h('th', {}, 'Kualitas'), h('th', {}, '')), ...rows));
+        return;
+      }
+      main.append(h('h3', {}, 'Access Point'), this.floorSel(floor, f => { floor = f; render(); }));
+      const tb = h('table', {}, h('tr', {}, ...['AP', 'Status', 'MAC', 'Kanal', 'Daya TX', 'Radio', 'Klien', 'Cek kanal', ''].map(x => h('th', {}, x))));
+      for (const ap of APS.filter(a => !floor || a.level === floor)) {
+        const pw = apPowered(ap);
+        const status = !ap.mounted ? 'Tidak terpasang' : !pw ? 'Offline (tidak ada daya PoE / link)' : !ap.adopted ? 'Menunggu adopsi' : 'Online';
+        const live_ = pw && ap.adopted;
+        const ch = h('select', { name: `ch-${ap.id}`, disabled: !live_ ? 'disabled' : null, onchange: (e: Event) => { ap.ch = +(e.target as HTMLSelectElement).value; this.emit('cfg', { kind: 'wlc', ap: ap.id, ch: ap.ch }); render(); } }, ...CHANNELS.map(n => h('option', { value: String(n), selected: n === ap.ch ? 'selected' : null }, String(n))));
+        const pwr = h('select', { name: `pw-${ap.id}`, disabled: !live_ ? 'disabled' : null, onchange: (e: Event) => { ap.power = (e.target as HTMLSelectElement).value as TxPower; this.emit('cfg', { kind: 'wlc', ap: ap.id, power: ap.power }); render(); } }, ...(['Tinggi', 'Sedang', 'Rendah'] as TxPower[]).map(n => h('option', { value: n, selected: n === ap.power ? 'selected' : null }, n)));
+        const rad = h('input', { type: 'checkbox', name: `radio-${ap.id}`, checked: ap.radio ? 'checked' : null, disabled: !live_ ? 'disabled' : null, onchange: (e: Event) => { ap.radio = (e.target as HTMLInputElement).checked; this.emit('cfg', { kind: 'wlc', ap: ap.id, radio: ap.radio }); render(); } });
+        const n = [...CLIENTS.values()].filter(c => servingAp(c.pc) === ap).length;
+        const clean = !live_ ? '-' : channelClean(ap) ? '✓ bersih' : '⚠ tumpang tindih';
+        const act = pw && ap.mounted && !ap.adopted ? h('button', { class: 'btn', name: `adopt-${ap.id}`, onclick: () => { ap.adopted = true; this.emit('cfg', { kind: 'wlc', ap: ap.id, adopt: true }); render(); } }, 'Adopsi') : h('span');
+        tb.append(h('tr', { class: status === 'Online' ? '' : 'warn' }, h('td', {}, ap.id), h('td', {}, status), h('td', {}, ap.mac), h('td', {}, ch), h('td', {}, pwr), h('td', {}, rad), h('td', {}, String(n)), h('td', {}, clean), h('td', {}, act)));
+      }
+      main.append(tb, h('p', { class: 'muted' }, '"Cek kanal": AP lain/tetangga dengan kanal yang tumpang tindih (selisih < 5) terdengar di atas −80 dBm di lokasi AP ini.'));
+    };
+    render();
+    return root;
+  }
+  private floorSel(cur: number, set: (f: number) => void) {
+    return h('div', { class: 'flsel' }, 'Lantai: ', ...[0, 4, 5, 6, 7, 8].map(f => h('button', { class: `btn${cur === f ? ' def' : ''}`, name: `wlc-floor-${f}`, onclick: () => set(f) }, f ? `L${f}` : 'Semua')));
   }
 
   // ---------------------------------------------------------------- router WebKonfig (editable)
@@ -818,7 +963,7 @@ export class PcOS {
       const ids = ['if', 'addr', 'dhcp', 'dns', 'routes'];
       const main = h('main', {}, h('h3', {}, `RuteOS WebKonfig · ${r.name}`));
       wrap.append(h('div', { class: 'wf' }, h('aside', {}, ...nav.map((x, i) => h('div', { class: ids[i] === page ? 'on' : '', style: { cursor: 'pointer' }, onclick: () => { page = ids[i]; render(); } }, x))), main));
-      if (page === 'if') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Type'), h('th', {}, 'Running')), h('tr', {}, h('td', {}, 'ether1-isp'), h('td', {}, 'Ethernet'), h('td', {}, 'R')), h('tr', {}, h('td', {}, env.wireless ? 'wlan-tamu' : `vlan${env.vlan}-lan`), h('td', {}, env.wireless ? 'Wireless' : 'VLAN'), h('td', {}, 'R'))));
+      if (page === 'if') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Type'), h('th', {}, 'Running')), h('tr', {}, h('td', {}, 'ether1-isp'), h('td', {}, 'Ethernet'), h('td', {}, 'R')), h('tr', {}, h('td', {}, this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`), h('td', {}, this.wl ? 'Wireless' : 'VLAN'), h('td', {}, 'R'))));
       if (page === 'routes') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Dst. Address'), h('th', {}, 'Gateway'), h('th', {}, 'Distance')), h('tr', {}, h('td', {}, '0.0.0.0/0'), h('td', {}, '100.64.12.1 (ether1-isp)'), h('td', {}, '1')), h('tr', {}, h('td', {}, `${env.net}/${env.prefix}`), h('td', {}, `vlan${env.vlan}-lan (connected)`), h('td', {}, '0'))));
       if (page === 'addr') {
         const a1 = inp(`${r.ip}/${env.prefix}`, '170px'); a1.name = 'lan-addr';
@@ -833,7 +978,7 @@ export class PcOS {
           this.emit('cfg', { kind: 'lan', env: env.id, ip: m[1], prefix: p });
           render();
         };
-        main.append(h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${r.ip}/${env.prefix}`), h('td', {}, env.net), h('td', {}, env.wireless ? 'wlan-tamu' : `vlan${env.vlan}-lan`)), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
+        main.append(h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${r.ip}/${env.prefix}`), h('td', {}, env.net), h('td', {}, this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`)), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
           h('p', {}, h('b', {}, 'Ubah alamat LAN')), row('Address', a1), h('button', { class: 'btn', name: 'apply-addr', onclick: apply }, 'Apply'), out,
           h('p', { class: 'fnote' }, 'Mengubah alamat LAN memindahkan subnet seluruh segmen ini. PC yang memakai alamat lama akan terputus sampai disesuaikan.'));
       }
