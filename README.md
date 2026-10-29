@@ -21,7 +21,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 29 O
 | Aset | Semua model dibuat prosedural dari kode (geometri Three.js), tanpa file model atau font eksternal |
 | Ekspor | GLTFExporter (tombol Ekspor GLB, nama objek ikut terbawa untuk Blender/Meshy) |
 | QA otomatis | Playwright + Chromium + SwiftShader (headless), skrip di `tools/qa/` |
-| Berbagi link | Python `http.server` + Cloudflare quick tunnel (`cloudflared`) |
+| Hosting | GitHub Pages dari folder `docs/` (branch `main`) |
 
 Dependensi runtime hanya `three`. Dev: `typescript`, `vite`, `@types/three`.
 
@@ -114,9 +114,9 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 **Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
 
 **Aturan dunia nyata**
-- Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak switch di Ruang Server L1. Penanda hanya menunjuk arah.
-- Alat fisik: LAN tester, kabel console USB–RJ45, laptop teknisi, patch cord (stok habis pakai). Tanpa console + laptop, switch tidak bisa dikonfigurasi.
-- Switch per lantai (SW-L1/L2/L3, 48 port) dengan CLI mirip Cisco IOS: `enable`, `conf t`, `interface [range] gi1/0/N`, `shutdown`, `switchport access vlan`, `vlan`/`name`, `show interfaces status`, `show vlan brief`, `show mac address-table`, `show running-config`, `write memory`, singkatan (`sh vl br`), `?`, dan pesan error IOS. Label outlet (L2-14) = port Gi1/0/14. LED port di rak mengikuti status.
+- Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak MDF di Ruang Server L1, Rak IDF di ruang IDF lantai 2 dan 3. Penanda hanya menunjuk arah.
+- Alat fisik: toner + probe, LAN tester, kabel console USB–RJ45, laptop teknisi, patch cord (stok habis pakai). Tanpa console + laptop, switch tidak bisa dikonfigurasi.
+- Switch per lantai (SW-L1/L2/L3, 48 port) dengan CLI mirip Cisco IOS: `enable`, `conf t`, `interface [range] gi1/0/N`, `shutdown`, `switchport access vlan`, `vlan`/`name`, `show interfaces status`, `show vlan brief`, `show mac address-table`, `show running-config`, `write memory`, singkatan (`sh vl br`), `?`, dan pesan error IOS. LED port di rak mengikuti status.
 - Router tiap segmen bisa diubah di WebKonfig: alamat LAN, DHCP server (pool, gateway, DNS, lease, daftar lease), DNS forwarder (upstream, Allow Remote Requests, record A).
 - Klien DHCP menyimpan lease lama sampai renew; lease dari subnet lama ditolak dan klien mencoba ulang sendiri (±60 detik). Lepas/colok kabel atau enable adapter = minta alamat baru. IP bentrok antar-PC terdeteksi.
 - Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
