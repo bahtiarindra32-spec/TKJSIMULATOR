@@ -69,36 +69,94 @@ export const INTERNET: Record<string, { ip: string; web: string }> = {
 };
 export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 
-// ---------------------------------------------------------------- switches
+// ---------------------------------------------------------------- switches & structured cabling
+// Each floor follows TIA-568 structured cabling: wall outlet -> horizontal cable -> patch panel port in the
+// floor rack -> patch cord -> switch port. L1's rack in the server room is the MDF (core); L2/L3 have an IDF
+// rack in the IDF room with their own access switch, uplinked to the MDF on Gi1/0/49 (802.1Q trunk).
 export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string }
-export interface Switch { name: string; level: number; ip: string; ports: Port[]; vlans: Map<number, string>; dirty: boolean }
+/** A patch-panel port: `pc` = the desk whose wall outlet is wired to it, `label` = what is printed on that
+ *  wall outlet ('' = missing), `patch` = switch port its patch cord goes to, `hang` = a cord hangs unplugged. */
+export interface PanelPort { n: number; pc: string | null; label: string; patch: number | null; hang: boolean }
+export interface Uplink { cable: boolean; allowed: number[] | null }
+export interface Switch {
+  name: string; level: number; ip: string; ports: Port[]; vlans: Map<number, string>; dirty: boolean;
+  panel: PanelPort[]; uplink: Uplink | null; upPort: Port; loop: [number, number] | null; rack: string;
+}
 export const SWITCHES: Switch[] = [];
-const PORT_OF = new Map<string, { sw: Switch; port: Port }>();
+const PANEL_OF = new Map<string, { sw: Switch; pp: PanelPort }>();
 export const portName = (n: number) => `Gi1/0/${n}`;
-export const outletOf = (pc: string) => { const p = PORT_OF.get(pc); return p ? `L${p.sw.level}-${String(p.port.n).padStart(2, '0')}` : '-'; };
+export const outletId = (lv: number, n: number) => `L${lv}-${String(n).padStart(2, '0')}`;
+/** The real identifier of a desk's outlet (= its patch-panel port). */
+export const outletOf = (pc: string) => { const p = PANEL_OF.get(pc); return p ? outletId(p.sw.level, p.pp.n) : '-'; };
+/** What is printed on the wall plate ('' when the label is missing). */
+export const wallLabel = (pc: string) => PANEL_OF.get(pc)?.pp.label ?? '';
+export const panelOf = (pc: string) => PANEL_OF.get(pc) ?? null;
+export const isWired = (pc: string) => PANEL_OF.has(pc);
 
-/** Build the floor switches and patch every wired PC to its own port (sorted, so the map is stable). */
+/** Recompute which PC reaches which switch port (after any patch-cord change). */
+export function repatch(sw: Switch) {
+  for (const p of sw.ports) p.pc = null;
+  for (const pp of sw.panel) if (pp.patch && pp.pc) sw.ports[pp.patch - 1].pc = pp.pc;
+}
+/** Plug (or unplug with null) the patch cord of a panel port. Returns an error text or ''. */
+export function patchCord(sw: Switch, ppN: number, swN: number | null): string {
+  const pp = sw.panel[ppN - 1]; if (!pp) return 'port patch panel tidak ada';
+  if (swN !== null) {
+    if (swN < 1 || swN > sw.ports.length) return 'port switch tidak ada';
+    if (sw.panel.some(q => q !== pp && q.patch === swN)) return `${portName(swN)} sudah terpakai patch cord lain`;
+    if (sw.loop?.includes(swN)) return `${portName(swN)} sudah terpakai kabel lain`;
+  }
+  const before = pp.pc ? ADAPTERS.get(pp.pc) : undefined;
+  pp.patch = swN; pp.hang = swN === null;
+  repatch(sw);
+  if (before) bounce(before);
+  return '';
+}
+
+/** Build the floor switches and wire every PC: outlet n -> panel port n -> switch port n (sorted, stable). */
 export function initSwitches(pcNames: string[]) {
-  SWITCHES.length = 0; PORT_OF.clear();
+  SWITCHES.length = 0; PANEL_OF.clear();
   for (const lv of [1, 2, 3]) {
     const vlan = lv === 1 ? 10 : 20;
-    const sw: Switch = { name: `SW-L${lv}`, level: lv, ip: lv === 1 ? '192.168.10.2' : `192.168.20.${lv}`, ports: [], vlans: new Map([[1, 'default'], [10, 'LAB'], [20, 'KANTOR']]), dirty: false };
+    const sw: Switch = {
+      name: `SW-L${lv}`, level: lv, ip: lv === 1 ? '192.168.10.2' : `192.168.20.${lv}`, ports: [], vlans: new Map([[1, 'default'], [10, 'LAB'], [20, 'KANTOR']]), dirty: false,
+      panel: [], uplink: lv === 1 ? null : { cable: true, allowed: null }, upPort: { n: 49, pc: null, shutdown: false, vlan: 1, desc: lv === 1 ? '' : 'UPLINK-MDF' }, loop: null, rack: lv === 1 ? 'MDF' : `IDF-L${lv}`,
+    };
     if (lv > 1) sw.vlans.delete(10);
-    for (let n = 1; n <= 48; n++) sw.ports.push({ n, pc: null, shutdown: n > 44, vlan, desc: '' });
+    for (let n = 1; n <= 48; n++) { sw.ports.push({ n, pc: null, shutdown: n > 44, vlan, desc: '' }); sw.panel.push({ n, pc: null, label: '', patch: null, hang: false }); }
     const mine = pcNames.filter(p => new RegExp(`_L${lv}_`).test(p)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
-    mine.forEach((pc, i) => { const port = sw.ports[i]; port.pc = pc; port.desc = pc.replace(/^PROP_/, ''); PORT_OF.set(pc, { sw, port }); });
+    // outlets are installed in blocks of four with a spare (unused, unpatched) outlet after each block,
+    // so panel numbers and switch-port numbers differ, as on a real floor
+    mine.forEach((pc, i) => { const pp = sw.panel[i + Math.floor(i / 4)]; pp.pc = pc; pp.label = outletId(lv, pp.n); pp.patch = i + 1; sw.ports[i].desc = pc.replace(/^PROP_/, '').slice(0, 18); PANEL_OF.set(pc, { sw, pp }); });
+    repatch(sw);
     SWITCHES.push(sw);
   }
 }
-export const portOf = (pc: string) => PORT_OF.get(pc) ?? null;
+/** The switch port a PC reaches right now through its outlet + patch cord (null = not patched). */
+export function portOf(pc: string) {
+  const q = PANEL_OF.get(pc); if (!q || !q.pp.patch) return null;
+  return { sw: q.sw, port: q.sw.ports[q.pp.patch - 1] };
+}
 export const isWireless = (pc: string) => /_L[4-8]_/.test(pc);
+/** A cable between two ports of the same switch with no spanning tree: broadcast storm. */
+export const stormOn = (sw: Switch) => !!sw.loop && !sw.ports[sw.loop[0] - 1].shutdown && !sw.ports[sw.loop[1] - 1].shutdown;
+/** Uplink to the MDF carries this VLAN? */
+export function uplinkCarries(sw: Switch, vlan: number) {
+  if (!sw.uplink) return true;
+  if (!sw.uplink.cable || sw.upPort.shutdown) return false;
+  return !sw.uplink.allowed || sw.uplink.allowed.includes(vlan);
+}
 
 /** Which segment a PC is on right now. */
 export function envOf(pc: string): Env {
   if (isWireless(pc)) return ENVS.guest;
-  const p = PORT_OF.get(pc);
-  if (!p) return /_L[2-3]_/.test(pc) ? ENVS.office : ENVS.lab;
+  const q = PANEL_OF.get(pc);
+  if (!q) return /_L[2-3]_/.test(pc) ? ENVS.office : ENVS.lab;
+  const p = portOf(pc);
+  if (!p) return ENVS.none;
   if (!p.sw.vlans.has(p.port.vlan)) return ENVS.none;          // VLAN not created on the switch: port inactive
+  if (stormOn(p.sw)) return ENVS.none;                          // broadcast storm: nothing gets through
+  if (!uplinkCarries(p.sw, p.port.vlan)) return ENVS.none;      // routers live behind the MDF
   return Object.values(ENVS).find(e => e.vlan === p.port.vlan && !e.wireless) ?? ENVS.none;
 }
 /** Legacy name kept for callers that only need the default segment. */
@@ -127,8 +185,9 @@ export function adapterOf(pc: string) { return ADAPTERS.get(pc) ?? newAdapter(pc
 /** Physical layer: is there a link light on the NIC? */
 export function linkUp(a: Adapter) {
   if (isWireless(a.pc)) return true;
-  const p = PORT_OF.get(a.pc);
-  return a.cable && !a.broken && !(p && p.port.shutdown);
+  if (!PANEL_OF.has(a.pc)) return a.cable && !a.broken;
+  const p = portOf(a.pc);
+  return a.cable && !a.broken && !!p && !p.port.shutdown;
 }
 /** Media state as Windows reports it (link + adapter enabled). */
 export const mediaOk = (a: Adapter) => linkUp(a);

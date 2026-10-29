@@ -24,7 +24,8 @@ const getTools = async () => {
   await K(() => window.__kota.noc.closeModal());
 };
 const consoleTo = async (sw, lines) => {
-  console.log('  rack hint:', await goAnchor('RACKP'));
+  if (sw === 'SW-L1') { console.log('  rack hint:', await goAnchor('RACKP')); }
+  else { const id = `IDF-${sw.slice(3)}`; const d = await K(i => window.__kota.idfs().find(x => x.id === i), id); await Q.go(d.x, d.z, d.level); console.log('  rack', await K(() => window.__kota.nearRack())); }
   await press('f');
   if (!(await mclick(`console-${sw}`))) console.log('  !! no console button');
   await p.waitForTimeout(150); await p.click('.swcli .swin');
@@ -178,7 +179,7 @@ for (const ph of phases) {
       console.log('  v4b', (await verify(T[3].pc))?.slice(-120).replace(/\n+/g, ' / ')); await report('vlan');
       await shot('jobs_shift_end'); console.log('  end board:', (await modalText())?.slice(0, 300));
     }
-  } catch (e) { console.log(`!! ${ph} failed:`, e.message.slice(0, 300)); await shot(`jobs_fail_${ph}`); }
+  } catch (e) { console.log(`!! ${ph} failed:`, e.message.slice(0, 300)); await shot(`jobs_fail_${ph}`); await K(() => { const n = window.__kota.noc; for (const j of n.jobs) j.status = 'closed'; n.mode = 'idle'; n.jobs = []; n.closeModal(); }); }
 }
 console.log('\nSUMMARY', JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, (v ?? '').match(/Laporan kerja \S+ ([★☆]+)/)?.[1] ?? 'no-report']))));
 console.log('noc', JSON.stringify(await K(() => ({ xp: window.__kota.noc.xp, rank: window.__kota.noc.rank(), mode: window.__kota.noc.mode }))));

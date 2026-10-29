@@ -1,6 +1,6 @@
 // Console session to a floor switch (Cisco IOS-like subset) shown on the technician laptop.
 // Every command changes the shared switch state in net.ts, so the PCs feel it immediately.
-import { SWITCHES, ADAPTERS, portName, linkUp, bounce, type Switch, type Port } from './net';
+import { SWITCHES, ADAPTERS, portName, linkUp, bounce, stormOn, type Switch, type Port } from './net';
 
 type Mode = 'user' | 'priv' | 'config' | 'if' | 'vlan';
 const el = (tag: string, cls = '', txt = '') => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt) e.textContent = txt; return e; };
@@ -46,12 +46,20 @@ export class SwitchCli {
     const v = this.input.value; this.input.value = '';
     if (!this.started) { this.started = true; this.print('\n'); this.setPrompt(); return; }
     this.print(`${this.prompt()}${v}\n`);
-    if (v.trim()) { this.hist.push(v); this.hi = this.hist.length; this.exec(v.trim()); this.onCmd(v.trim(), this.sw); }
+    if (v.trim()) { this.hist.push(v); this.hi = this.hist.length; this.exec(v.trim()); this.onCmd(v.trim(), this.sw); this.flap(); }
     this.setPrompt();
   }
   /** Run a command as if typed (QA hooks use the same path). */
   type(v: string) { this.input.value = v; this.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); }
 
+  /** A loop makes the switch log MAC flapping (as IOS does) between the two looped ports. */
+  private flap() {
+    if (!stormOn(this.sw)) return;
+    const pcs = this.sw.ports.filter(p => p.pc).slice(0, 2);
+    const [a, b] = this.sw.loop!;
+    for (const p of pcs) { const m = (ADAPTERS.get(p.pc!)?.mac ?? '0000.0000.0000').replace(/-/g, ''); this.print(`%SW_MATM-4-MACFLAP_NOTIF: Host ${m.slice(0, 4)}.${m.slice(4, 8)}.${m.slice(8)} in vlan ${p.vlan} is flapping between port ${portName(a)} and port ${portName(b)}\n`); }
+  }
+  private up(p: Port) { return p === this.sw.upPort; }
   private bad(tok?: string) { this.print(`% Invalid input detected at '^' marker.${tok ? `  (${tok})` : ''}\n\n`); }
   private incomplete() { this.print('% Incomplete command.\n\n'); }
 
@@ -61,6 +69,7 @@ export class SwitchCli {
     const m = /^1\/0\/(\d+)(?:-(\d+))?$/.exec(s);
     if (!m) return null;
     const a = +m[1], b = m[2] ? +m[2] : a;
+    if (a === 49 && b === 49 && this.sw.uplink) return [this.sw.upPort];
     if (a < 1 || b > this.sw.ports.length || b < a) return null;
     return this.sw.ports.slice(a - 1, b);
   }
@@ -113,11 +122,29 @@ export class SwitchCli {
             p.shutdown = false;
             const a = p.pc ? ADAPTERS.get(p.pc) : undefined;
             if (a) bounce(a);
-            const up = !!a && linkUp(a) && a.enabled;
+            const up = this.up(p) ? this.sw.uplink!.cable : this.sw.loop?.includes(p.n) ? true : !!a && linkUp(a) && a.enabled;
             this.print(`%LINK-3-UPDOWN: Interface ${portName(p.n)}, changed state to ${up ? 'up' : 'down'}\n`);
             if (up) this.print(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${portName(p.n)}, changed state to up\n`);
           }
           this.sw.dirty = true; return;
+        }
+        if (kw(t[0], 'switchport', 2) && this.ifs.some(p => this.up(p))) {
+          const U = this.sw.uplink!;
+          if (kw(t[1], 'mode', 2)) { if (!t[2]) return this.incomplete(); if (!kw(t[2], 'trunk', 2)) { this.print('% Gi1/0/49 adalah uplink ke MDF: harus "switchport mode trunk" (membawa banyak VLAN).\n'); return; } return; }
+          if (kw(t[1], 'access', 2)) { this.print('% Uplink membawa banyak VLAN (trunk 802.1Q). Pakai "switchport trunk allowed vlan ...".\n'); return; }
+          if (kw(t[1], 'trunk', 2) && kw(t[2], 'allowed', 2) && kw(t[3], 'vlan', 2)) {
+            const arg = t[4]?.toLowerCase(); if (!arg) return this.incomplete();
+            const list = (x: string | undefined) => { if (!x) return null; const out: number[] = []; for (const part of x.split(',')) { const r = /^(\d+)(?:-(\d+))?$/.exec(part); if (!r) return null; const a = +r[1], b = r[2] ? +r[2] : a; if (a < 1 || b > 4094 || b < a) return null; for (let k = a; k <= b; k++) out.push(k); } return out; };
+            const cur = U.allowed ?? [];
+            if (kw(arg, 'all', 2)) U.allowed = null;
+            else if (kw(arg, 'none', 2)) U.allowed = [];
+            else if (kw(arg, 'add', 2)) { const l = list(t[5]); if (!l) return this.bad(t[5]); if (U.allowed) U.allowed = [...new Set([...cur, ...l])].sort((a, b) => a - b); }
+            else if (kw(arg, 'remove', 2)) { const l = list(t[5]); if (!l) return this.bad(t[5]); const base = U.allowed ?? Array.from({ length: 4094 }, (_, i) => i + 1); U.allowed = base.filter(v => !l.includes(v)); }
+            else if (kw(arg, 'except', 2)) { const l = list(t[5]); if (!l) return this.bad(t[5]); U.allowed = Array.from({ length: 4094 }, (_, i) => i + 1).filter(v => !l.includes(v)); }
+            else { const l = list(t[4]); if (!l) return this.bad(t[4]); U.allowed = [...new Set(l)].sort((a, b) => a - b); }
+            this.sw.dirty = true; return;
+          }
+          return this.bad(t[1]);
         }
         if (kw(t[0], 'switchport', 2)) {
           if (kw(t[1], 'mode', 2)) { if (!t[2]) return this.incomplete(); if (!kw(t[2], 'access', 2)) { this.print('% Port akses ke PC: gunakan "switchport mode access". Trunk hanya untuk uplink.\n'); return; } return; }
@@ -149,6 +176,8 @@ export class SwitchCli {
 
   private status(p: Port) {
     if (p.shutdown) return 'disabled';
+    if (this.up(p)) return this.sw.uplink!.cable ? 'connected' : 'notconnect';
+    if (this.sw.loop?.includes(p.n)) return 'connected';
     const a = p.pc ? ADAPTERS.get(p.pc) : undefined;
     if (!a || !a.cable || a.broken) return 'notconnect';
     if (!this.sw.vlans.has(p.vlan)) return 'inactive';
@@ -160,12 +189,23 @@ export class SwitchCli {
     if (kw(t[0], 'interfaces', 2) && (kw(t[1], 'status', 2))) {
       let s = 'Port      Name               Status       Vlan       Duplex  Speed Type\n';
       for (const p of sw.ports) { const st = this.status(p); s += `${portName(p.n).padEnd(10)}${p.desc.slice(0, 18).padEnd(19)}${st.padEnd(13)}${String(p.vlan).padEnd(11)}${(st === 'connected' ? 'a-full' : 'auto').padEnd(8)}${(st === 'connected' ? 'a-1000' : 'auto').padEnd(6)}10/100/1000BaseTX\n`; }
+      if (sw.uplink) { const st = this.status(sw.upPort); s += `${portName(49).padEnd(10)}${sw.upPort.desc.padEnd(19)}${st.padEnd(13)}${'trunk'.padEnd(11)}${(st === 'connected' ? 'full' : 'auto').padEnd(8)}${(st === 'connected' ? '1000' : 'auto').padEnd(6)}1000BaseLX SFP\n`; }
       this.print(s + '\n'); return;
+    }
+    if (kw(t[0], 'interfaces', 2) && kw(t[1], 'trunk', 2)) {
+      if (!sw.uplink) { this.print('\n% Switch inti (MDF): trunk ke IDF ada di modul fiber, tidak dikonfigurasi dari sini.\n\n'); return; }
+      const st = this.status(sw.upPort) === 'connected';
+      if (!st) { this.print('\n'); return; }
+      const al = sw.uplink.allowed === null ? '1-4094' : sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none';
+      const act = [...sw.vlans.keys()].filter(v => sw.uplink!.allowed === null || sw.uplink!.allowed.includes(v)).sort((a, b) => a - b).join(',') || 'none';
+      this.print(`\nPort        Mode         Encapsulation  Status        Native vlan\nGi1/0/49    on           802.1q         trunking      1\n\nPort        Vlans allowed on trunk\nGi1/0/49    ${al}\n\nPort        Vlans allowed and active in management domain\nGi1/0/49    ${act}\n\n`);
+      return;
     }
     if (kw(t[0], 'interfaces', 2) && t[1]) {
       const p = this.parseIf(t.slice(1).filter(x => !kw(x, 'switchport', 2)));
       if (!p || p.length !== 1) return this.bad(t.slice(1).join(' '));
       const q = p[0], st = this.status(q);
+      if (this.up(q)) { this.print(`GigabitEthernet1/0/49 is ${q.shutdown ? 'administratively down' : st === 'connected' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : `down (${st})`}\n  Description: ${q.desc}\n  Hardware is Gigabit Ethernet SFP (1000BaseLX, fiber) · Administrative Mode: trunk\n\n`); return; }
       this.print(`${portName(q.n).replace('Gi', 'GigabitEthernet')} is ${q.shutdown ? 'administratively down' : st === 'connected' || st === 'inactive' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : st === 'inactive' ? 'up (inactive)' : `down (${st})`}\n  Description: ${q.desc}\n  Switchport: Enabled · Administrative Mode: static access · Access Mode VLAN: ${q.vlan} (${sw.vlans.get(q.vlan) ?? 'Inactive'})\n\n`);
       return;
     }
@@ -191,10 +231,11 @@ export class SwitchCli {
       let s = `Building configuration...\n\nCurrent configuration:\n!\nhostname ${sw.name}\n!\n`;
       for (const [id, name] of sw.vlans) if (id !== 1) s += `vlan ${id}\n name ${name}\n!\n`;
       for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
+      if (sw.uplink) { s += `interface GigabitEthernet1/0/49\n description ${sw.upPort.desc}\n switchport mode trunk\n`; if (sw.uplink.allowed) s += ` switchport trunk allowed vlan ${sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none'}\n`; if (sw.upPort.shutdown) s += ' shutdown\n'; s += '!\n'; }
       s += `interface Vlan1\n ip address ${sw.ip} 255.255.255.0\n!\nend\n`;
       this.print(s + '\n'); return;
     }
-    if (kw(t[0], 'version', 2)) { this.print(`Nusa IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E8\n${sw.name} uptime is 41 days, 3 hours\n48 Gigabit Ethernet interfaces\n\n`); return; }
+    if (kw(t[0], 'version', 2)) { this.print(`Nusa IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E8\n${sw.name} uptime is 41 days, 3 hours\n48 Gigabit Ethernet interfaces, 4 SFP uplink ports\n\n`); return; }
     if (kw(t[0], 'ip', 2)) { this.print(`Interface              IP-Address      OK? Method Status                Protocol\nVlan1                  ${sw.ip.padEnd(16)}YES NVRAM  up                    up\n\n`); return; }
     this.bad(t[0]);
   }

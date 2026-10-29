@@ -56,10 +56,10 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | Shift | Lari |
 | Spasi | Lompat (bisa juga jatuh dari pinggiran) |
 | V | Ganti kamera orang pertama / orang ketiga (avatar siswa terlihat) |
-| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak switch (Ruang Server), Papan kerja (meja NOC) |
+| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak MDF (Ruang Server L1), Rak IDF (ruang IDF L2/L3), Papan kerja (meja NOC) |
 | E / Q | Naik/turun di lift atau tangga (animasi perjalanan + indikator lantai) |
 | T | Papan kerja NOC: ambil surat kerja, mulai shift, lacak pekerjaan |
-| C | Cek fisik kabel di PC (konektor, LED link, LAN tester, ganti/pasang patch cord) |
+| C | Cek fisik di meja: konektor, LED link, LAN tester, patch cord, pasang toner di outlet, tempel label outlet |
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
 | G atau `?low` | Mode grafis ringan |
@@ -104,12 +104,12 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 | Surat kerja | Yang dikerjakan pemain | Terbuka |
 |---|---|---|
 | Pasang IP Statis | Isi IPv4 statis persis surat kerja di 2–3 PC, uji dari tiap PC | Magang |
-| Sambungkan Meja Baru | Ambil patch cord + console + laptop di Lemari Alat, pasang patch cord di PC, `no shutdown` (dan VLAN yang benar) di switch lewat console, uji DHCP | Magang |
+| Sambungkan Meja Baru | Pasang patch cord di meja, pasang toner di outlet tanpa label, sapu probe di patch panel rak lantai itu, patch ke port switch di surat kerja, `switchport access vlan` + `no shutdown` lewat console, tempel label outlet, uji DHCP | Magang |
 | Nama untuk Server Intranet | Tambah record DNS di router (WebKonfig), perbaiki PC yang memakai DNS publik, buka nama itu di browser | Teknisi Junior |
 | Pasang Router Baru & DHCP | Router setelan pabrik 192.168.88.1: IP statis sementara di PC, ganti alamat LAN (koneksi putus!), pindah subnet, atur DHCP & DNS, kembalikan PC ke DHCP, renew, uji | Teknisi Junior |
 | Pindahkan Meja ke VLAN Kasir | `vlan 30` / `name KASIR` / `switchport access vlan 30` di switch lantai, renew, buka server POS 192.168.30.10 | Teknisi |
 
-**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
+**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
 
 **Aturan dunia nyata**
 - Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak switch di Ruang Server L1. Penanda hanya menunjuk arah.
@@ -121,6 +121,13 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
 - Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
 - Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang → Teknisi Junior → Teknisi → Network Engineer tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
+
+### Pengkabelan terstruktur (TIA-568)
+- Meja → patch cord → outlet dinding → kabel horizontal → patch panel di rak lantai → patch cord → port switch. Nomor outlet = nomor port patch panel (contoh `L2-07`); nomor port switch berbeda, seperti di gedung nyata. Tiap 4 outlet ada 1 outlet cadangan.
+- Rak MDF di ruang server L1 (SW-L1, inti). Rak IDF di ruang IDF L2 dan L3 (SW-L2, SW-L3), uplink fiber Gi1/0/49 (trunk 802.1Q) ke MDF.
+- Rak: patch panel 48 port + switch 48 port bisa diklik. Klik port patch panel lalu port switch untuk memasang patch cord; cabut patch cord; cabut kabel loop; pasang ulang fiber uplink.
+- Toner + probe: pasang toner di outlet meja, nyalakan probe di rak, sapu port patch panel. Port yang benar berbunyi keras, port sebelahnya samar (induksi), dan nadanya melemah kalau port itu sudah tersambung ke port switch yang aktif.
+- Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop.
 
 ### Kamera, gerak, grafik
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.

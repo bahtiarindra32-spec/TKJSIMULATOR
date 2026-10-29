@@ -15,7 +15,7 @@ import { Signals, Traffic, Pedestrians } from './game/traffic';
 import { MISSIONS } from './game/missions';
 import * as ND from './assets/netdevices';
 import { hotelAnchorsWorld } from './game/missionSystem';
-import { initSwitches, portOf } from './pcos/net';
+import { initSwitches, portOf, panelOf } from './pcos/net';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
 
 import { buildWayfinding } from './world/wayfinding';
@@ -72,7 +72,9 @@ const pcos = new PcOS();
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));
-const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET);
+// IDF wall racks of the office floors (one access switch + patch panel each); the player stands in front of them
+const IDFS = [2, 3].map(lv => { const o = hotel.getObjectByName(`PROP_L${lv}_IDF_RACK_01`); const c = o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : new THREE.Vector3(); return { id: `IDF-L${lv}`, level: lv, x: c.x, y: c.y, z: c.z - 0.9 }; });
+const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET, IDFS);
 const { tls } = buildStreetProps(world);
 buildWayfinding(world);
 dressL1(hotel);
@@ -298,6 +300,8 @@ let camDist = 2;
 pcos.onClose = () => { keys.clear(); last = performance.now(); };
 function interact() {
   if (uiBlocked()) return;
+  const rk = nearRack();
+  if (rk && rk !== 'MDF' && !nearPc) { keys.clear(); noc.openRack(rk); return; }
   const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y);
   if (door && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
   if (!nearAnchor && nearPc) { keys.clear(); if (document.pointerLockElement) document.exitPointerLock(); pcos.open(nearPc.name, nearPc.label); return; }
@@ -320,7 +324,11 @@ composer.addPass(gtao); composer.addPass(new OutputPass());
 let quality = window.innerWidth > 720 && !new URLSearchParams(location.search).has('low');
 function setQuality(q: boolean) { quality = q; toast(q ? 'Grafik: Tinggi (AO aktif)' : 'Grafik: Ringan'); }
 
-function nearRack() { return player.level === 1 && Math.hypot(player.pos.x - RACK.x, player.pos.z - RACK.z) < 2.2; }
+function nearRack(): string | null {
+  if (player.level === 1 && Math.hypot(player.pos.x - RACK.x, player.pos.z - RACK.z) < 2.2) return 'MDF';
+  for (const d of IDFS) if (player.level === d.level && Math.hypot(player.pos.x - d.x, player.pos.z - (d.z + 0.9)) < 2.2) return d.id;
+  return null;
+}
 function updateWalk(dt: number) {
   const run = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.2 : 1;
   if (keys.has('ArrowLeft')) player.yaw += 1.8 * dt; if (keys.has('ArrowRight')) player.yaw -= 1.8 * dt;
@@ -536,6 +544,8 @@ requestAnimationFrame(() => { frame(); const l = $('loading'); l.style.opacity =
     return `opened=${o1.toFixed(2)} closed=${d.open.toFixed(2)} total=${(window as any).__doorCount ?? '?'}`;
   },
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
+  panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
+  nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
   noc, missions, pcos, pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: walkability grid of a hotel level (local metres, -1..31 x -1..21). 0 blocked, 1 standable+reachable from seed, 2 standable but unreachable */
