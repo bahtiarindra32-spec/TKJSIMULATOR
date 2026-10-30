@@ -56,16 +56,22 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | W A S D / panah | Jalan dan menoleh (gerak dan tolehan halus, dengan akselerasi) |
 | Mouse | Menoleh |
 | Shift | Lari |
-| Spasi | Lompat (bisa juga jatuh dari pinggiran) |
+| Spasi | Lompat (bisa juga jatuh dari pinggiran). Saat jongkok: berdiri. Saat naik motor: rem belakang |
+| X | Jongkok / berdiri (C sudah dipakai untuk Cek, Z untuk zona). Jalan pelan ±1,1 m/s, tidak bisa lari; tidak bisa berdiri kalau ada halangan di atas kepala |
 | V | Ganti kamera orang pertama / orang ketiga (avatar siswa terlihat) |
 | F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak MDF (Ruang Server L1), Rak IDF (ruang IDF L2/L3), Papan kerja (meja NOC), Rak 1 router edge, Rak 2 server Linux, Rak 3 NAS, panel printer, telepon IP |
+| F (dekat motor) | Naik motor / turun (kalau masih melaju, motor direm otomatis dulu, lalu pemain turun di sisi yang kosong) |
 | E / Q | Di pintu tangga: naik/turun satu lantai. Di pintu lift: panel lift (tombol 1–8 atau ketuk lantai, E/Q satu lantai, Esc batal) |
 | T | Papan kerja NOC: ambil surat kerja, mulai shift, lacak pekerjaan |
 | C | Cek fisik di meja: konektor, LED link, LAN tester, patch cord, pasang toner di outlet, tempel label outlet |
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
 | G / tombol Grafik | Ganti kualitas: Tinggi, Sedang, Rendah, Hemat. `?low` atau perangkat sentuh mulai dari Rendah, `?q=hemat` memaksa level |
-| Esc | Keluar dari mode jalan / tutup jendela |
+| Esc | Keluar dari mode jalan / tutup jendela (kalau sedang naik motor, motor diparkir di tempat) |
+
+**Saat naik Motor Matic:** W / ↑ gas · S / ↓ rem, kalau sudah berhenti tahan untuk mundur pelan · A / D (← / →) belok · Spasi rem belakang · mouse atau tarik layar untuk melihat sekeliling (kembali ke tengah sendiri saat melaju) · V kamera kejar / mata pengendara · F turun · R kembalikan motor ke jalan terdekat.
+
+**Sentuh:** tombol Jongkok di kanan bawah. Saat naik motor: joystick kiri = belok + gas (dorong ke atas) / rem-mundur (tarik ke bawah), tombol Gas, Rem, Turun, Reset. Melepas joystick atau menggeser jari keluar dari tombol Gas langsung menghentikan gas. Saat jendela kehilangan fokus semua tombol dilepas.
 
 ## 5. Yang sudah dibuat ✅
 
@@ -153,6 +159,13 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Tiket: ISP1 putus dengan failover salah (route utama tanpa track, route cadangan hilang, atau NAT keluar Gi0/1 belum ada), NAT tidak mencakup segmen, ACL memblok segmen/DNS.
 - Semua tiket baru di atas hanya tertutup kalau akar masalahnya benar-benar beres di simulasi **dan** pemain menguji dari klien (browser intranet, cetak uji, panggilan telepon, `net use`, ping/situs).
 
+### Jongkok & Motor Matic (30 Okt 2026)
+- ✅ Jongkok (X / tombol Jongkok): mata turun halus 1,62 → 1,05 m, kapsul tabrakan 1,75 → 1,25 m, jalan jongkok ±1,1 m/s, pose jongkok + jalan jongkok di kamera orang ketiga. Cek plafon sebelum berdiri. Otomatis berdiri saat duduk di PC, naik tangga/lift, atau naik motor. Meja kantor (daun meja) sekarang padat: tidak bisa ditembus berdiri maupun jongkok (tinggi meja 0,76 m < tinggi jongkok).
+- ✅ Motor Matic (`src/game/motor.ts`, model di `src/assets/vehicles.ts`): skuter matic 1:1 (panjang 1,86 m, jarak sumbu roda 1,26 m, jok 0,74–0,80 m) prosedural, tanpa merek. Setang + spakbor depan + roda depan berbelok di sumbu kemudi, standar samping saat parkir, lampu rem menyala saat mengerem, pelat nomor, roda berputar.
+- ✅ Diparkir di: `PROP_MOTOR_01–03` di deretan parkir motor depan hotel (X 241,5–243,5 · Z 165, dekat spawn) dan `PROP_MOTOR_04–05` di parkir mobil hotel (X 276,5 / 277,7 · Z 199,5).
+- ✅ Fisika arcade yang masuk akal: akselerasi menurun mendekati 85 km/j, rem ±7 m/s², mundur pelan 1,3 m/s, sudut belok dibatasi kecepatan, motor miring saat menikung sesuai kecepatan, mengikuti tinggi aspal/kerb/trotoar (naik kerb ≤ 22 cm), tabrakan dengan gedung/properti/kendaraan/pejalan kaki/motor lain dengan sub-step (tidak tembus di 85 km/j), tidak bisa masuk hotel/tangga JPO, pemulihan otomatis kalau terjepit, R = kembali ke jalan terdekat. Spidometer, suara mesin hasil Web Audio (tanpa file).
+- ✅ Saat naik motor: interaksi PC/rak/tangga/cek dimatikan, pemain duduk dengan tangan di setang (ikut berbelok) dan kaki kiri turun saat berhenti.
+
 ### Kamera, gerak, grafik
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
 - ✅ Kolisi otomatis untuk semua mesh padat ≥ 25 cm (audit: 76 gedung kota dan 30 properti jalan tertutup kolider).
@@ -181,7 +194,7 @@ kota-nusantara/
 │  ├─ data/city.ts           semua koordinat jalan, zona, gedung, level hotel, anchor, spawn
 │  ├─ world/                 core, roads, buildings, hotel, props, wayfinding, interiorDressing
 │  ├─ assets/                netdevices, vehicles, people
-│  ├─ game/                  physics, traffic, missionSystem, missionLogic, missions, missionsF
+│  ├─ game/                  physics, traffic, motor (Motor Matic), missionSystem, missionLogic, missions, missionsF
 │  ├─ ui/                    minimap, missionUI, waypoint, mission.css
 │  └─ pcos/                  net.ts (simulasi jaringan), os.ts (Jendela 11), switchcli.ts, wifi.ts,
 │                            linux.ts (srv-nusa), office.ts (printer/telepon/NAS), edge.ts (R-EDGE), term.ts, ext.ts
@@ -197,7 +210,11 @@ kota-nusantara/
 Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordinat tabel PDF).
 Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
 
-## 8. Validasi terakhir (30 Okt 2026)
+## 8. Validasi terakhir (30 Okt 2026, jongkok + motor)
+- `tools/qa/qa_motor.mjs` (keyboard nyata + emulasi sentuh) dan `tools/qa/qa_crouch.mjs`: naik/turun 6×, lari penuh di Jl. Kebon Jeruk, belok kiri/kanan, mundur, 85 km/j ke tembok menara/hotel/median dengan dt 1/30 dan 1/10 (tidak tembus), menabrak mobil dari belakang, naik/turun kerb, mencoba masuk pintu lobi, turun di samping tembok, kamera 1/3, modal/pause, kehilangan fokus, Esc, terjepit, joystick dilepas. Jongkok: kecepatan, kamera, meja, plafon, duduk di PC, tangga, lift, lompat, naik motor.
+- Regresi: `qa_v6` (lift memakai panel v8), `qa_v8a`, `qa_hotel walk/cam`, `qa_mobile land/port`, `qa_tutor` lolos.
+
+## 8b. Validasi 30 Okt 2026 (pagi)
 - Playwright + SwiftShader, input nyata: `qa_tutor` (tutorial selesai ★★★, petunjuk muncul saat diam/macet), `qa_linux` (ssh, layanan mati, zone, scope DHCP), `qa_office` (printer, telepon, NAS), `qa_edge` (ISP1 failover, NAT, ACL), `qa_v8a` (tangga, lift 1→8→1), `qa_wifi`, `qa_v6`, `qa_mobile` (joystick, tombol F, panel lift disentuh), `qa_jobs` (static, dns). Tanpa page error.
 - Performa (844×390, DPR 2, CPU 4× lebih lambat, SwiftShader tanpa GPU): jalan depan hotel 4542 → 851 draw call, 4,18 → 0,90 juta segitiga; lobi 4163 → 590 draw call. Angka FPS SwiftShader (0,38 → 1,0) hanya untuk perbandingan, bukan FPS HP asli.
 

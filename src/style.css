@@ -124,3 +124,14 @@ body.touch #liftpanel .lp-f { max-width: 230px; }
 .phone-scr .dial { font-size: 18px; letter-spacing: 2px; margin-top: 4px; }
 .phone-pad { display: grid; grid-template-columns: repeat(3, 54px); gap: 6px; margin: 6px 0; }
 .phone-pad .btn { height: 40px; font-size: 16px; }
+/* Motor Matic speedometer (only while riding) */
+#speedo { position: fixed; right: 22px; bottom: 128px; display: none; align-items: center; gap: 12px; padding: 8px 14px; background: rgba(10,14,18,.62); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; color: #f4f6f8; font: 600 12px system-ui, sans-serif; z-index: 30; pointer-events: none; backdrop-filter: blur(6px); }
+#speedo.on { display: flex; }
+#speedo .sp-v b { font: 800 30px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; min-width: 2.2ch; display: inline-block; text-align: right; }
+#speedo .sp-v small { margin-left: 4px; opacity: .75; }
+#speedo .sp-bar { width: 120px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
+#speedo .sp-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2bd46b, #ffd400 70%, #ff5a36); }
+#speedo .sp-g { min-width: 34px; text-align: center; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,.12); font-weight: 800; }
+body.touch #speedo { bottom: auto; right: auto; top: calc(10px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); padding: 6px 10px; }
+body.touch #speedo .sp-v b { font-size: 22px; }
+body.touch #speedo .sp-bar { width: 70px; }

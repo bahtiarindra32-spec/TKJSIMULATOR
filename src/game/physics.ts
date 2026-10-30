@@ -39,7 +39,7 @@ export function buildAutoColliders(root: THREE.Object3D) {
           if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
           box.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld);
           const h = box.max.y - box.min.y, w = box.max.x - box.min.x, d = box.max.z - box.min.z;
-          if (h >= 0.25 && Math.max(w, d) < 160 && box.min.y < 40) {
+          if ((h >= 0.25 || o.userData.slab) && Math.max(w, d) < 160 && box.min.y < 40) {
             colliders.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, minY: box.min.y, maxY: box.max.y }); added++;
           }
         }
@@ -61,10 +61,13 @@ function query(x: number, z: number) {
   return near;
 }
 
-export function resolveCircle(p: THREE.Vector3, feet: number, radius: number, extra: AABB[] = []) {
+/** static colliders in the 3x3 grid cells around a point (shared array: copy before the next call) */
+export function queryColliders(x: number, z: number) { return query(x, z); }
+/** push a circle out of every collider in its height band. top = body height above the feet (1.75 standing, less crouched) */
+export function resolveCircle(p: THREE.Vector3, feet: number, radius: number, extra: AABB[] = [], top = 1.75) {
   const list = query(p.x, p.z);
   for (let pass = 0; pass < 2; pass++) for (const c of pass ? extra : list) {
-    if (c.maxY < feet + 0.35 || c.minY > feet + 1.75) continue;
+    if (c.maxY < feet + 0.35 || c.minY > feet + top) continue;
     const nx = Math.min(Math.max(p.x, c.minX), c.maxX), nz = Math.min(Math.max(p.z, c.minZ), c.maxZ);
     const dx = p.x - nx, dz = p.z - nz, d2 = dx * dx + dz * dz;
     if (d2 >= radius * radius) continue;

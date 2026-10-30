@@ -5,8 +5,10 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { ZONES, ROADS, ROAD_SPEC, LEVELS, SPAWN, ANCHORS, HOTEL_ORIGIN, wx, wz } from './data/city';
 import { colliders, bakeStatic, setBakedVisible, type AABB } from './world/core';
-import { buildAutoColliders, buildGrid, resolveCircle, blocked } from './game/physics';
-import { createPerson, randomSpec, walkPose, idlePose, typingPose, WALK_STRIDE } from './assets/people';
+import { buildAutoColliders, buildGrid, resolveCircle, blocked, queryColliders } from './game/physics';
+import { Motors, buildGroundBoxes, VMAX, type Bike } from './game/motor';
+import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS } from './assets/vehicles';
+import { createPerson, randomSpec, walkPose, idlePose, typingPose, crouchPose, ridePose, WALK_STRIDE } from './assets/people';
 import { buildRoads } from './world/roads';
 import { buildGround, buildCity } from './world/buildings';
 import { buildHotel, updateDoors, closedDoorBoxes, nearestDoor, toggleDoor, blinkMaterials, insideHotel, zoneAt, verticalZones } from './world/hotel';
@@ -28,7 +30,7 @@ import { dressL1, l1Lights } from './world/interiorDressing';
 import { Minimap } from './ui/minimap';
 import { PcOS } from './pcos/os';
 import { Noc } from './game/noc';
-import { setupTouch, touch, isTouch } from './ui/touch';
+import { setupTouch, touch, isTouch, releaseTouch } from './ui/touch';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -119,6 +121,17 @@ const missionUI = { setHudVisible: (_v: boolean) => {} };
 const waypoint = createWaypoint();
 const missionMarker = createAnchorMarker(); gameLayer.add(missionMarker.group);
 buildAutoColliders(world); buildGrid();
+// rideable Motor Matic: flat ground boxes (asphalt 0.02, kerbs 0.17, sidewalks 0.15, parking slabs) + bike-only walls
+const motors = new Motors(gameLayer);
+buildGroundBoxes(['FASE_A_JALAN', 'FASE_B_TANAH_ZONA', 'FASE_E_PROPERTI_JALAN', 'PARKIR_MOTOR_01'].map(n => world.getObjectByName(n)!).filter(Boolean), o => o.name === 'JPO_01' || o.name === 'ZONE_OVERLAY');
+{
+  const hb = { x0: wx(HOTEL_ORIGIN[0]), x1: wx(HOTEL_ORIGIN[0] + 30), z0: wz(HOTEL_ORIGIN[1]), z1: wz(HOTEL_ORIGIN[1] + 20) };
+  motors.walls.push({ minX: hb.x0 - 0.1, maxX: hb.x1 + 0.1, minZ: hb.z0 - 0.1, maxZ: hb.z1 + 0.1, minY: -1, maxY: 40 }); // no riding into the hotel (lobby, lift, stairs)
+  const jpo = world.getObjectByName('JPO_01');
+  for (const st of jpo?.children ?? []) { const q = st.userData.stair; if (q) motors.walls.push({ minX: q.x0, maxX: q.x1, minZ: q.z0, maxZ: q.z1, minY: -1, maxY: 8 }); }
+  for (const w of [[-210, -199.5, -160, 160], [199.5, 210, -160, 160], [-210, 210, -160, -149.5], [-210, 210, 149.5, 160]]) motors.walls.push({ minX: w[0], maxX: w[1], minZ: w[2], maxZ: w[3], minY: -1, maxY: 40 });
+}
+motors.settle();
 const zoneOverlay = world.getObjectByName('ZONE_OVERLAY')!;
 // render batches: one per region; hotel per level so the cutaway can hide upper floors
 const batches = new THREE.Group(); batches.name = 'RENDER_BATCHES'; scene.add(batches);
@@ -188,6 +201,15 @@ const avatar = createPerson(randomSpec(() => 0.42, 'student_m'));
 avatar.root.name = 'PLAYER_AVATAR'; avatar.root.visible = false;
 avatar.root.traverse(o => { (o as THREE.Mesh).frustumCulled = false; }); scene.add(avatar.root);
 const keys = new Set<string>();
+/** crouch (jongkok): X toggles; k eases 0 (standing) .. 1 (crouched) for camera height, speed and pose */
+const crouch = { on: false, k: 0 };
+const CROUCH_TOP = 1.25, STAND_TOP = 1.75, EYE_STAND = 1.62, EYE_CROUCH = 1.05;
+/** the Motor Matic the player is riding (null = on foot) */
+let riding: Bike | null = null;
+let mountT = 1, wantDismount = false, chaseYaw = 0, camDistR = 4, rideShake = 0, hitToastT = 0;
+const rideLook = { yaw: 0, pitch: -0.16, idle: 0 };
+const WALK_HINTS = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · X jongkok · V kamera · F interaksi · T papan kerja · C cek fisik · R Wi-Fi analyzer · E/Q tangga/lift · M peta · Esc keluar';
+const RIDE_HINTS = 'W gas · S rem / mundur pelan · A/D belok · Spasi rem belakang · Mouse lihat sekeliling · V kamera · F turun · R kembalikan ke jalan · Esc keluar';
 missions.onModalChange(open => { if (open) keys.clear(); });
 noc.toast = (s, ms) => toast(s, ms);
 noc.onModal(open => { if (open) keys.clear(); else last = performance.now(); });
@@ -195,7 +217,8 @@ const uiBlocked = () => missions.isModalOpen() || pcos.isOpen() || noc.isModalOp
 function enterWalk() {
   mode = 'walk'; document.body.classList.add('entered'); document.body.classList.remove('viewing'); setCutaway(false); controls.enabled = false; tween = null;
   player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1;
-  $('hints').textContent = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · V kamera · F interaksi · T papan kerja · C cek fisik · R Wi-Fi analyzer · E/Q tangga/lift · M peta · Esc keluar';
+  riding = null; crouch.on = false; crouch.k = 0; document.body.classList.remove('riding', 'crouching');
+  $('hints').textContent = WALK_HINTS;
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
   if (!isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
   touchUi?.onEnter();
@@ -204,6 +227,8 @@ function enterWalk() {
   if (!QS.has('qa') || QS.has('tutor')) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
 }
 function exitWalk() {
+  if (riding) forceDismount();
+  crouch.on = false; crouch.k = 0; document.body.classList.remove('crouching');
   mode = 'orbit'; document.body.classList.remove('entered'); controls.enabled = true;
   $('hints').textContent = 'Klik/tarik untuk memutar · roda untuk zoom';
   if (document.pointerLockElement) document.exitPointerLock();
@@ -211,7 +236,11 @@ function exitWalk() {
   prompt.hide(); $('hudHint').textContent = '';   // the walk prompt ([F] Buka pintu…) used to stay on screen over the orbit views
 }
 $('enter').onclick = enterWalk;
-const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => { player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3); } });
+const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => lookBy(dx, dy) });
+function lookBy(dx: number, dy: number) {
+  if (riding) { rideLook.yaw -= dx * 0.0022; rideLook.pitch = THREE.MathUtils.clamp(rideLook.pitch - dy * 0.0022, -0.6, 0.45); rideLook.idle = 0; return; }
+  player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3);
+}
 $('btnBack').onclick = () => goView('overview');
 window.addEventListener('keydown', e => {
   if (pcos.isOpen() || noc.isModalOpen()) return;
@@ -222,15 +251,20 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyZ') toggleZones();
   if (e.code === 'KeyM' && mode === 'walk') minimap.toggle();
   if (e.code === 'KeyG') setQuality();
-  if (mode === 'walk' && (e.code === 'KeyE' || e.code === 'KeyQ')) changeFloor(e.code === 'KeyE' ? 1 : -1);
-  if (mode === 'walk' && e.code === 'KeyF') interact();
-  if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked()) noc.setAnalyzer(!noc.analyzerOn);
+  if (mode === 'walk' && (e.code === 'KeyE' || e.code === 'KeyQ') && !riding) changeFloor(e.code === 'KeyE' ? 1 : -1);
+  if (mode === 'walk' && e.code === 'KeyF' && !e.repeat) interact();
+  if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked() && !e.repeat) { if (riding) { motors.resetToRoad(riding, rideDyn(riding)); } else noc.setAnalyzer(!noc.analyzerOn); }
   if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) noc.openBoard();
-  if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen()) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
-  if (mode === 'walk' && e.code === 'Space') { e.preventDefault(); if (player.ground && !missions.isModalOpen()) { player.vy = 4.4; player.ground = false; } }
+  if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen() && !riding) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
+  if (mode === 'walk' && e.code === 'KeyX' && !e.repeat && !riding && !uiBlocked()) setCrouch(!crouch.on);
+  if (mode === 'walk' && e.code === 'Space') { e.preventDefault(); if (!riding && !missions.isModalOpen() && !e.repeat && crouch.on) setCrouch(false); else if (!riding && player.ground && !missions.isModalOpen() && !crouch.on) { player.vy = 4.4; player.ground = false; } }
   if (mode === 'walk' && e.code === 'KeyV') { thirdPerson = !thirdPerson; toast(thirdPerson ? 'Kamera orang ketiga (V untuk ganti)' : 'Kamera orang pertama (V untuk ganti)', 1800); }
 });
 window.addEventListener('keyup', e => keys.delete(e.code));
+// focus loss (alt-tab, notification, app switch): nothing may stay held, no throttle stuck open
+function releaseInput() { keys.clear(); releaseTouch(); drag = false; motors.engine.on = false; }
+window.addEventListener('blur', releaseInput);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
 renderer.domElement.addEventListener('click', () => { if (mode === 'walk' && !isTouch() && !uiBlocked() && !document.pointerLockElement) renderer.domElement.requestPointerLock?.(); });
 let drag = false, lx = 0, ly = 0;
 renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' && mode === 'walk') return; drag = true; lx = e.clientX; ly = e.clientY; });
@@ -241,7 +275,7 @@ window.addEventListener('pointermove', e => {
   let dx = 0, dy = 0;
   if (document.pointerLockElement) { dx = e.movementX; dy = e.movementY; } else if (drag) { dx = e.clientX - lx; dy = e.clientY - ly; lx = e.clientX; ly = e.clientY; }
   if (ride) return;
-  player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3);
+  lookBy(dx, dy);
 });
 
 const RADIUS = 0.32;
@@ -279,15 +313,57 @@ function collide(p: THREE.Vector3, feet: number) {
   }
   closedDoorBoxes(p.x, p.z, vehicleBoxes, feet);
   vertical.closedBoxes(player.level, vehicleBoxes);
-  resolveCircle(p, feet, RADIUS, vehicleBoxes);
+  for (const b of motors.bikes) if (!b.ridden && Math.abs(b.pos.x - p.x) < 6 && Math.abs(b.pos.z - p.z) < 6) motors.boxesOf(b, vehicleBoxes);
+  resolveCircle(p, feet, RADIUS, vehicleBoxes, crouch.on ? CROUCH_TOP : STAND_TOP);
 }
+/** traffic as solid boxes around a point */
+function trafficBoxes(x: number, z: number, range: number, out: AABB[]) {
+  for (const v of traffic.vehicles) {
+    const o = v.obj.position; if (Math.abs(o.x - x) > range || Math.abs(o.z - z) > range) continue;
+    const ew = v.lane.axis === 'EW', half = v.len / 2, w = v.len > 10 ? 1.3 : v.len < 2.5 ? 0.45 : 0.95;
+    out.push({ minX: o.x - (ew ? half : w), maxX: o.x + (ew ? half : w), minZ: o.z - (ew ? w : half), maxZ: o.z + (ew ? w : half), minY: 0, maxY: 3 });
+  }
+}
+/** everything that moves and can stop the bike: traffic, pedestrians, the other (parked) bikes */
+const rideBoxes: AABB[] = [];
+function rideDyn(b: Bike) {
+  rideBoxes.length = 0; trafficBoxes(b.pos.x, b.pos.z, 14, rideBoxes);
+  for (const pd of peds.peds) { const o = pd.obj.position; if (Math.abs(o.x - b.pos.x) < 12 && Math.abs(o.z - b.pos.z) < 12) rideBoxes.push({ minX: o.x - 0.24, maxX: o.x + 0.24, minZ: o.z - 0.24, maxZ: o.z + 0.24, minY: 0, maxY: 1.8 }); }
+  for (const o of motors.bikes) if (o !== b && Math.abs(o.pos.x - b.pos.x) < 8 && Math.abs(o.pos.z - b.pos.z) < 8) motors.boxesOf(o, rideBoxes);
+  return rideBoxes;
+}
+const circleHits = (c: AABB, x: number, z: number, r: number) => { const nx = Math.min(Math.max(x, c.minX), c.maxX), nz = Math.min(Math.max(z, c.minZ), c.maxZ); return (x - nx) ** 2 + (z - nz) ** 2 < r * r; };
+/** room to stand up here? (anything between crouched head height and standing head height above the circle) */
+function canStand() {
+  const feet = player.pos.y, x = player.pos.x, z = player.pos.z, r = RADIUS - 0.03;
+  const hit = (c: AABB) => c.minY < feet + 1.8 && c.maxY > feet + CROUCH_TOP && c.maxY >= feet + 0.35 && circleHits(c, x, z, r);
+  for (const c of queryColliders(x, z)) if (hit(c)) return false;
+  const dyn: AABB[] = []; trafficBoxes(x, z, 10, dyn); closedDoorBoxes(x, z, dyn, feet); vertical.closedBoxes(player.level, dyn);
+  for (const c of dyn) if (hit(c)) return false;
+  return true;
+}
+function setCrouch(on: boolean, quiet = false) {
+  if (on === crouch.on) return true;
+  if (on) {
+    if (riding || seat || vertical.busy() || !player.ground) return false;
+    crouch.on = true; if (!quiet) toast(isTouch() ? 'Jongkok · ketuk Jongkok lagi untuk berdiri' : 'Jongkok · tekan X lagi untuk berdiri', 1500);
+  } else {
+    if (!canStand()) { if (!quiet) toast('Tidak bisa berdiri: ada halangan di atas kepala.', 2000); return false; }
+    crouch.on = false;
+  }
+  document.body.classList.toggle('crouching', crouch.on);
+  return true;
+}
+/** sitting / riding / lifts need the player upright: stand up (or say why not) */
+function standForAction(): boolean { if (!crouch.on) return true; if (setCrouch(false, true)) return true; toast('Tidak bisa berdiri di sini: ada halangan di atas kepala.', 2000); return false; }
 function inVertical(x: number, z: number) {
   if (insideHotel(x, z) && cityZ(z) > HOTEL_ORIGIN[1] + 10.3 && cityZ(z) < HOTEL_ORIGIN[1] + 12.2 && cityX(x) > HOTEL_ORIGIN[0] + 15.5 && cityX(x) < HOTEL_ORIGIN[0] + 23) return true; // standing at the stair/lift doors
   return verticalZones.some(v => x > v.x0 && x < v.x1 && z > v.z0 && z < v.z1); }
 const atLift = () => player.pos.x > wx(HOTEL_ORIGIN[0] + 19);
 function changeFloor(d: number, target?: number) {
-  if (vertical.busy() || seat) return;
+  if (vertical.busy() || seat || riding) return;
   if (!insideHotel(player.pos.x, player.pos.z) || !inVertical(player.pos.x, player.pos.z)) { toast('Naik/turun lantai hanya di depan pintu tangga atau lift (core gedung).'); return; }
+  if (!standForAction()) return;
   if (atLift() && target === undefined) { liftPanel.open(d); return; }
   keys.clear(); vel.set(0, 0);
   const err = vertical.start(player, d > 0 ? 1 : -1, target);
@@ -336,6 +412,7 @@ pcos.onClose = () => {
 };
 /** walk the camera down into the chair in front of a PC, then open its OS */
 function sitAt(pc: (typeof PCS)[number]) {
+  if (!standForAction()) return;
   keys.clear(); vel.set(0, 0); if (document.pointerLockElement) document.exitPointerLock();
   const q = new THREE.Quaternion(); pc.o.getWorldQuaternion(q);
   const toMe = new THREE.Vector3(player.pos.x - pc.p.x, 0, player.pos.z - pc.p.z);
@@ -369,6 +446,8 @@ function nearSpot() {
 }
 function interact() {
   if (uiBlocked() || ride) return;
+  if (riding) { requestDismount(); return; }
+  const nb = nearBike(); if (nb) { mount(nb); return; }
   const sp = nearSpot(); if (sp) { noc.useSpot(sp.id); return; }
   const rk = nearRack();
   if (rk && rk !== 'MDF' && !nearPc) { keys.clear(); noc.openRack(rk); return; }
@@ -452,7 +531,10 @@ function nearRack(): string | null {
 }
 function updateWalk(dt: number) {
   ride = vertical.busy();
-  const run = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run ? 2.2 : 1;
+  if (ride && crouch.on) { crouch.on = false; document.body.classList.remove('crouching'); }
+  crouch.k += ((crouch.on ? 1 : 0) - crouch.k) * (1 - Math.exp(-dt * 10)); if (Math.abs(crouch.k - (crouch.on ? 1 : 0)) < 0.002) crouch.k = crouch.on ? 1 : 0;
+  const ck = crouch.k;
+  const run = !crouch.on && (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.run) ? 2.2 : 1;
   if (!ride) { if (keys.has('ArrowLeft')) player.yaw += 1.8 * dt; if (keys.has('ArrowRight')) player.yaw -= 1.8 * dt; }
   if (keys.has('ArrowUp')) player.pitch = Math.min(1.3, player.pitch + dt); if (keys.has('ArrowDown')) player.pitch = Math.max(-1.3, player.pitch - dt);
   const f = ride ? 0 : THREE.MathUtils.clamp((keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + touch.y, -1, 1), s = ride ? 0 : THREE.MathUtils.clamp((keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + touch.x, -1, 1);
@@ -461,7 +543,7 @@ function updateWalk(dt: number) {
   view.yaw += Math.atan2(Math.sin(player.yaw - view.yaw), Math.cos(player.yaw - view.yaw)) * sm; view.pitch += (player.pitch - view.pitch) * sm;
   const fwd = new THREE.Vector3(-Math.sin(view.yaw), 0, -Math.cos(view.yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x);
   const want = ride ? new THREE.Vector3() : fwd.multiplyScalar(f).add(right.multiplyScalar(s));
-  if (want.lengthSq() > 0) { const mag = Math.min(1, want.length()); want.normalize().multiplyScalar(2.4 * run * mag); }
+  if (want.lengthSq() > 0) { const mag = Math.min(1, want.length()); want.normalize().multiplyScalar(2.4 * run * mag * (1 - 0.55 * ck)); }   // crouch-walk ≈ 1.1 m/s
   // acceleration: quick to start, a short glide to stop, little control in the air
   const rate = !player.ground ? 2.5 : want.lengthSq() > 0 ? 9 : 11;
   const ka = 1 - Math.exp(-dt * rate);
@@ -498,19 +580,20 @@ function updateWalk(dt: number) {
   if (moving) player.phase = (player.phase + (scriptedWalk || mv.length()) / (WALK_STRIDE * avatar.scale)) % 1;
   if (thirdPerson) {
     if (!player.ground && !ride) walkPose(avatar, 0.3, 0.9);
+    else if (ck > 0.02) crouchPose(avatar, player.phase, moving ? Math.min(1, speed / 1.0) : 0, ck, performance.now() / 1000);
     else if (moving) walkPose(avatar, player.phase, Math.min(1, speed / 1.2));
     else idlePose(avatar, performance.now() / 1000);
   }
   avatar.root.visible = thirdPerson;
   // camera feel: head bob + sway while walking, a dip when landing, wider FOV when running, slight lean on strafe
-  const amt = moving && (player.ground || ride) ? Math.min(1, speed / 2.4) : 0;
+  const amt = (moving && (player.ground || ride) ? Math.min(1, speed / 2.4) : 0) * (1 - 0.5 * ck);
   fx.dipV += (-fx.dip * 90 - fx.dipV * 14) * dt; fx.dip += fx.dipV * dt;
   const running = run > 1 && moving && !ride;
   const wantFov = running ? 61 : 55; fx.fov += (wantFov - fx.fov) * (1 - Math.exp(-dt * 6));
   if (Math.abs(camera.fov - fx.fov) > 0.01) { camera.fov = fx.fov; camera.updateProjectionMatrix(); }
   fx.roll += ((ride ? 0 : -s * 0.012) - fx.roll) * (1 - Math.exp(-dt * 8));
   const bobY = Math.sin(player.phase * Math.PI * 4) * 0.026 * amt, bobX = Math.sin(player.phase * Math.PI * 2) * 0.016 * amt;
-  const eyeY = player.pos.y + 1.62 + fx.dip;
+  const eyeY = player.pos.y + EYE_STAND + (EYE_CROUCH - EYE_STAND) * ck + fx.dip;
   if (!thirdPerson) {
     camera.position.set(player.pos.x + Math.cos(view.yaw) * bobX, eyeY + bobY, player.pos.z - Math.sin(view.yaw) * bobX);
     camera.rotation.set(view.pitch, view.yaw, fx.roll, 'YXZ');
@@ -519,7 +602,7 @@ function updateWalk(dt: number) {
     const indoor = insideHotel(player.pos.x, player.pos.z);
     const inCar = vertical.ride?.kind === 'lift' && player.pos.z > wz(HOTEL_ORIGIN[1] + 12.2);
     const wantD = inCar ? 0.9 : indoor ? 2.3 : 3.6, pitch = THREE.MathUtils.clamp(view.pitch, -1.0, 0.9);
-    view.head.lerp(new THREE.Vector3(player.pos.x, player.pos.y + 1.72, player.pos.z), view.head.distanceTo(player.pos) > 4 ? 1 : 1 - Math.exp(-dt * 18));
+    view.head.lerp(new THREE.Vector3(player.pos.x, player.pos.y + 1.72 - 0.58 * ck, player.pos.z), view.head.distanceTo(player.pos) > 4 ? 1 : 1 - Math.exp(-dt * 18));
     const head = view.head;
     const back = new THREE.Vector3(Math.sin(view.yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(view.yaw) * Math.cos(pitch));
     const side = new THREE.Vector3(Math.cos(view.yaw), 0, -Math.sin(view.yaw)).multiplyScalar(0.35);
@@ -555,7 +638,9 @@ function updateWalk(dt: number) {
   let hint = '', at: THREE.Vector3 | null = null;
   const sp = ride ? null : nearSpot();
   const dr = !ride && !sp && insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y, 1.7, player.yaw) : null;
+  const nb = ride || sp ? null : nearBike();
   if (ride) hint = '';
+  else if (nb) { hint = '[F] Naik motor'; at = new THREE.Vector3(nb.pos.x, nb.pos.y + 1.35, nb.pos.z); }
   else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
   else if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { hint = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; at = new THREE.Vector3(dr.cx, dr.y0 + 1.45, dr.cz); if (inVertical(player.pos.x, player.pos.z)) hint += atLift() ? ' · [E] Panggil lift (pilih lantai)' : ' · [E] Naik tangga · [Q] Turun tangga'; }
   else {
@@ -570,6 +655,130 @@ function updateWalk(dt: number) {
   }
   $('hudHint').textContent = hint;
   prompt.show(hint, at);
+}
+
+// ---------- Motor Matic: mount, ride, dismount ----------
+const speedo = (() => { const e = document.createElement('div'); e.id = 'speedo'; e.innerHTML = '<div class="sp-v"><b>0</b><small>km/j</small></div><div class="sp-bar"><i></i></div><div class="sp-g">N</div>'; document.body.appendChild(e); return e; })();
+function nearBike() {
+  if (riding || seat || vertical.busy() || player.level !== 1 || insideHotel(player.pos.x, player.pos.z) || player.pos.y > 1) return null;
+  return motors.nearest(player.pos.x, player.pos.z, 1.7);
+}
+function mount(b: Bike) {
+  if (!standForAction()) return;
+  riding = b; motors.mount(b); mountT = 0; wantDismount = false;
+  vel.set(0, 0); player.vy = 0; player.ground = true;
+  chaseYaw = b.yaw; rideLook.yaw = 0; rideLook.pitch = -0.16; rideLook.idle = 0; camDistR = 2.5;
+  b.m.lean.add(avatar.root); avatar.root.position.set(0, 0, 0); avatar.root.rotation.set(0, Math.PI, 0);
+  motors.engine.start();
+  document.body.classList.add('riding'); speedo.classList.add('on');
+  $('hints').textContent = RIDE_HINTS;
+  toast(isTouch() ? 'Naik motor · joystick = belok & gas/rem' : 'Naik motor · W gas · S rem · A/D belok · Spasi rem belakang · F turun', 3200);
+}
+/** where the rider can step off: beside the bike first, then behind/in front; never inside a wall, car or the hotel */
+function dismountSpot(b: Bike): THREE.Vector3 | null {
+  const f = motors.fwd(b), r = new THREE.Vector3(-f.z, 0, f.x);
+  const dyn: AABB[] = []; trafficBoxes(b.pos.x, b.pos.z, 10, dyn); closedDoorBoxes(b.pos.x, b.pos.z, dyn, b.pos.y);
+  for (const o of motors.bikes) if (Math.abs(o.pos.x - b.pos.x) < 6 && Math.abs(o.pos.z - b.pos.z) < 6) motors.boxesOf(o, dyn);
+  const tries: [number, number][] = [[-0.85, 0.1], [0.85, 0.1], [-0.85, 0.55], [0.85, 0.55], [-0.85, -0.4], [0.85, -0.4], [0, -1.65], [0, 1.6], [-1.25, 0], [1.25, 0], [-1.25, 0.9], [1.25, 0.9], [0, -2.1], [0, 2.05]];
+  const q = new THREE.Vector3();
+  for (const [sx, sz] of tries) {
+    q.copy(b.pos).addScaledVector(r, sx).addScaledVector(f, -sz);
+    if (insideHotel(q.x, q.z) || Math.abs(q.x) > 199 || Math.abs(q.z) > 149) continue;
+    const feet = feetHeight(q.x, q.z, b.pos.y + 0.2);
+    if (Math.abs(feet - b.pos.y) > 0.35) continue;
+    const t = q.clone(); t.y = feet; resolveCircle(t, feet, RADIUS + 0.03, dyn);
+    if (Math.hypot(t.x - q.x, t.z - q.z) > 1e-4) continue;
+    if (blocked(q.x, q.z, feet + 1.0, RADIUS) || blocked(q.x, q.z, feet + 0.5, RADIUS)) continue;
+    // the step-off path from the seat must not pass through a wall either
+    const m = b.pos.clone().lerp(q, 0.5); if (blocked(m.x, m.z, feet + 0.8, 0.05)) continue;
+    return q.setY(feet);
+  }
+  return null;
+}
+function endRide(b: Bike, at: THREE.Vector3 | null) {
+  motors.park(b); riding = null; wantDismount = false; motors.engine.stop();
+  scene.add(avatar.root); avatar.root.rotation.set(0, 0, 0); avatar.root.scale.setScalar(avatar.scale);
+  const p = at ?? b.pos.clone();
+  player.pos.copy(p); player.level = 1; player.vy = 0; player.ground = true; vel.set(0, 0);
+  player.yaw = view.yaw = view.bodyYaw = b.yaw; player.pitch = view.pitch = -0.05;
+  view.head.set(player.pos.x, player.pos.y + 1.72, player.pos.z);
+  document.body.classList.remove('riding'); speedo.classList.remove('on');
+  $('hints').textContent = WALK_HINTS;
+  if (Math.abs(camera.fov - 55) > 0.01) { camera.fov = fx.fov = 55; camera.updateProjectionMatrix(); }
+}
+function requestDismount() {
+  const b = riding; if (!b) return;
+  if (Math.abs(b.speed) > 0.6) { if (!wantDismount) toast('Mengerem untuk turun…', 1400); wantDismount = true; return; }
+  const at = dismountSpot(b);
+  if (!at) { wantDismount = false; toast('Tidak ada ruang untuk turun di sini. Geser motornya sedikit.', 2600); return; }
+  endRide(b, at);
+}
+/** leaving walk mode while riding (Esc): park the bike where it is */
+function forceDismount() { const b = riding; if (!b) return; b.speed = 0; endRide(b, dismountSpot(b)); }
+const _grip = new THREE.Vector3(), _q = new THREE.Quaternion();
+const RIDE_HIP = new THREE.Vector3(0, 0.86, -0.17);
+function gripRig(i: 0 | 1, steer: number, out: THREE.Vector3) {
+  const g = MOTOR_GRIPS[i]; out.set(g[0], g[1], g[2]).sub(MOTOR_STEER_PIVOT).applyQuaternion(_q.setFromAxisAngle(MOTOR_STEER_AXIS, steer)).add(MOTOR_STEER_PIVOT);
+  out.z += 0.04; out.y += 0.015;                       // wrist sits just behind the grip
+  return out.set(-out.x, out.y, -out.z);               // bike space (fwd -Z, right +X) -> rider space (fwd +Z, left +X)
+}
+function updateRide(dt: number) {
+  const b = riding!;
+  const kW = keys.has('KeyW') || keys.has('ArrowUp'), kS = keys.has('KeyS') || keys.has('ArrowDown');
+  const kA = keys.has('KeyA') || keys.has('ArrowLeft'), kD = keys.has('KeyD') || keys.has('ArrowRight');
+  let thr = THREE.MathUtils.clamp((kW ? 1 : 0) + Math.max(0, touch.y), 0, 1), brk = THREE.MathUtils.clamp((kS ? 1 : 0) + Math.max(0, -touch.y), 0, 1);
+  const steer = THREE.MathUtils.clamp((kA ? 1 : 0) - (kD ? 1 : 0) - touch.x, -1, 1);
+  if (wantDismount && (kW || touch.y > 0.3)) wantDismount = false;          // rider changed their mind
+  let rear = keys.has('Space');
+  if (wantDismount) { thr = 0; if (b.speed > 0) brk = 1; else { brk = 0; rear = true; } }   // brake to a stop in either direction (S at a standstill would reverse)
+  if (mountT < 1) { mountT = Math.min(1, mountT + dt / 0.35); thr = 0; }
+  motors.update(b, { throttle: thr, brake: brk, rear, steer }, dt, rideDyn(b));
+  motors.render(b, dt);
+  if (wantDismount && Math.abs(b.speed) < 0.6) { wantDismount = false; requestDismount(); if (!riding) return; }
+  player.pos.copy(b.pos); player.level = 1;
+  // rider: hands on the grips (they turn with the bars), feet on the floorboard, left foot down when stopped
+  const fd = b.footDown;
+  avatar.root.visible = thirdPerson;
+  if (thirdPerson) ridePose(avatar, { hip: RIDE_HIP, lean: 0.3 + 0.06 * Math.min(1, Math.abs(b.speed) / VMAX), ankleL: new THREE.Vector3(0.13 + 0.25 * fd, 0.43 - 0.35 * fd, 0.16 - 0.1 * fd), ankleR: new THREE.Vector3(-0.13, 0.43, 0.16), gripL: gripRig(0, b.steer, new THREE.Vector3()), gripR: gripRig(1, b.steer, _grip), look: THREE.MathUtils.clamp(rideLook.yaw * 0.5, -0.6, 0.6) });
+  // feedback
+  hitToastT -= dt;
+  if (b.hit > 3) { rideShake = Math.min(0.25, b.hit * 0.02); if (hitToastT <= 0) { toast(b.hit > 8 ? 'Tabrakan keras! Motor terpental.' : 'Tabrakan! Hati-hati.', 1500); hitToastT = 1.5; } }
+  else if (b.hit > 0 && b.hit < 0.1) rideShake = Math.max(rideShake, 0.03);   // kerb bump
+  else if (b.hit === -1) { toast('Motor dikembalikan ke jalan terdekat.', 2200); chaseYaw = b.yaw; camDistR = 2; }
+  rideShake *= Math.exp(-dt * 8);
+  // camera: chase cam that lags the bike's heading, free look with mouse/drag that recentres when riding; or rider's eyes (V)
+  rideLook.idle += dt;
+  if (rideLook.idle > 1.4 && Math.abs(b.speed) > 1.5) { rideLook.yaw *= Math.exp(-dt * 2.2); rideLook.pitch += (-0.16 - rideLook.pitch) * (1 - Math.exp(-dt * 2)); }
+  chaseYaw += Math.atan2(Math.sin(b.yaw - chaseYaw), Math.cos(b.yaw - chaseYaw)) * (1 - Math.exp(-dt * 4.5));
+  const wantFov = 55 + 9 * Math.min(1, Math.abs(b.speed) / VMAX); fx.fov += (wantFov - fx.fov) * (1 - Math.exp(-dt * 4));
+  if (Math.abs(camera.fov - fx.fov) > 0.01) { camera.fov = fx.fov; camera.updateProjectionMatrix(); }
+  const shake = Math.sin(elapsed * 61) * rideShake * 0.4;
+  if (!thirdPerson) {
+    b.m.root.updateMatrixWorld(true);   // from the root: its world matrix is otherwise one frame stale (camera lag / wrong spot)
+    const head = new THREE.Vector3(0, 1.5, 0.04).applyMatrix4(b.m.lean.matrixWorld);
+    camera.position.copy(head); camera.position.y += shake;
+    camera.rotation.set(THREE.MathUtils.clamp(rideLook.pitch + 0.1, -1.0, 0.6), b.yaw + rideLook.yaw, b.lean * 0.55, 'YXZ');
+  } else {
+    const yaw = chaseYaw + rideLook.yaw, pitch = THREE.MathUtils.clamp(rideLook.pitch, -0.6, 0.45);
+    const target = new THREE.Vector3(b.pos.x, b.pos.y + 1.3, b.pos.z);
+    const back = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+    const wantD = 4.2 + Math.abs(b.speed) * 0.05; let d = 0.5; const q = new THREE.Vector3();
+    while (d < wantD) { q.copy(target).addScaledVector(back, d + 0.15); if (blocked(q.x, q.z, q.y, 0.22) || q.y < b.pos.y + 0.25) break; d += 0.15; }
+    camDistR = d < camDistR ? d : camDistR + (d - camDistR) * Math.min(1, 3 * dt);
+    camera.position.copy(target).addScaledVector(back, camDistR); camera.position.y = Math.max(camera.position.y, b.pos.y + 0.35) + shake;
+    camera.lookAt(target.x, target.y + 0.15, target.z);
+  }
+  // HUD
+  const kmh = Math.round(Math.abs(b.speed) * 3.6);
+  const vb = speedo.querySelector('b')!; if (vb.textContent !== String(kmh)) vb.textContent = String(kmh);
+  (speedo.querySelector('.sp-bar i') as HTMLElement).style.width = `${Math.min(100, (Math.abs(b.speed) / VMAX) * 100).toFixed(1)}%`;
+  const gear = b.speed < -0.05 ? 'R' : wantDismount ? 'P' : b.braking ? 'REM' : kmh > 0 ? 'D' : 'N'; const ge = speedo.querySelector('.sp-g')!; if (ge.textContent !== gear) ge.textContent = gear;
+  let hint = '', at: THREE.Vector3 | null = null;
+  if (Math.abs(b.speed) < 0.6) { hint = '[F] Turun'; at = new THREE.Vector3(b.pos.x, b.pos.y + 1.95, b.pos.z); }
+  if (b.noProgT > 2.5) hint = (hint ? hint + ' · ' : '') + '[R] Kembalikan motor ke jalan';
+  $('hudHint').textContent = hint; prompt.show(hint, at);
+  motors.engine.on = !document.hidden && document.hasFocus();
+  motors.engine.update(b.speed, thr);
 }
 /** floating key prompt next to the thing you can use ("[F] Buka pintu") */
 const prompt = (() => {
@@ -644,8 +853,8 @@ function frame() {
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
   if (mode !== 'walk') { /* orbit */ }
   else if (seat) { updateSeat(dt); prompt.hide(); }
-  else if (!uiBlocked()) { vertical.update(dt, player); updateWalk(dt); }
-  else prompt.hide();
+  else if (!uiBlocked()) { if (riding) updateRide(dt); else { vertical.update(dt, player); updateWalk(dt); } }
+  else { prompt.hide(); if (riding) { motors.engine.on = false; motors.engine.update(0, 0); } }
   { const tx = mode === 'walk' ? vertical.hud() : ''; if (liftInd.textContent !== tx) liftInd.textContent = tx; liftInd.classList.toggle('on', !!tx); }
   if (mode === 'walk' && noc.analyzerOn) { anaT -= dt; if (anaT <= 0) { anaT = 0.25; const inH = insideHotel(player.pos.x, player.pos.z); noc.renderAnalyzer(cityX(player.pos.x) - HOTEL_ORIGIN[0], cityZ(player.pos.z) - HOTEL_ORIGIN[1], player.pos.y + 1.2, inH ? player.level : 1, locationName(player.pos.x, player.pos.z).replace('BLD_HOTEL_NUSANTARA · ', '')); } }
   signals.update(t); traffic.update(dt, t, mode === 'walk' ? player.pos : null); peds.update(dt, t);
@@ -709,7 +918,17 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.
   // automated playtest on software GL: pause the rAF loop so real input events get dispatched, then advance fixed steps
   pause: (v: boolean) => { const was = paused; paused = v; if (was && !v) { last = performance.now(); requestAnimationFrame(frame); } },
   step: (n = 1, dt = 1 / 30, render = true) => { fixedDt = dt; for (let i = 0; i < n; i++) { skipRender = !render || i < n - 1; frame(); } skipRender = false; fixedDt = 0; },
-  state: () => ({ mode, body: document.body.className, x: cityX(player.pos.x), z: cityZ(player.pos.z), y: player.pos.y, lv: player.level, loc: $('hudLoc').textContent, hint: $('hudHint').textContent, toast: $('toast').textContent }),
+  /** QA: Motor Matic + crouch */
+  motor: () => riding && { id: riding.id, x: riding.pos.x + 200, z: riding.pos.z + 150, y: riding.pos.y, yaw: riding.yaw, speed: riding.speed, kmh: Math.abs(riding.speed) * 3.6, steer: riding.steer, lean: riding.lean, pitch: riding.pitch, stuck: riding.stuckT, noProg: riding.noProgT, want: wantDismount, engine: motors.engine.on, speedo: speedo.innerText.replace(/\s+/g, ' ') },
+  bikes: () => motors.bikes.map(b => ({ id: b.id, x: +(b.pos.x + 200).toFixed(3), z: +(b.pos.z + 150).toFixed(3), y: +b.pos.y.toFixed(3), yaw: +b.yaw.toFixed(3), ridden: b.ridden, speed: b.speed })),
+  bikeTo: (id: string, X: number, Z: number, yaw: number) => { const b = motors.bikes.find(q => q.id === id)!; b.pos.set(wx(X), 0.5, wz(Z)); b.yaw = yaw; b.pos.y = 0; motors.settle(); return b.pos.y; },
+  bikeSpeed: (v: number) => { if (riding) { riding.speed = v; mountT = 1; } return !!riding; },
+  keysHeld: () => [...keys],
+  /** QA only: a test beam (no mesh) to check the stand-up ceiling test where the city has no natural 1.3-1.7 m overhead */
+  qaBeam: (X: number, Z: number, lv: number, y0: number, y1: number, w: number, d: number) => { const f = LEVELS[lv - 1].elev + 0.12; colliders.push({ minX: wx(X - w / 2), maxX: wx(X + w / 2), minZ: wz(Z - d / 2), maxZ: wz(Z + d / 2), minY: f + y0, maxY: f + y1 }); buildGrid(); },
+  crouch: () => ({ on: crouch.on, k: crouch.k, canStand: canStand(), eye: camera.position.y - player.pos.y, third: thirdPerson }),
+  lowOverheads: (X: number, Z: number, r = 6, lv = 1) => { const feet = LEVELS[lv - 1].elev + 0.12; return colliders.filter(c => wx(X) > c.minX - r && wx(X) < c.maxX + r && wz(Z) > c.minZ - r && wz(Z) < c.maxZ + r && c.minY > feet + CROUCH_TOP && c.minY < feet + 1.75 && c.maxY > feet + 1.3).map(c => [c.minX + 200, c.maxX + 200, c.minZ + 150, c.maxZ + 150, c.minY, c.maxY].map(v => +v.toFixed(2))); },
+  state: () => ({ mode, riding: riding?.id ?? null, crouch: crouch.on, body: document.body.className, x: cityX(player.pos.x), z: cityZ(player.pos.z), y: player.pos.y, lv: player.level, loc: $('hudLoc').textContent, hint: $('hudHint').textContent, toast: $('toast').textContent }),
   near: (X: number, Z: number, r = 1.5) => colliders.filter(c => wx(X) > c.minX - r && wx(X) < c.maxX + r && wz(Z) > c.minZ - r && wz(Z) < c.maxZ + r && c.minY < 2 && c.maxY > 0.4).map(c => [c.minX + 200, c.maxX + 200, c.minZ + 150, c.maxZ + 150, c.minY, c.maxY].map(v => +v.toFixed(2))),
   solidAudit: (rootName = 'FASE_C_GEDUNG_KOTA') => {
     const out: string[] = []; const bx = new THREE.Box3(); let checked = 0;

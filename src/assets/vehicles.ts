@@ -501,14 +501,13 @@ export function randomCarKind(): 'mpv' | 'sedan' | 'hatch' { const r = rnd(); re
 // ================================================================= MOTORBIKES
 // Honda BeAT / Vario style matic scooter: 1.86 x 0.68 x 1.08 m, seat 0.74 m, WB 1.256, 14" wheels.
 const ZF = -0.63, ZR = 0.63, RF = 0.25, RR = 0.255;
-function scooterTemplate(): Template {
-  let t = templates.get('scooter'); if (t) return t;
-  const k = new Kit();
+/** scooter geometry; k = body, s = steering assembly (bars, cover, mirrors, fork, front fender). Traffic bikes pass the same kit twice. */
+function scooterParts(k: Kit, s: Kit) {
   const P = 'paint', W = '#ffffff';
   const rearTaper = (z: number) => 1 - 0.38 * THREE.MathUtils.smoothstep(z, 0.35, 0.98);
   // front fender hugging the front wheel
   const arc = (r: number, a0: number, a1: number, n = 8): V2[] => Array.from({ length: n + 1 }, (_, i) => { const a = a0 + (a1 - a0) * i / n; return [ZF - Math.cos(a) * r, RF + Math.sin(a) * r]; });
-  k.prof(P, W, [...arc(0.305, 0.45, 1.95), ...arc(0.275, 1.95, 0.45)], 0.13, 0, 0.012);
+  s.prof(P, W, [...arc(0.305, 0.45, 1.95), ...arc(0.275, 1.95, 0.45)], 0.13, 0, 0.012);
   // front apron / leg shield (body colour) with V headlight
   const apronTaper = (z: number, y: number) => 1 - 0.25 * THREE.MathUtils.smoothstep(y, 0.75, 1.0) - 0.2 * THREE.MathUtils.smoothstep(-z, 0.5, 0.64);
   k.prof(P, W, [[-0.5, 0.42], [-0.585, 0.6], [-0.615, 0.78], [-0.595, 0.93], [-0.5, 0.99], [-0.41, 0.97], [-0.375, 0.72], [-0.345, 0.44], [-0.4, 0.36]], 0.38, 0, 0.03, apronTaper);
@@ -517,20 +516,20 @@ function scooterTemplate(): Template {
   for (const sx of [-1, 1]) k.box('lamp', C.amber, 0.05, 0.03, 0.04, sx * 0.13, 0.9, -0.6, 0, 0, sx * 0.3);
   k.box('matte', C.black, 0.12, 0.05, 0.03, 0, 0.62, -0.598, -0.25); // horn grille
   // handlebar cover, meter, bars, grips, levers, mirrors
-  k.prof(P, W, [[-0.56, 0.97], [-0.52, 1.05], [-0.42, 1.08], [-0.35, 1.05], [-0.36, 0.98], [-0.45, 0.95]], 0.44, 0, 0.025, (z, y) => 1 - 0.3 * THREE.MathUtils.smoothstep(-z, 0.4, 0.56));
-  k.box('matte', '#0d1418', 0.18, 0.012, 0.1, 0, 1.083, -0.43, -0.3);
-  k.cyl('metal', C.chrome, 0.011, 0.6, 0, 1.0, -0.4, 'x', 6);
+  s.prof(P, W, [[-0.56, 0.97], [-0.52, 1.05], [-0.42, 1.08], [-0.35, 1.05], [-0.36, 0.98], [-0.45, 0.95]], 0.44, 0, 0.025, (z, y) => 1 - 0.3 * THREE.MathUtils.smoothstep(-z, 0.4, 0.56));
+  s.box('matte', '#0d1418', 0.18, 0.012, 0.1, 0, 1.083, -0.43, -0.3);
+  s.cyl('metal', C.chrome, 0.011, 0.6, 0, 1.0, -0.4, 'x', 6);
   for (const sx of [-1, 1]) {
-    k.cyl('matte', C.rubber, 0.019, 0.12, sx * 0.29, 1.0, -0.4, 'x', 8);
-    k.seg('matte', C.alu, [sx * 0.2, 1.01, -0.43], [sx * 0.31, 1.02, -0.47], 0.008, 4, 1, 1, false); // brake lever
-    k.seg('matte', C.black, [sx * 0.19, 1.05, -0.46], [sx * 0.26, 1.24, -0.49], 0.009, 4, 1, 1, false); // mirror stalk
-    k.sphere('matte', C.black, 0.06, sx * 0.28, 1.27, -0.49, 1.3, 0.75, 0.3, 8, 5);
-    k.box('glass', W, 0.13, 0.07, 0.008, sx * 0.28, 1.27, -0.468);
+    s.cyl('matte', C.rubber, 0.019, 0.12, sx * 0.29, 1.0, -0.4, 'x', 8);
+    s.seg('matte', C.alu, [sx * 0.2, 1.01, -0.43], [sx * 0.31, 1.02, -0.47], 0.008, 4, 1, 1, false); // brake lever
+    s.seg('matte', C.black, [sx * 0.19, 1.05, -0.46], [sx * 0.26, 1.24, -0.49], 0.009, 4, 1, 1, false); // mirror stalk
+    s.sphere('matte', C.black, 0.06, sx * 0.28, 1.27, -0.49, 1.3, 0.75, 0.3, 8, 5);
+    s.box('glass', W, 0.13, 0.07, 0.008, sx * 0.28, 1.27, -0.468);
   }
   // fork + front disc & caliper
   for (const sx of [-1, 1]) k.seg('metal', C.alu, [sx * 0.072, RF, ZF], [sx * 0.065, 0.72, -0.52], 0.02, 6, 1, 1, false);
-  k.cyl('metal', '#c9ced3', 0.11, 0.006, -0.06, RF, ZF, 'x', 14);
-  k.box('matte', C.darkGrey, 0.03, 0.08, 0.06, -0.075, RF + 0.08, ZF + 0.07, 0.6);
+  s.cyl('metal', '#c9ced3', 0.11, 0.006, -0.06, RF, ZF, 'x', 14);
+  s.box('matte', C.darkGrey, 0.03, 0.08, 0.06, -0.075, RF + 0.08, ZF + 0.07, 0.6);
   // floorboard with rubber mat, side skirts
   k.prof('matte', C.rubber, [[-0.36, 0.33], [0.03, 0.33], [0.03, 0.36], [-0.36, 0.36]], 0.3, 0, 0.005);
   k.prof(P, W, [[-0.36, 0.24], [0.06, 0.22], [0.1, 0.33], [-0.39, 0.335]], 0.29, 0, 0.012);
@@ -560,7 +559,12 @@ function scooterTemplate(): Template {
   for (const sx of [-1, 1]) k.box('matte', C.black, 0.07, 0.025, 0.045, sx * 0.2, 0.4, 0.25);
   k.seg('matte', C.black, [-0.1, 0.18, 0.25], [0.1, 0.18, 0.25], 0.015, 5, 1, 1, false);
   // plates (Indonesian bike plate ~25 x 10.5 cm): front on the apron bottom, rear on the holder
-  const plates = plateGeo([[0.24, 0.085, 0, 0.5, -0.565, -1, 0.35], [0.25, 0.088, 0, 0.485, 0.995, 1, -0.2]]);
+}
+const scooterPlates = () => plateGeo([[0.24, 0.085, 0, 0.5, -0.565, -1, 0.35], [0.25, 0.088, 0, 0.485, 0.995, 1, -0.2]]);
+function scooterTemplate(): Template {
+  let t = templates.get('scooter'); if (t) return t;
+  const k = new Kit(); scooterParts(k, k);
+  const plates = scooterPlates();
   t = {
     geos: k.build(), len: 1.86, plates: { geo: plates, kind: 'black' },
     wheels: [{ r: RF, w: 0.085, style: 'moto', x: 0, y: RF, z: ZF, front: true }, { r: RR, w: 0.095, style: 'moto', x: 0, y: RR, z: ZR }],
@@ -647,4 +651,49 @@ export function makeMotor(opts: MotorOpts = {}) {
     if (pil) { const pi = Math.floor(rnd() * 12); const pm = new THREE.Mesh(riderGeo(PILLION, OUTFITS[(pi + 5) % 12], `p${pi}`), clsMat('matte')); pm.name = 'PEMBONCENG'; pm.castShadow = true; g.add(pm); }
   }
   return g;
+}
+
+// ================================================================= RIDEABLE SCOOTER ("Motor Matic")
+// Same 1:1 matic scooter as traffic (length 1.86 m, wheelbase 1.26 m, seat 0.74-0.80 m), but split so the
+// steering assembly (bars, cover, mirrors, fork, front fender, front wheel) turns about the head axis, plus a
+// side stand and a brake-light overlay. Hierarchy: root (ground point, yaw) > lean (roll/pitch about the
+// contact line) > body meshes, steer (pivot on the head axis) > front wheel; rear wheel; stand; brake lamp.
+export const MOTOR_STEER_PIVOT = new THREE.Vector3(0, 0.72, -0.52);
+export const MOTOR_STEER_AXIS = new THREE.Vector3(0, 0.47, 0.11).normalize();
+export const MOTOR_GRIPS: [V3, V3] = [[-0.29, 1.0, -0.4], [0.29, 1.0, -0.4]];
+export const MOTOR_WHEELBASE = ZR - ZF, MOTOR_RF = RF, MOTOR_RR = RR, MOTOR_ZF = ZF, MOTOR_ZR = ZR;
+interface RideTemplate { body: Partial<Record<Cls, THREE.BufferGeometry>>; steer: Partial<Record<Cls, THREE.BufferGeometry>>; plates: THREE.BufferGeometry; stand: THREE.BufferGeometry; brake: THREE.BufferGeometry }
+let rideT: RideTemplate | null = null;
+function rideTemplate(): RideTemplate {
+  if (rideT) return rideT;
+  const k = new Kit(), s = new Kit(); scooterParts(k, s);
+  const steer = s.build(); for (const g of Object.values(steer)) g!.translate(-MOTOR_STEER_PIVOT.x, -MOTOR_STEER_PIVOT.y, -MOTOR_STEER_PIVOT.z);
+  const st = new Kit(); // side stand on the left, folded down to the ground (stand-mounted parking lean ~5°)
+  st.seg('matte', C.black, [-0.1, 0.24, 0.06], [-0.27, 0.025, -0.02], 0.014, 6, 1, 1, false);
+  st.box('matte', C.black, 0.06, 0.012, 0.035, -0.275, 0.012, -0.025);
+  const br = new Kit(); // brake light glow (shown while braking)
+  br.prof('lamp', '#ff2a2a', [[0.835, 0.815], [0.985, 0.754], [0.962, 0.668], [0.92, 0.676], [0.94, 0.743], [0.825, 0.798]], 0.205, 0, 0.012, z => 1 - 0.38 * THREE.MathUtils.smoothstep(z, 0.35, 0.98));
+  rideT = { body: k.build(), steer, plates: scooterPlates(), stand: st.build().matte!, brake: br.build().lamp! };
+  return rideT;
+}
+export interface RideMotor { root: THREE.Group; lean: THREE.Group; steer: THREE.Group; wheelF: THREE.Mesh; wheelR: THREE.Mesh; stand: THREE.Mesh; brake: THREE.Mesh }
+export function makeRideableMotor(color: string, name: string): RideMotor {
+  const t = rideTemplate(); const paint = paintMat(color, 'moto');
+  const root = new THREE.Group(); root.name = name; root.userData.kind = 'motor_ride';
+  const lean = new THREE.Group(); lean.name = `${name}_LEAN`; root.add(lean);
+  const mk = (geos: Partial<Record<Cls, THREE.BufferGeometry>>, parent: THREE.Object3D, tag: string) => {
+    for (const cls of Object.keys(geos) as Cls[]) { const m = new THREE.Mesh(geos[cls]!, cls === 'paint' ? paint : clsMat(cls)); m.name = `${name}_${tag}_${cls}`; m.castShadow = cls !== 'lamp'; m.receiveShadow = cls === 'paint' || cls === 'matte'; parent.add(m); }
+  };
+  mk(t.body, lean, 'BODI');
+  const steer = new THREE.Group(); steer.name = `${name}_SETANG`; steer.position.copy(MOTOR_STEER_PIVOT); lean.add(steer);
+  mk(t.steer, steer, 'SETANG');
+  const plate = new THREE.Mesh(t.plates, plateMat('black')); plate.name = `${name}_PLAT`; lean.add(plate);
+  const wheelF = new THREE.Mesh(wheelGeo(RF, 0.085, 'moto'), wheelMat()); wheelF.name = `${name}_RODA_DEPAN`; wheelF.castShadow = true; wheelF.userData.r = RF;
+  wheelF.position.set(0, RF, ZF).sub(MOTOR_STEER_PIVOT); steer.add(wheelF);
+  const wheelR = new THREE.Mesh(wheelGeo(RR, 0.095, 'moto'), wheelMat()); wheelR.name = `${name}_RODA_BELAKANG`; wheelR.castShadow = true; wheelR.userData.r = RR;
+  wheelR.position.set(0, RR, ZR); lean.add(wheelR);
+  const stand = new THREE.Mesh(t.stand, clsMat('matte')); stand.name = `${name}_STANDAR`; stand.castShadow = true; lean.add(stand);
+  const brake = new THREE.Mesh(t.brake, clsMat('lamp')); brake.name = `${name}_LAMPU_REM`; brake.visible = false; lean.add(brake);
+  root.traverse(o => { (o as THREE.Mesh).frustumCulled = true; });
+  return { root, lean, steer, wheelF, wheelR, stand, brake };
 }

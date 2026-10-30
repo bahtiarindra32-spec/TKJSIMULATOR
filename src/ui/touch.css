@@ -42,3 +42,15 @@ body.touch .ms-tracker { left: auto; right: calc(10px + env(safe-area-inset-righ
 body.touch #wifi-ana { right: auto; left: 50%; transform: translateX(-50%); bottom: auto; top: calc(56px + env(safe-area-inset-top)); width: min(320px, 70vw); }
 body.touch #minimap:not(.big) { display: none !important; }
 body.touch.entered #views { display: none !important; }
+/* crouch button + riding cluster (Gas / Rem / Turun / Reset) */
+.tbtns #t-crouch { right: 162px; bottom: 4px; }
+.rbtns { display: none; position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); width: 190px; height: 190px; z-index: 41; }
+.rbtns button { position: absolute; }
+.rbtns .big { width: 86px; height: 86px; right: 0; bottom: 0; font-size: 22px; background: rgba(43,212,107,.45) !important; }
+.rbtns .big.on { background: rgba(43,212,107,.9) !important; }
+.rbtns #t-rem { width: 66px; height: 66px; right: 98px; bottom: 0; font-size: 18px; background: rgba(255,90,54,.4) !important; }
+.rbtns #t-rem.on { background: rgba(255,90,54,.9) !important; }
+.rbtns #t-turun { width: 58px; height: 58px; right: 10px; bottom: 100px; }
+.rbtns #t-reset { width: 46px; height: 46px; right: 84px; bottom: 84px; }
+body.touch.entered.riding .rbtns { display: block; }
+body.touch.entered.riding .tbtns, body.riding #touchui .walk-only { display: none !important; }

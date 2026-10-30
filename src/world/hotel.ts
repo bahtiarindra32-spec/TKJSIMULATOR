@@ -157,7 +157,7 @@ function put<T extends THREE.Object3D>(p: THREE.Object3D, o: T, lx: number, y: n
 let devN = 0;
 function desk(p: THREE.Object3D, y: number, x: number, z: number, w: number, d: number, name?: string, top = M.woodLight) {
   const g = new THREE.Group(); if (name) g.name = name; p.add(g);
-  box(g, X(x), y + 0.72, Z(z), w, 0.04, d, top);
+  box(g, X(x), y + 0.72, Z(z), w, 0.04, d, top).userData.slab = true; // desk top is solid (no walking or crouching through it)
   for (const [dx, dz] of [[0.03, 0.03], [w - 0.07, 0.03], [0.03, d - 0.07], [w - 0.07, d - 0.07]]) box(g, X(x + dx), y, Z(z + dz), 0.04, 0.72, 0.04, M.steel, undefined, false);
   box(g, X(x + 0.05), y + 0.3, Z(z + 0.02), w - 0.1, 0.4, 0.02, mat('#d6d2c8'), undefined, false); // modesty panel (front edge)
   return g;

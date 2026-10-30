@@ -19,6 +19,9 @@ export function goFullscreen() {
   } catch { /* not allowed here */ }
 }
 
+let releaseAll: () => void = () => { touch.x = touch.y = 0; };
+/** focus lost / app switched: drop the joystick and every held button (main.ts clears its key set) */
+export function releaseTouch() { releaseAll(); }
 const key = (code: string, type: 'keydown' | 'keyup' = 'keydown') => window.dispatchEvent(new KeyboardEvent(type, { code, key: code.replace(/^Key/, '').toLowerCase(), bubbles: true }));
 
 export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy: number) => void; active: () => boolean; toast: (s: string, ms?: number) => void }) {
@@ -33,22 +36,32 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
       <button data-run class="mid" id="t-run">»<small>Lari</small></button>
       <button data-k="KeyE" class="sm" id="t-e">E<small>Naik</small></button>
       <button data-k="KeyQ" class="sm" id="t-q">Q<small>Turun</small></button>
+      <button data-k="KeyX" class="mid" id="t-crouch">⤓<small>Jongkok</small></button>
+    </div>
+    <div class="rbtns">
+      <button data-k="KeyW" data-hold class="big" id="t-gas">▲<small>Gas</small></button>
+      <button data-k="KeyS" data-hold class="mid" id="t-rem">■<small>Rem</small></button>
+      <button data-k="KeyF" class="mid" id="t-turun">⇲<small>Turun</small></button>
+      <button data-k="KeyR" class="sm" id="t-reset">↺<small>Reset</small></button>
     </div>
     <div class="ttop">
-      <button data-k="KeyT">Kerja</button><button data-k="KeyC">Cek</button><button data-k="KeyR">Wi-Fi</button>
+      <button data-k="KeyT">Kerja</button><button data-k="KeyC" class="walk-only">Cek</button><button data-k="KeyR" class="walk-only">Wi-Fi</button>
       <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyG" id="t-gfx">Grafik</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
     </div>`;
   document.body.appendChild(root);
   const stop = (e: Event) => { e.stopPropagation(); };
+  const held = new Set<HTMLButtonElement>();
   root.querySelectorAll<HTMLButtonElement>('button').forEach(b => {
     b.addEventListener('pointerdown', e => {
       stop(e); e.preventDefault(); b.classList.add('on');
-      if (b.dataset.k) key(b.dataset.k);
+      if (b.dataset.k) { key(b.dataset.k); held.add(b); }
       if (b.dataset.run !== undefined) { touch.run = !touch.run; b.classList.toggle('lock', touch.run); }
       if (b.dataset.fs !== undefined) { if (document.fullscreenElement) document.exitFullscreen?.(); else if (isIOS() && !standalone()) iosHint(true); else goFullscreen(); }
     });
-    const up = (e: Event) => { stop(e); b.classList.remove('on'); if (b.dataset.k) key(b.dataset.k, 'keyup'); };
-    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', () => b.classList.remove('on'));
+    const up = (e: Event) => { stop(e); b.classList.remove('on'); if (b.dataset.k && held.delete(b)) key(b.dataset.k, 'keyup'); };
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+    // a finger sliding off a held button (Gas/Rem) releases it too, so the throttle can never stick open
+    b.addEventListener('pointerleave', e => { b.classList.remove('on'); if (b.dataset.hold !== undefined) up(e); });
     b.addEventListener('click', e => e.stopPropagation());
   });
 
@@ -71,7 +84,11 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
     touch.x = l ? (dx / Math.min(l, R)) * k : 0; touch.y = l ? (-dy / Math.min(l, R)) * k : 0;
   });
   const end = (e: PointerEvent) => { if (e.pointerId !== sid) return; sid = null; touch.x = touch.y = 0; knob.style.transform = ''; ring.classList.remove('on'); };
-  zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
+  zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end); zone.addEventListener('lostpointercapture', end);
+  releaseAll = () => {
+    sid = null; touch.x = touch.y = 0; knob.style.transform = ''; ring.classList.remove('on'); looks.clear();
+    for (const b of held) { b.classList.remove('on'); if (b.dataset.k) key(b.dataset.k, 'keyup'); } held.clear();
+  };
 
   // look: any touch on the 3D view that is not on a control
   const looks = new Map<number, { x: number; y: number }>();
@@ -92,6 +109,7 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
     const keys = [...document.querySelectorAll('#iprompt.on kbd')].map(k => k.textContent);
     (root.querySelector('#t-e') as HTMLElement).style.display = keys.includes('E') ? '' : 'none';
     (root.querySelector('#t-q') as HTMLElement).style.display = keys.includes('Q') ? '' : 'none';
+    root.querySelector('#t-crouch')!.classList.toggle('lock', document.body.classList.contains('crouching'));
     const gl = document.getElementById('btnGfx')?.textContent?.replace(/^Grafik: /, '').replace(' (otomatis)', ''); const gb = root.querySelector('#t-gfx') as HTMLElement; if (gl && gb.textContent !== 'Grafik ' + gl) gb.textContent = 'Grafik ' + gl;
   }, 250);
 

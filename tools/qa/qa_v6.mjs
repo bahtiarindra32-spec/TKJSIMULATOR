@@ -30,8 +30,10 @@ for (const ph of phases) {
       out.prompt = pr ? 'OK' : 'NONE';
     }
     if (ph === 'sit') {
-      const pcs = await K(() => window.__kota.pcs().filter(c => /_L2_PC_/.test(c.name)).map(c => c.name)); const pc = pcs[3];
-      await goPc(pc); const cam0 = await K(() => window.__kota.cam());
+      // since the desk IP phones exist, some PC spots offer the phone on F: pick a spot whose prompt is the PC
+      const pcs = await K(() => window.__kota.pcs().filter(c => /_L2_PC_/.test(c.name)).map(c => c.name)); let pc = pcs[3];
+      for (const n of pcs) { if (await goPc(n) && /Nyalakan/.test((await st()).hint)) { pc = n; break; } }
+      const cam0 = await K(() => window.__kota.cam());
       await press('f'); const tr = [];
       for (let i = 0; i < 8; i++) { await step(3); tr.push([await K(() => JSON.stringify(window.__kota.seat())), (await K(() => window.__kota.cam())).y.toFixed(2)].join(' ')); if (i === 2) await shot('v6_sit_mid'); }
       console.log('  sit trace', tr.join(' / '));
@@ -44,7 +46,8 @@ for (const ph of phases) {
     }
     if (ph === 'lift') {
       await go(HO[0] + 20, HO[1] + 11, 1, 0); await step(3); console.log('  hint', (await st()).hint);
-      await press('e'); const tr = []; let shotIn = false;
+      await press('e'); const panel = await K(() => document.getElementById('liftpanel').classList.contains('on')); console.log('  lift panel open', panel);
+      await press('2'); const tr = []; let shotIn = false;
       for (let i = 0; i < 160; i++) {
         await step(3); const v = await K(() => window.__kota.vertical()); const s = await st();
         if (i % 6 === 0) tr.push(`${v.ride?.phase ?? 'done'}@${s.y.toFixed(2)}/${s.z.toFixed(1)}`);
@@ -58,11 +61,14 @@ for (const ph of phases) {
       // walk away and back: landing door must be closed (solid)
       await hold('s', 6); await step(30);
       out.lift = s.lv === 2 ? 'OK' : 'FAIL';
-      await press('q'); for (let i = 0; i < 160; i++) { await step(3); if (!(await K(() => window.__kota.vertical())).ride) break; }
+      // back to the lift door (the walk-away above), Q opens the panel, 1 = lobby
+      await go(HO[0] + 21, HO[1] + 10.8, 2, Math.PI); await step(3);
+      await press('q'); await press('1'); for (let i = 0; i < 300; i++) { await step(3); if (!(await K(() => window.__kota.vertical())).ride) break; }
       s = await st(); console.log('  back down lv', s.lv, 'y', s.y.toFixed(2)); out.liftDown = s.lv === 1 ? 'OK' : 'FAIL';
-      // multi: L1 -> L5 by pressing E 4 times in a row
-      for (let k = 0; k < 4; k++) { await press('e'); for (let i = 0; i < 160; i++) { await step(3); if (!(await K(() => window.__kota.vertical())).ride) break; } }
-      s = await st(); console.log('  up to', s.lv); out.lift5 = s.lv === 5 ? 'OK' : 'FAIL';
+      // L1 -> L5: one E opens the floor panel, 5 picks the floor (v8 lift panel; was E pressed 4 times)
+      await go(HO[0] + 21, HO[1] + 10.8, 1, Math.PI); await step(3);
+      await press('e'); await press('5'); for (let i = 0; i < 600; i++) { await step(3); if (!(await K(() => window.__kota.vertical())).ride) break; }
+      s = await st(); console.log('  up to', s.lv, 'y', s.y.toFixed(2)); out.lift5 = s.lv === 5 && Math.abs(s.y - 13.72) < 0.06 ? 'OK' : 'FAIL';
     }
     if (ph === 'stair') {
       await go(HO[0] + 17, HO[1] + 11, 1, 0); await step(3); console.log('  hint', (await st()).hint);

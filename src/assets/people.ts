@@ -597,3 +597,82 @@ export function typingPose(p: Person, time: number, seatHeight = 0.45) {
   }
   commitPose(p);
 }
+
+/** crouch (jongkok) blended by k (0 standing .. 1 full crouch); phase/move animate a short crouch-walk.
+ *  Full crouch puts the head at ~1.2 m for a 1.70 m person (matches the crouched collision height). */
+export function crouchPose(p: Person, phase: number, move: number, k: number, time = 0) {
+  const r = p.rig; resetPose(r);
+  const t = ((phase % 1) + 1) % 1;
+  for (const [side, off, sx] of [['L', 0, 1], ['R', 0.5, -1]] as const) {
+    const c = Math.cos(TAU * (t + off)), sn = Math.sin(TAU * (t + off));
+    const th = -(1.42 * k) - 0.32 * move * k * c;                 // thigh swings forward/back with the step
+    const kn = 2.2 * k + 0.35 * move * k * Math.max(0, sn);        // knee lifts the swinging foot
+    r[`thigh${side}`].rotation.set(th, 0, sx * 0.1 * k);
+    r[`shin${side}`].rotation.x = kn;
+    r[`foot${side}`].rotation.set(-(th + kn), 0, -sx * 0.1 * k);
+    r[`upperArm${side}`].rotation.set(-0.45 * k + 0.2 * move * k * c, 0, sx * (0.12 + 0.05 * k));
+    r[`forearm${side}`].rotation.set(-0.75 * k - 0.15, 0, 0);
+    r[`hand${side}`].rotation.set(-0.1, 0, 0);
+  }
+  const br = Math.sin(time * 1.7);
+  r.spine.rotation.x = 0.42 * k; r.chest.rotation.x = 0.1 * k + 0.01 * br;
+  r.neck.rotation.x = -0.3 * k; r.head.rotation.x = -0.18 * k;
+  r.hips.rotation.y = 0.08 * move * k * Math.sin(TAU * t);
+  groundHips(r);
+  commitPose(p);
+}
+
+// ---- riding a scooter: two-bone IK for legs (to the floorboard) and arms (to the grips)
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _DOWN = new THREE.Vector3(0, -1, 0);
+const _va = new THREE.Vector3(), _vb = new THREE.Vector3(), _vc = new THREE.Vector3(), _vd = new THREE.Vector3(), _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
+function ik2(a: THREE.Vector3, c: THREE.Vector3, l1: number, l2: number, pole: THREE.Vector3, out: THREE.Vector3) {
+  const d = _vd.copy(c).sub(a); const D = Math.min(Math.max(d.length(), Math.abs(l1 - l2) + 1e-3), l1 + l2 - 1e-3); d.normalize();
+  const x = (l1 * l1 - l2 * l2 + D * D) / (2 * D), h = Math.sqrt(Math.max(0, l1 * l1 - x * x));
+  const pp = _vc.copy(pole).addScaledVector(d, -pole.dot(d)).normalize();
+  return out.copy(a).addScaledVector(d, x).addScaledVector(pp, h);
+}
+/** world (rig-space) rotation of a bone's parent chain, from the bones' current local transforms */
+function rigWorld(b: THREE.Object3D, out: THREE.Matrix4) {
+  const chain: THREE.Object3D[] = []; for (let q: THREE.Object3D | null = b; q && (q as THREE.Bone).isBone; q = q.parent) chain.unshift(q);
+  out.identity(); for (const q of chain) { q.updateMatrix(); out.multiply(q.matrix); } return out;
+}
+/** aim a bone (rest direction -Y) at `dir` (rig space), given its parent's rig-space rotation */
+function aim(b: THREE.Bone, parentQ: THREE.Quaternion, dir: THREE.Vector3) {
+  _q1.setFromUnitVectors(_DOWN, _va.copy(dir).normalize());
+  b.quaternion.copy(_q3.copy(parentQ).invert()).multiply(_q1);
+}
+export interface RideTargets { hip: THREE.Vector3; lean: number; ankleL: THREE.Vector3; ankleR: THREE.Vector3; gripL: THREE.Vector3; gripR: THREE.Vector3; look?: number }
+/** seated on a scooter. Targets are in the person's root space in metres (person faces +Z, its left = +X). */
+export function ridePose(p: Person, T: RideTargets) {
+  const r = p.rig, s = 1 / p.scale; resetPose(r);
+  r.hips.position.set(T.hip.x * s, T.hip.y * s, T.hip.z * s);
+  r.spine.rotation.x = T.lean * 0.7; r.chest.rotation.x = T.lean * 0.3;
+  r.neck.rotation.x = -T.lean * 0.55; r.head.rotation.x = -T.lean * 0.25; r.head.rotation.y = T.look ?? 0;
+  const B = p.bind, hipQ = new THREE.Quaternion();
+  for (const [side, sx, ank] of [['L', 1, T.ankleL], ['R', -1, T.ankleR]] as const) {
+    const thigh = r[`thigh${side}`], shin = r[`shin${side}`], foot = r[`foot${side}`];
+    const H = new THREE.Vector3().copy(r.hips.position).add(_vb.set(B[BI[`thigh${side}`]].x - B[BI.hips].x, 0, 0));
+    const A = ank.clone().multiplyScalar(s);
+    const K = ik2(H, A, LEG.thigh, LEG.shin, new THREE.Vector3(sx * 0.25, 0.35, 1), new THREE.Vector3());
+    aim(thigh, hipQ, K.clone().sub(H));
+    const tq = thigh.quaternion.clone();
+    aim(shin, tq, A.clone().sub(K));
+    const sq = tq.clone().multiply(shin.quaternion);
+    foot.quaternion.copy(sq.invert()).multiply(_q2.setFromEuler(new THREE.Euler(-0.15, 0, 0)));
+  }
+  // arms: shoulders from the leaned chest, hands to the grips
+  for (const [side, sx, grip] of [['L', 1, T.gripL], ['R', -1, T.gripR]] as const) {
+    const ua = r[`upperArm${side}`], fa = r[`forearm${side}`], hand = r[`hand${side}`];
+    rigWorld(r.chest, _m1);
+    const S = new THREE.Vector3().copy(ua.position).applyMatrix4(_m1);
+    const chestQ = new THREE.Quaternion().setFromRotationMatrix(_m1);
+    const W = grip.clone().multiplyScalar(s);
+    const E = ik2(S, W, ARM.upper, ARM.fore, new THREE.Vector3(sx * 1, -0.7, -0.4), new THREE.Vector3());
+    aim(ua, chestQ, E.clone().sub(S));
+    const uq = chestQ.clone().multiply(ua.quaternion);
+    aim(fa, uq, W.clone().sub(E));
+    hand.rotation.set(0.15, 0, 0);
+  }
+  void _m2;
+  commitPose(p);
+}

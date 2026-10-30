@@ -296,7 +296,8 @@ export function buildStreetProps(world: THREE.Object3D) {
     for (const [z0] of [[197], [206]]) { for (let i = 0; i <= 18; i++) box(g, wx(225 + i * 2.5) - 0.05, 0.1, wz(z0), 0.1, 0.01, 5, lm, undefined, false); }
   }
   const gv = group(root, 'G1_KENDARAAN_PARKIR');
-  for (let i = 0; i < 12; i++) { const m = motorMesh(pick(['#c0392b', '#2c3e50', '#ecf0f1', '#2980b9', '#111'])); m.name = `PARKED_MOTOR_${String(i + 1).padStart(2, '0')}`; m.position.set(wx(232.5 + i * 1.0), 0.17, wz(165)); m.rotation.y = 0; gv.add(m); }
+  // slots 10-12 of the row (X 241.5-243.5) hold the rideable PROP_MOTOR_01..03 (game/motor.ts)
+  for (let i = 0; i < 12; i++) { const col = pick(['#c0392b', '#2c3e50', '#ecf0f1', '#2980b9', '#111']); if (i >= 9) continue; /* keep the seeded sequence */ const m = motorMesh(col); m.name = `PARKED_MOTOR_${String(i + 1).padStart(2, '0')}`; m.position.set(wx(232.5 + i * 1.0), 0.17, wz(165)); m.rotation.y = 0; gv.add(m); }
   for (let i = 0; i < 10; i++) { const c = carMesh(pick(CAR_COLORS)); c.name = `PARKED_CAR_${String(i + 1).padStart(2, '0')}`; c.position.set(wx(225 + 1.25 + i * 5), 0.1, wz(199.5)); c.rotation.y = 0; gv.add(c); addCollider(wx(225 + i * 5 + 0.3), wx(225 + i * 5 + 2.2), wz(197.2), wz(201.8), 0, 1.5); }
   return { root, tls };
 }
