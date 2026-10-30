@@ -19,6 +19,7 @@ import { SwitchCli } from '../pcos/switchcli';
 import { EXT, DEVICES } from '../pcos/ext';
 import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
 import { Term } from '../pcos/term';
+import { nasPanel } from '../pcos/office';
 import './noc.css';
 
 // ---------------------------------------------------------------- helpers
@@ -228,10 +229,10 @@ export class Noc {
   private itPc(): PcInfo { return this.pcs.find(p => p.level === 1 && /_ITOFFICE_/.test(p.name) && healthy(adapterOf(p.name))) ?? this.pcs.find(p => p.level === 1 && /_ITOFFICE_/.test(p.name)) ?? this.CABINET; }
   private apSpot(ap: Ap): PcInfo { const w = apWorld(ap); return { name: `SPOT-${ap.id}`, label: `Bracket plafon ${ap.id} · koridor L${ap.level}`, x: w.x, y: w.y - 1.6, z: w.z, level: ap.level }; }
   /** places in the world the board owns besides PCs/racks (AP mount brackets); main shows the prompt and calls useSpot */
-  spots(): { id: string; x: number; z: number; level: number; hint: string }[] {
-    const out: { id: string; x: number; z: number; level: number; hint: string }[] = [];
+  spots(): { id: string; x: number; z: number; level: number; hint: string; r?: number }[] {
+    const out: { id: string; x: number; z: number; level: number; hint: string; r?: number }[] = [];
     for (const j of this.openJobs()) { const ap = this.jobAp(j); if (ap && !ap.mounted) { const w = apWorld(ap); out.push({ id: ap.id, x: w.x, z: w.z, level: ap.level, hint: `[F] Pasang AP di bracket plafon (${ap.id})` }); } }
-    for (const d of DEVICES) out.push({ id: d.id, x: d.x, z: d.z, level: d.level, hint: d.hint() });
+    for (const d of DEVICES) out.push({ id: d.id, x: d.x, z: d.z, level: d.level, hint: d.hint(), r: d.r });
     return out;
   }
   useSpot(id: string) {
@@ -730,6 +731,7 @@ export class Noc {
     if (name === 'ANCHOR_SRV_NETRACK_01') { this.openRack('MDF'); return true; }
     if (name === 'ANCHOR_IT_NOC_01') { this.openBoard(); return true; }
     if (name === 'ANCHOR_SRV_RACK_02') { this.openServer(); return true; }
+    if (name === 'ANCHOR_SRV_RACK_03') { nasPanel(); return true; }
     if (name === 'ANCHOR_SRV_RACK_01' && this.edgeOpen) { this.edgeOpen(); return true; }
     return false;
   }
@@ -738,6 +740,7 @@ export class Noc {
     if (name === 'ANCHOR_SRV_NETRACK_01') return '[F] Rak MDF (patch panel · switch · console)';
     if (name === 'ANCHOR_IT_NOC_01') return '[F] Papan kerja NOC';
     if (name === 'ANCHOR_SRV_RACK_02') return '[F] Server Linux srv-nusa (console)';
+    if (name === 'ANCHOR_SRV_RACK_03') return '[F] Rak 3 · NAS nas-kantor';
     if (name === 'ANCHOR_SRV_RACK_01' && this.edgeOpen) return '[F] Router edge R-EDGE (console)';
     return null;
   }
@@ -1091,6 +1094,9 @@ export class Noc {
   /** set by the edge-router module (opens its console in a board modal) */
   edgeOpen: (() => void) | null = null;
   term: Term | null = null;
+  /** device modules show their panels in the board modal */
+  showPanel(el: HTMLElement) { this.show(el); }
+  logLine(s: string) { this.logAll(s); this.check(false); }
   openServer() {
     const box = h('div', 'noc-box wide');
     box.append(h('h2', '', `Rak 2 · Server Linux ${SRV.name} (${SRV.ip})`));

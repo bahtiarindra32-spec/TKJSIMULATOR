@@ -120,3 +120,7 @@ body.touch #liftpanel .lp-f { max-width: 230px; }
 .nano-ta { min-height: 220px; height: 34vh; background: #0b0f12; color: #e6e6e6; border: 0; font: 13px/1.35 ui-monospace, monospace; padding: 6px; resize: vertical; outline: none; white-space: pre; }
 .nano-b { display: flex; gap: 8px; }
 #pcos .cmd .nano-ta { height: 260px; }
+.phone-scr { background: #b9d3c2; color: #102018; border-radius: 6px; padding: 10px 12px; font: 13px/1.4 ui-monospace, monospace; min-height: 70px; margin: 6px 0; border: 3px solid #2b3236; }
+.phone-scr .dial { font-size: 18px; letter-spacing: 2px; margin-top: 4px; }
+.phone-pad { display: grid; grid-template-columns: repeat(3, 54px); gap: 6px; margin: 6px 0; }
+.phone-pad .btn { height: 40px; font-size: 16px; }

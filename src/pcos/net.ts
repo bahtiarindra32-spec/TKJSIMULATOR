@@ -82,7 +82,7 @@ export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 // Each floor follows TIA-568 structured cabling: wall outlet -> horizontal cable -> patch panel port in the
 // floor rack -> patch cord -> switch port. L1's rack in the server room is the MDF (core); L2/L3 have an IDF
 // rack in the IDF room with their own access switch, uplinked to the MDF on Gi1/0/49 (802.1Q trunk).
-export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string; poe?: boolean }
+export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string; poe?: boolean; voice?: number }
 /** A patch-panel port: `pc` = the desk whose wall outlet is wired to it, `label` = what is printed on that
  *  wall outlet ('' = missing), `patch` = switch port its patch cord goes to, `hang` = a cord hangs unplugged. */
 export interface PanelPort { n: number; pc: string | null; label: string; patch: number | null; hang: boolean }

@@ -39,6 +39,7 @@ export class SwitchCli {
   private prompt() { const n = this.sw.name; return this.mode === 'user' ? `${n}>` : this.mode === 'priv' ? `${n}#` : this.mode === 'config' ? `${n}(config)#` : this.mode === 'if' ? `${n}(config-if${this.ifs.length > 1 ? '-range' : ''})#` : `${n}(config-vlan)#`; }
   private setPrompt() { this.promptEl.textContent = this.started ? this.prompt() : ''; }
   private key(e: KeyboardEvent) {
+    if (e.key === 'Escape') return;   // the modal closes
     e.stopPropagation();
     if (e.key === 'ArrowUp') { if (this.hi > 0) this.input.value = this.hist[--this.hi] ?? ''; e.preventDefault(); return; }
     if (e.key === 'ArrowDown') { this.input.value = this.hist[++this.hi] ?? ''; if (this.hi > this.hist.length) this.hi = this.hist.length; e.preventDefault(); return; }
@@ -146,6 +147,12 @@ export class SwitchCli {
           }
           return this.bad(t[1]);
         }
+        if (kw(t[0], 'switchport', 2) && kw(t[1], 'voice', 2) && kw(t[2], 'vlan', 2)) {
+          const id = +t[3]; if (!t[3]) return this.incomplete(); if (!(id >= 1 && id <= 1001)) return this.bad(t[3]);
+          if (!this.sw.vlans.has(id)) { this.print(`% Voice VLAN does not exist. Creating vlan ${id}\n`); this.sw.vlans.set(id, `VLAN${String(id).padStart(4, '0')}`); }
+          for (const p of this.ifs) p.voice = id; this.sw.dirty = true; return;
+        }
+        if (kw(t[0], 'no', 2) && kw(t[1], 'switchport', 2) && kw(t[2], 'voice', 2)) { for (const p of this.ifs) p.voice = undefined; this.sw.dirty = true; return; }
         if (kw(t[0], 'switchport', 2)) {
           if (kw(t[1], 'mode', 2)) { if (!t[2]) return this.incomplete(); if (!kw(t[2], 'access', 2)) { this.print('% Port akses ke PC: gunakan "switchport mode access". Trunk hanya untuk uplink.\n'); return; } return; }
           if (kw(t[1], 'access', 2) && kw(t[2], 'vlan', 2)) {
@@ -175,7 +182,7 @@ export class SwitchCli {
       user: '  enable      Turn on privileged commands\n  exit        Exit from the EXEC\n  show        Show running system information',
       priv: '  configure   Enter configuration mode\n  copy        Copy from one file to another\n  disable     Turn off privileged commands\n  exit        Exit from the EXEC\n  show        Show running system information\n  write       Write running configuration to memory',
       config: '  do          To run exec commands in config mode\n  end         Exit from configure mode\n  exit        Exit from configure mode\n  interface   Select an interface to configure\n  no          Negate a command or set its defaults\n  vlan        Vlan commands',
-      if: '  description Interface specific description\n  do          To run exec commands\n  end         Exit from configure mode\n  exit        Exit from interface configuration mode\n  no          Negate a command or set its defaults\n  power       Power configuration (power inline auto|never)\n  shutdown    Shutdown the selected interface\n  switchport  Set switching mode characteristics',
+      if: '  description Interface specific description\n  do          To run exec commands\n  end         Exit from configure mode\n  exit        Exit from interface configuration mode\n  no          Negate a command or set its defaults\n  power       Power configuration (power inline auto|never)\n  switchport  voice vlan N (telepon IP), access vlan N\n  shutdown    Shutdown the selected interface\n  switchport  Set switching mode characteristics',
       vlan: '  end         Exit from configure mode\n  exit        Apply changes, bump revision number, and exit mode\n  name        Ascii name of the VLAN',
     };
     this.print(`${m[this.mode]}\n\n`);
@@ -212,7 +219,7 @@ export class SwitchCli {
       if (!p || p.length !== 1) return this.bad(t.slice(1).join(' '));
       const q = p[0], st = this.status(q);
       if (this.up(q)) { this.print(`GigabitEthernet1/0/49 is ${q.shutdown ? 'administratively down' : st === 'connected' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : `down (${st})`}\n  Description: ${q.desc}\n  Hardware is Gigabit Ethernet SFP (1000BaseLX, fiber) · Administrative Mode: trunk\n\n`); return; }
-      this.print(`${portName(q.n).replace('Gi', 'GigabitEthernet')} is ${q.shutdown ? 'administratively down' : st === 'connected' || st === 'inactive' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : st === 'inactive' ? 'up (inactive)' : `down (${st})`}\n  Description: ${q.desc}\n  Switchport: Enabled · Administrative Mode: static access · Access Mode VLAN: ${q.vlan} (${sw.vlans.get(q.vlan) ?? 'Inactive'})\n\n`);
+      this.print(`${portName(q.n).replace('Gi', 'GigabitEthernet')} is ${q.shutdown ? 'administratively down' : st === 'connected' || st === 'inactive' ? 'up' : 'down'}, line protocol is ${st === 'connected' ? 'up (connected)' : st === 'inactive' ? 'up (inactive)' : `down (${st})`}\n  Description: ${q.desc}\n  Switchport: Enabled · Administrative Mode: static access · Access Mode VLAN: ${q.vlan} (${sw.vlans.get(q.vlan) ?? 'Inactive'})\n  Voice VLAN: ${q.voice ? `${q.voice} (${sw.vlans.get(q.voice) ?? 'Inactive'})` : 'none'} · Power inline: ${q.poe === false ? 'never' : 'auto'}\n\n`);
       return;
     }
     if (kw(t[0], 'power', 2)) {
@@ -243,7 +250,7 @@ export class SwitchCli {
       if (this.mode === 'user') return this.bad(t[0]);
       let s = `Building configuration...\n\nCurrent configuration:\n!\nhostname ${sw.name}\n!\n`;
       for (const [id, name] of sw.vlans) if (id !== 1) s += `vlan ${id}\n name ${name}\n!\n`;
-      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.poe === false) s += ' power inline never\n'; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
+      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.voice) s += ` switchport voice vlan ${p.voice}\n`; if (p.poe === false) s += ' power inline never\n'; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
       if (sw.uplink) { s += `interface GigabitEthernet1/0/49\n description ${sw.upPort.desc}\n switchport mode trunk\n`; if (sw.uplink.allowed) s += ` switchport trunk allowed vlan ${sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none'}\n`; if (sw.upPort.shutdown) s += ' shutdown\n'; s += '!\n'; }
       s += `interface Vlan1\n ip address ${sw.ip} 255.255.255.0\n!\nend\n`;
       this.print(s + '\n'); return;

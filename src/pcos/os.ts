@@ -9,6 +9,8 @@ import { nanoEditor } from './term';
 /** extra web apps served by simulated devices (Linux server, NAS, printers): up() false = connection refused */
 export const SITES: Record<string, { up?: (ip: string) => boolean; render: (ip: string, url: URL, os: PcOS) => HTMLElement }> = {};
 /** extra CMD commands (net use, ...) registered by device modules */
+/** extra desktop icons (Printers) */
+export const DESK_EXT: [string, (os: PcOS) => void][] = [];
 export const CMD_EXT: Record<string, (args: string[], raw: string, os: PcOS) => string | Promise<string>> = {};
 
 type Attrs = Record<string, any>;
@@ -148,6 +150,7 @@ export class PcOS {
       this.dicon(I.net, 'Network Connections', () => this.openNcpa()),
       this.dicon(I.web, 'Tepi', () => this.openBrowser()),
       this.dicon(I.note, 'Notepad', () => this.openNotepad()),
+      ...DESK_EXT.map(([nm, fn]) => this.dicon(I.gear, nm, () => fn(this))),
       ...(isWireless(this.curName) ? [this.dicon(I.wifi, 'Wi-Fi', () => this.openWifi())] : []),
       this.dicon(I.folder, 'Lembar Kerja', () => this.openNotepad('LEMBAR KERJA TKJ\r\n\r\n1. Cek konfigurasi IP: ipconfig /all\r\n2. Uji koneksi ke gateway & server: ping\r\n3. Cek DNS: nslookup cari.id\r\n4. Lacak rute: tracert cari.id\r\n5. Atur IP statis lewat Network Connections > Ethernet > Properties > IPv4\r\n')),
     );
