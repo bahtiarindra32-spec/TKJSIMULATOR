@@ -17,6 +17,7 @@ import * as ND from './assets/netdevices';
 import { hotelAnchorsWorld } from './game/missionSystem';
 import { initLinux, linuxQa } from './pcos/linux';
 import { initOffice, officeQa } from './pcos/office';
+import { edgeQa } from './pcos/edge';
 import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy } from './pcos/net';
 import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
 import { Vertical } from './game/vertical';
@@ -101,6 +102,7 @@ const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x
   hotel.traverse(o => { const m = /^PROP_L([23])_IPPHONE_\d+$/.exec(o.name); if (!m) return; const lv = +m[1]; const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()); const near = PCS.filter(p => new RegExp(`_L${lv}_`).test(p.name)).sort((a, b) => Math.hypot(a.p.x - c.x, a.p.z - c.z) - Math.hypot(b.p.x - c.x, b.p.z - c.z))[0]; if (near && Math.hypot(near.p.x - c.x, near.p.z - c.z) < 2.5 && !phones.some(q => q.pc === near.name)) phones.push({ id: o.name, level: lv, x: c.x, z: c.z, pc: near.name }); });
   initOffice({ printers, phones, pcs: PCS.map(c => ({ name: c.name, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })) }, { show: el => noc.showPanel(el), close: () => noc.closeModal(), ext: e => noc.extEvent(e as never), log: s => noc.logLine(s), toast: (s, ms) => toast(s, ms) });
 }
+for (const [k, an] of [['RACK1', 'ANCHOR_SRV_RACK_01'], ['RACK2', 'ANCHOR_SRV_RACK_02'], ['RACK3', 'ANCHOR_SRV_RACK_03']]) { const a = hotelAnchorsWorld().find(x => x.name === an); if (a) noc.PLACES[k] = { name: k, label: an === 'ANCHOR_SRV_RACK_01' ? 'Rak 1 · Router edge' : an === 'ANCHOR_SRV_RACK_02' ? 'Rak 2 · srv-nusa' : 'Rak 3 · NAS', x: a.x, y: 1.4, z: a.z, level: 1 }; }
 noc.onApVisual = ap => { const o = hotel.getObjectByName(`PROP_L${ap.level}_CORRIDOR_AP_${ap.lx}`); if (o) o.visible = ap.mounted; };
 const { tls } = buildStreetProps(world);
 buildWayfinding(world);
@@ -721,7 +723,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
-  noc, missions, pcos, linux: linuxQa, office: officeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
+  noc, missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: walkability grid of a hotel level (local metres, -1..31 x -1..21). 0 blocked, 1 standable+reachable from seed, 2 standable but unreachable */
   reach: (lv: number, seedX = 1, seedZ = 11, st = 0.2) => {

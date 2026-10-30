@@ -20,6 +20,8 @@ import { EXT, DEVICES } from '../pcos/ext';
 import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
 import { Term } from '../pcos/term';
 import { nasPanel } from '../pcos/office';
+import { EdgeShell, EDGE, activeRoute } from '../pcos/edge';
+const EDGE_F = ['isp1', 'nat', 'acl'];
 import './noc.css';
 
 // ---------------------------------------------------------------- helpers
@@ -200,6 +202,7 @@ export class Noc {
   private needs(j: Job): Item[] {
     const need: Item[] = [];
     const isC = j.kind === 'contract';
+    if (j.faults.some(f => EDGE_F.includes(f))) { for (const it of ['console', 'laptop'] as Item[]) if (!this.inv[it as 'console']) need.push(it); return need; }
     if (j.tut) { const pc = j.targets[0].pc.name; if (!this.inv.tester && !j.tut.tested) need.push('tester'); if (this.noCord.has(pc) && this.inv.patch < 1) need.push('patch'); return need; }
     if (isC && j.tpl === 'ap') {
       const ap = this.jobAp(j)!;
@@ -248,6 +251,7 @@ export class Noc {
   private needsTone(j: Job) { return j.targets.find(t => this.unpatched(j, t.pc.name) && !panelOf(t.pc.name)!.pp.label && this.toneAt !== t.pc.name) ?? null; }
   private labelMissing(j: Job) { return j.kind === 'contract' && j.tpl === 'desk' ? j.targets.find(t => wallOk(t.pc.name) === false) ?? null : null; }
   nextStop(j: Job): PcInfo {
+    if (j.faults.some(f => EDGE_F.includes(f))) { if (this.needs(j).length) return this.CABINET; if (!j.faults.every(f => !EXT[f] || EXT[f].ok(j.targets[0].pc.name)) && this.PLACES.RACK1) return this.PLACES.RACK1; }
     if (j.tut) return this.needs(j).length ? this.CABINET : j.targets[0].pc;
     if (j.kind === 'contract' && this.needs(j).length) return this.CABINET;
     if (j.kind === 'contract' && j.tpl === 'ap') {
@@ -266,6 +270,8 @@ export class Noc {
   }
   nextHint(j: Job): string {
     const n = this.needs(j);
+    if (j.faults.some(f => EDGE_F.includes(f)) && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
+    if (j.faults.some(f => EDGE_F.includes(f)) && !j.faults.every(f => !EXT[f] || EXT[f].ok(j.targets[0].pc.name))) return 'Router edge R-EDGE di rak 1 ruang server L1 [F]: console';
     if (j.tut) { const st = this.tutStage(j); const pc = j.targets[0].pc.label; return st === 'tools' ? `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}` : st === 'cord' ? `${pc}: cek fisik [C], pasang patch cord outlet → PC` : st === 'test' ? `${pc}: cek fisik [C], tes kabel dengan LAN tester` : st === 'sit' ? `Nyalakan ${pc} [F]` : st === 'ipconfig' ? 'Command Prompt: ketik ipconfig' : st === 'ping' ? 'Command Prompt: ping alamat Default Gateway' : 'Selesai'; }
     if (j.kind === 'contract' && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.kind === 'contract' && j.tpl === 'ap') {
@@ -1016,7 +1022,7 @@ export class Noc {
     j.slaMet = j.age <= j.sla;
     const busy = new Set(this.openJobs().flatMap(x => x.targets.map(t => t.pc.name)));
     j.collateral = j.snap.filter(n => !busy.has(n) && !j.targets.some(t => t.pc.name === n) && !healthy(adapterOf(n)));
-    const swDirty = j.swTouched && SWITCHES.some(s => s.dirty);
+    const swDirty = j.swTouched && (SWITCHES.some(s => s.dirty) || (j.faults.some(f => EDGE_F.includes(f)) && EDGE.dirty));
     let stars = 3; if (!j.slaMet) stars--; if (j.collateral.length) stars--; if (j.wrong > 0 || swDirty) stars--;
     j.stars = Math.max(1, stars);
     const base = j.kind === 'contract' ? TEMPLATES[j.tpl as TplId].xp : j.kind === 'follow' ? 60 : 100 + (j.faults.some(f => FAULTS[f].rank > 0) ? 50 : 0) + (j.faults.length > 1 ? 60 : 0);
@@ -1092,7 +1098,22 @@ export class Noc {
 
   // ---------------------------------------------------------------- Linux server srv-nusa (rack 2)
   /** set by the edge-router module (opens its console in a board modal) */
-  edgeOpen: (() => void) | null = null;
+  edgeOpen: (() => void) | null = () => this.openEdge();
+  /** fixed places in the world the guidance can point at (racks in the server room) */
+  PLACES: Record<string, PcInfo> = {};
+  openEdge() {
+    if (!this.inv.console || !this.inv.laptop) { this.toast('Butuh laptop teknisi dan kabel console. Ambil di Lemari Alat (Workshop TKJ).', 4200); return; }
+    const box = h('div', 'noc-box wide');
+    box.append(h('h2', '', 'Rak 1 · Router edge R-EDGE (C1111-4P)'));
+    const led = (ok: boolean) => `<b style="color:${ok ? '#5c5' : '#e55'}">${ok ? 'hijau' : 'merah'}</b>`;
+    const r = activeRoute();
+    box.append(h('p', 'how', `ONT ISP1 NusaNet: PON ${led(true)} · LOS ${EDGE.isp[1].up ? '<b>mati</b>' : '<b style="color:#e55">merah berkedip</b>'} → Gi0/0 · Modem ISP2 CepatLink: ONLINE ${led(EDGE.isp[2].up)} → Gi0/1 · Gi0/2 → core (inside). Jalur aktif: <b>${r ? r.nh : 'tidak ada'}</b>. Laptop teknisi tersambung lewat kabel console.`));
+    const sh = new EdgeShell(); this.term = new Term(sh, 'COM3 - PuTTY · Console R-EDGE (9600 8N1)');
+    sh.onCmd = line => { for (const j of this.openJobs()) if (j.faults.some(f => EDGE_F.includes(f))) j.swTouched = true; this.logAll(`R-EDGE: ${line.slice(0, 60)}`); this.check(false); };
+    box.append(this.term.root);
+    const rw = h('div', 'row'); rw.append(btn('Cabut console [Esc]', () => this.closeModal(), 'btn', 'edge-close')); box.append(rw);
+    this.show(box, false); const tm = this.term; setTimeout(() => tm.focus(), 80);
+  }
   term: Term | null = null;
   /** device modules show their panels in the board modal */
   showPanel(el: HTMLElement) { this.show(el); }
