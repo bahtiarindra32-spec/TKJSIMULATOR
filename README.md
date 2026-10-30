@@ -4,7 +4,7 @@ Game 3D berbasis browser untuk siswa SMK TKJ kelas 10/11. Pemain magang di **Nus
 
 **▶ Main langsung di browser:** https://bahtiarindra32-spec.github.io/TKJSIMULATOR/
 
-README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 29 Oktober 2026).
+README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 Oktober 2026).
 
 ---
 
@@ -58,13 +58,13 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | Shift | Lari |
 | Spasi | Lompat (bisa juga jatuh dari pinggiran) |
 | V | Ganti kamera orang pertama / orang ketiga (avatar siswa terlihat) |
-| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak MDF (Ruang Server L1), Rak IDF (ruang IDF L2/L3), Papan kerja (meja NOC) |
-| E / Q | Naik/turun di lift atau tangga (animasi perjalanan + indikator lantai) |
+| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak MDF (Ruang Server L1), Rak IDF (ruang IDF L2/L3), Papan kerja (meja NOC), Rak 1 router edge, Rak 2 server Linux, Rak 3 NAS, panel printer, telepon IP |
+| E / Q | Di pintu tangga: naik/turun satu lantai. Di pintu lift: panel lift (tombol 1–8 atau ketuk lantai, E/Q satu lantai, Esc batal) |
 | T | Papan kerja NOC: ambil surat kerja, mulai shift, lacak pekerjaan |
 | C | Cek fisik di meja: konektor, LED link, LAN tester, patch cord, pasang toner di outlet, tempel label outlet |
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
-| G atau `?low` | Mode grafis ringan |
+| G / tombol Grafik | Ganti kualitas: Tinggi, Sedang, Rendah, Hemat. `?low` atau perangkat sentuh mulai dari Rendah, `?q=hemat` memaksa level |
 | Esc | Keluar dari mode jalan / tutup jendela |
 
 ## 5. Yang sudah dibuat ✅
@@ -131,10 +131,34 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Toner + probe: pasang toner di outlet meja, nyalakan probe di rak, sapu port patch panel. Port yang benar berbunyi keras, port sebelahnya samar (induksi), dan nadanya melemah kalau port itu sudah tersambung ke port switch yang aktif.
 - Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop.
 
+### Hari pertama: tutorial (pekerjaan fisik, tanpa kuis)
+- Pemain baru langsung mendapat surat kerja **Hari Pertama: Sambungkan PC Workshop** (juga ada di papan kerja sampai selesai): ambil LAN tester + patch cord di Lemari Alat, pasang patch cord dan tes kabel (C / tombol Cek), nyalakan PC (F / tombol Aksi), `ipconfig`, lalu `ping` Default Gateway.
+- Langkah dicatat dari aksi nyata. Petunjuk Kak Rani hanya muncul saat pemain tampak macet: diam ±8 detik tanpa kemajuan setelah ±22 detik, langkah salah (membuka PC sebelum kabel beres, mengetik perintah lain), atau terlalu lama. Petunjuk naik dari arahan singkat ke langkah rinci dan hilang begitu ada kemajuan. Teks menyesuaikan kontrol sentuh.
+
+### Server Linux srv-nusa (Rak 2, ruang server L1)
+- Ubuntu-like, 192.168.10.5 di VLAN lab. Dipakai lewat **console KVM** di rak (F) atau **SSH dari PC** (`ssh teknisi@srv-nusa`, sandi `smkbisa`).
+- Layanan benar-benar menjalankan jaringan lab: `isc-dhcp-server` memberi lease lab dari `/etc/dhcp/dhcpd.conf`, `bind9` menjawab zone `lab.smk.local` dari `/etc/bind/db.lab.smk.local` dan meneruskan nama lain ke router-lab, `apache2` menyajikan `http://intranet.lab.smk.local` dari `/var/www/html/index.html`, `ssh`.
+- Shell: `ls cd cat grep nano` (editor dengan Ctrl+O/Ctrl+X), `sudo systemctl status|start|stop|restart|reload|enable`, `journalctl -u`, `ip a`, `ip r`, `ss -tlnp`, `ping`, `dig`, `nslookup`, `host`, `named-checkzone`, `named-checkconf`, `dhcpd -t`, `dhcp-lease-list`, `curl`.
+- Tiket: layanan mati (bind9/apache2/isc-dhcp-server), record zone salah atau salah ketik yang membuat zone ditolak, scope DHCP salah (range di luar subnet atau `option routers` salah).
+
+### Perangkat kantor L2/L3
+- **Printer jaringan** PRN-L2 (192.168.20.50) dan PRN-L3 (192.168.20.51): panel depan (F) untuk IP/mask/gateway, cetak halaman konfigurasi, colok kabel. Di PC: ikon **Printers** atau `control printers`, tambah printer TCP/IP, **Cetak halaman uji**.
+- **Telepon IP** di meja kantor: berbagi port switch dengan PC, data di access VLAN 20, suara di **voice VLAN 100**, daya PoE. Layar telepon (F) menunjukkan status pendaftaran; tes panggil ke 9000 (echo) atau ext lain. Switch CLI: `switchport voice vlan 100`, `no switchport voice vlan`, `power inline auto|never`, `show interfaces gi1/0/N` menampilkan voice VLAN dan PoE.
+- **NAS nas-kantor** (192.168.20.10, Rak 3 ruang server L1): web admin (layanan SMB, shared folder, hak akses grup staf, buat folder). Di PC: `net use Z: \\nas-kantor\dokumen`, `net use`, `net view`, dengan error Windows asli (53, 67, 5).
+- Tiket: printer kembali ke setelan pabrik / kabel lepas, telepon kehilangan voice VLAN / PoE, NAS SMB mati / hak akses hilang / kabel lepas.
+
+### Router edge R-EDGE (Rak 1, ruang server L1)
+- Gi0/0 ISP1 (utama), Gi0/1 ISP2 (cadangan), Gi0/2 inside. Semua lalu lintas internet dari PC, laptop tamu, dan srv-nusa melewati router ini: default route + **IP SLA/track** untuk failover, **NAT/PAT overload** di interface keluar, dan **ACL** di interface inside (dibaca dari atas, deny implisit).
+- CLI ala Cisco (console + laptop dari Lemari Alat): `show ip interface brief`, `show ip route`, `show ip nat statistics|translations`, `show track`, `show ip sla summary`, `show access-lists`, `show running-config`, `ip route ... [AD] [track N]`, `ip nat inside|outside`, `ip nat inside source list N interface Gi0/X overload`, `access-list N ...`, `ip access-list extended N` + `no <seq>`, `ip access-group N in`, `ip sla N` / `icmp-echo`, `ip sla schedule`, `track N ip sla M reachability`, `ping`, `write memory`.
+- Tiket: ISP1 putus dengan failover salah (route utama tanpa track, route cadangan hilang, atau NAT keluar Gi0/1 belum ada), NAT tidak mencakup segmen, ACL memblok segmen/DNS.
+- Semua tiket baru di atas hanya tertutup kalau akar masalahnya benar-benar beres di simulasi **dan** pemain menguji dari klien (browser intranet, cetak uji, panggilan telepon, `net use`, ping/situs).
+
 ### Kamera, gerak, grafik
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
 - ✅ Kolisi otomatis untuk semua mesh padat ≥ 25 cm (audit: 76 gedung kota dan 30 properti jalan tertutup kolider).
-- ✅ Anti-flicker (shadow frustum di-snap, near/far kamera dinamis, polygonOffset lantai/marka), GTAO, dan mode ringan.
+- ✅ Anti-flicker (shadow frustum di-snap, near/far kamera dinamis, polygonOffset lantai/marka), GTAO.
+- ✅ 4 level grafik: Tinggi (AO + bayangan), Sedang (bayangan), Rendah (tanpa bayangan, jarak pandang 420 m), Hemat (render 0,7× resolusi, jarak pandang 260 m). Pengawas FPS menurunkan satu level otomatis kalau rata-rata < 24 FPS. Di dalam hotel hanya lantai pemain ±1 yang digambar. Kepadatan kendaraan dan pejalan kaki ikut level grafik.
+- ✅ Kontrol sentuh: tombol E/Q hanya muncul di depan tangga/lift, panel lift di tengah layar, tombol F berlabel aksi yang tersedia.
 - ✅ Loading screen dengan penjaga error WebGL. Tidak ada resource jaringan eksternal (aman offline).
 
 ## 6. Perubahan dari PDF (hasil audit)
@@ -159,7 +183,8 @@ kota-nusantara/
 │  ├─ assets/                netdevices, vehicles, people
 │  ├─ game/                  physics, traffic, missionSystem, missionLogic, missions, missionsF
 │  ├─ ui/                    minimap, missionUI, waypoint, mission.css
-│  └─ pcos/                  net.ts (simulasi jaringan), os.ts (Jendela 11), pcos.css
+│  └─ pcos/                  net.ts (simulasi jaringan), os.ts (Jendela 11), switchcli.ts, wifi.ts,
+│                            linux.ts (srv-nusa), office.ts (printer/telepon/NAS), edge.ts (R-EDGE), term.ts, ext.ts
 ├─ dev/                      halaman pamer: devices, vehicles, people, missions
 ├─ single/index.html         build satu file, siap dibuka offline
 ├─ tools/
@@ -172,6 +197,10 @@ kota-nusantara/
 Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordinat tabel PDF).
 Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
 
-## 8. Validasi terakhir (29 Okt 2026)
+## 8. Validasi terakhir (30 Okt 2026)
+- Playwright + SwiftShader, input nyata: `qa_tutor` (tutorial selesai ★★★, petunjuk muncul saat diam/macet), `qa_linux` (ssh, layanan mati, zone, scope DHCP), `qa_office` (printer, telepon, NAS), `qa_edge` (ISP1 failover, NAT, ACL), `qa_v8a` (tangga, lift 1→8→1), `qa_wifi`, `qa_v6`, `qa_mobile` (joystick, tombol F, panel lift disentuh), `qa_jobs` (static, dns). Tanpa page error.
+- Performa (844×390, DPR 2, CPU 4× lebih lambat, SwiftShader tanpa GPU): jalan depan hotel 4542 → 851 draw call, 4,18 → 0,90 juta segitiga; lobi 4163 → 590 draw call. Angka FPS SwiftShader (0,38 → 1,0) hanya untuk perbandingan, bukan FPS HP asli.
+
+## 9. Validasi sebelumnya (29 Okt 2026)
 - `npx tsc --noEmit` lolos, `vite build` lolos, build single-file lolos.
 - Playtest otomatis `tools/qa/qa_jobs.mjs` dengan input nyata (jalan ke lokasi, F/C, mengetik di CMD, form IPv4, WebKonfig, console switch): kelima surat kerja selesai bintang 3; shift 4 tiket (konektor, patch cord rusak, port shutdown, VLAN salah) selesai; uji "sengaja merusak" (shutdown port PC lain) menurunkan bintang dan memunculkan keluhan susulan yang lalu diperbaiki. Tanpa page error.

@@ -8,7 +8,10 @@ for (const [tag, vp] of [['land', { width: 844, height: 390 }], ['port', { width
   await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 120000 }); await p.waitForTimeout(800);
   await p.screenshot({ path: `/workspace/work/shots/m_${tag}_hero.png` });
   const K = (f, a) => p.evaluate(f, a);
-  await K(() => window.__kota.pause(true)); await p.tap('#enter'); await p.waitForTimeout(300); await K(() => window.__kota.pause(true));
+  await K(() => window.__kota.pause(true)); await p.tap('#enter'); await p.waitForTimeout(1300); await K(() => window.__kota.pause(true));
+  // first visit: the tutorial brief opens by itself (tap through it like a player)
+  out[tag + '_tutorBrief'] = await K(() => /Hari Pertama/.test(document.querySelector('.noc-modal')?.textContent ?? ''));
+  for (const n of ['brief-ok', 'order-ok']) { if (await p.$(`.noc-modal button[name=${n}]`)) await p.tap(`.noc-modal button[name=${n}]`); await p.waitForTimeout(150); }
   out[tag + '_touch'] = await K(() => document.body.classList.contains('touch') && getComputedStyle(document.getElementById('touchui')).display);
   const s0 = await K(() => ({ ...window.__kota.state() }));
   // joystick push up
@@ -41,6 +44,13 @@ for (const [tag, vp] of [['land', { width: 844, height: 390 }], ['port', { width
     out.liftLevel = await K(() => window.__kota.state().lv);
     await K(() => { window.__kota.teleport(200, 140, 1, 0); window.__kota.step(4); }); await p.waitForTimeout(400);
     out.eHiddenStreet = await K(() => getComputedStyle(document.getElementById('t-e')).display === 'none');
+    // tutorial on touch: the F button names the cabinet, tapping it opens the cabinet
+    const cab = await K(() => { const c = window.__kota.noc.CABINET; return { x: c.x + 200, z: c.z + 150 }; });
+    for (const [dx, dz] of [[0, 1.0], [0, -1.0], [1, 0], [-1, 0], [0, 0.6]]) { await K(([x, z]) => { window.__kota.teleport(x, z, 1, 0); window.__kota.step(3); }, [cab.x + dx, cab.z + dz]); await p.waitForTimeout(300); if (/Lemari/.test(await K(() => document.querySelector('#t-f small').textContent))) break; }
+    out.fLabelCabinet = await K(() => document.querySelector('#t-f small').textContent);
+    await p.tap('#t-f'); await K(() => window.__kota.step(2)); await p.waitForTimeout(200);
+    out.cabinetOpen = await K(() => /Lemari Alat/.test(document.querySelector('.noc-modal h2')?.textContent ?? ''));
+    await p.screenshot({ path: `/workspace/work/shots/m_land_cabinet.png` });
   }
   await ctx.close();
 }
