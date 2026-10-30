@@ -76,7 +76,9 @@ export function resolveCircle(p: THREE.Vector3, feet: number, radius: number, ex
   }
 }
 /** true if a point (eye) is inside any collider: used to keep the camera from poking through */
-export function blocked(x: number, z: number, y: number, r = 0.15) {
+export function blocked(x: number, z: number, y: number, r = 0.15, extra: AABB[] = []) {
   for (const c of query(x, z)) if (y > c.minY && y < c.maxY && x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
+  // dynamic solids (closed doors, closed lift landing doors) are not in the static grid
+  for (const c of extra) if (y > c.minY - r && y < c.maxY + r && x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
   return false;
 }

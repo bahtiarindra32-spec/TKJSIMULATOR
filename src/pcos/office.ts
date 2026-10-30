@@ -163,7 +163,7 @@ CMD_EXT.net = (args, _raw, os) => {
 };
 function smbReach(a: ReturnType<typeof adapterOf>, env: ReturnType<typeof envOf>, hostName: string): string {
   const r = resolve(a, env, hostName);
-  if (r === null || r === 'timeout') return 'System error 53 has occurred.\n\nThe network path was not found.';
+  if (r === null || typeof r !== 'object') return 'System error 53 has occurred.\n\nThe network path was not found.';
   if (r.ip !== NAS.ip) return 'System error 53 has occurred.\n\nThe network path was not found.';
   if (ping(a, env, r.ip, true).kind !== 'reply') return 'System error 53 has occurred.\n\nThe network path was not found.';
   if (!NAS.smb) return 'System error 53 has occurred.\n\nThe network path was not found.\n(Port 445 ditolak: layanan SMB di NAS tidak aktif)';

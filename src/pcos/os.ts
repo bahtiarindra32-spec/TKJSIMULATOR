@@ -374,7 +374,7 @@ export class PcOS {
         const hostN = tok.includes('@') ? tok.split('@')[1] : tok;
         if (!hostN) { t.print('usage: ssh [-l login_name] [user@]hostname'); return; }
         const r = resolve(a, env, hostN);
-        if (r === null || r === 'timeout') { t.print(`ssh: Could not resolve hostname ${hostN}: No such host is known.`); return; }
+        if (r === null || typeof r !== 'object') { t.print(`ssh: Could not resolve hostname ${hostN}: No such host is known.`); return; }
         const e = sshCheck(a, r.ip); this.emit('ssh', { target: r.ip, ok: !e, line });
         if (e) { t.print(e); return; }
         user = user.toLowerCase();
@@ -456,7 +456,7 @@ export class PcOS {
     const s = this.cur!;
     if (!raw) return null;
     const r = resolve(s.a, s.env, raw);
-    if (r === null || r === 'timeout') { t.print(kind === 'ping' ? `Ping request could not find host ${raw}. Please check the name and try again.` : `Unable to resolve target system name ${raw}.`); return null; }
+    if (r === null || typeof r !== 'object') { t.print(kind === 'ping' ? `Ping request could not find host ${raw}. Please check the name and try again.` : `Unable to resolve target system name ${raw}.`); return null; }
     return { ip: r.ip, name: parseIp(raw) !== null ? '' : raw };
   }
   private async cmdPing(args: string[], t: any) {
@@ -524,7 +524,9 @@ export class PcOS {
     if (!name) { t.print(`Default Server:  ${srvName}\nAddress:  ${dns}`); return; }
     const r = resolve(s.a, s.env, name);
     const head = `Server:  ${srvName}\nAddress:  ${dns}\n`;
-    if (r === null || r === 'timeout') { t.print(`${head}\n*** ${srvName} can't find ${name}: Non-existent domain`); return; }
+    if (r === 'servfail') { t.print(`${head}\n*** ${srvName} can't find ${name}: Server failed`); return; }
+    if (r === 'timeout') { await t.seq([`${head}`, `DNS request timed out.\n    timeout was 2 seconds.\n*** Request to ${srvName} timed-out`], 2000, 2000); return; }
+    if (r === null) { t.print(`${head}\n*** ${srvName} can't find ${name}: Non-existent domain`); return; }
     const local = s.env.hosts.some(x => x.ip === r.ip);
     t.print(`${head}\n${local ? '' : 'Non-authoritative answer:\n'}Name:    ${local && !name.includes('.') ? `${name}.${s.env.suffix}` : name}\nAddress:  ${r.ip}`);
   }
@@ -804,6 +806,7 @@ export class PcOS {
       if (s.env.id === 'guest' && !AUTH.has(s.a.mac) && host !== s.env.gateway) { set('Login Wi-Fi Tamu', this.portal(() => go(url.href, false))); addr.value = `http://portal.tamu.hotel/login?redirect=${encodeURIComponent(host)}`; return; }
       const r = resolve(s.a, s.env, host);
       if (r === 'timeout') { err('Hmmm… your Internet access is blocked', 'DNS_PROBE_FINISHED_NO_INTERNET', ['Checking the network cables, modem, and router', 'Checking the DNS server settings', 'Running Network Diagnostics'], host); return; }
+      if (r === 'servfail') { err('Hmmm… can\'t reach this page', 'ERR_NAME_NOT_RESOLVED', [`${host}'s server DNS address could not be found.`, 'Running Network Diagnostics', `DNS server ${l.dns[0] ?? ''} menjawab SERVFAIL (gagal memuat zone), bukan "nama tidak ada".`], host); return; }
       if (r === null) { err('Hmmm… can\'t reach this page', 'DNS_PROBE_FINISHED_NXDOMAIN', [`Check if there is a typo in ${host}.`, 'If spelling is correct, try running Network Diagnostics.', l.dns.length ? `DNS server ${l.dns[0]} tidak mengenal nama ini.` : 'Belum ada DNS server yang diatur.'], host); return; }
       const pr = ping(s.a, s.env, r.ip, true);
       if (pr.kind !== 'reply') { err('Hmmm… can\'t reach this page', 'ERR_CONNECTION_TIMED_OUT', [`${host} took too long to respond.`, 'Checking the connection', 'Checking the proxy and the firewall', 'Running Network Diagnostics'], host); return; }
@@ -1022,7 +1025,19 @@ export class PcOS {
           h('p', {}, h('b', {}, 'Ubah alamat LAN')), row('Address', a1), h('button', { class: 'btn', name: 'apply-addr', onclick: apply }, 'Apply'), out,
           h('p', { class: 'fnote' }, 'Mengubah alamat LAN memindahkan subnet seluruh segmen ini. PC yang memakai alamat lama akan terputus sampai disesuaikan.'));
       }
-      if (page === 'dhcp') {
+      if (page === 'dhcp' && env.dhcpServer && env.dhcpServer !== r.ip) {
+        // Lab segment: the router does NOT serve DHCP here; isc-dhcp-server on the Linux server does (same L2 segment).
+        const srv = env.hosts.find(x => x.ip === env.dhcpServer);
+        const srvName = srv ? `${srv.name} (${env.dhcpServer})` : env.dhcpServer;
+        const up = !!env.dhcp && !srv?.down;
+        const leases = [...env.leases.entries()].map(([mac, lip]) => { const ad = [...this.pcs.values()].find(p => p.a.mac === mac)?.a; return [lip, mac.toUpperCase(), ad?.host ?? '-', srvName]; });
+        main.append(h('p', {}, h('b', {}, `DHCP Server · vlan${env.vlan}-lan`)),
+          h('table', {}, h('tr', {}, h('th', {}, 'Interface'), h('th', {}, 'Mode'), h('th', {}, 'DHCP server')), h('tr', { name: 'dhcp-mode' }, h('td', {}, `vlan${env.vlan}-lan`), h('td', {}, 'Disabled (tidak membagi alamat)'), h('td', {}, srvName))),
+          note(`DHCP router dimatikan di segmen ini. Alamat klien dibagikan oleh ${srvName} (isc-dhcp-server), satu segmen dengan router, jadi tidak perlu DHCP relay.`, true),
+          up ? note(`${srvName} menjawab DHCP · pool ${env.dhcp!.start} – ${env.dhcp!.end}, gateway ${env.dhcp!.gw}, DNS ${env.dhcp!.dns.join(', ')}`, true) : note(`${srvName} tidak menjawab DHCP: klien baru akan dapat 169.254.x.x (APIPA). Periksa layanan isc-dhcp-server di server.`),
+          h('p', { class: 'fnote' }, `Ubah pool/gateway/DNS di server: /etc/dhcp/dhcpd.conf lalu sudo systemctl restart isc-dhcp-server. Jangan nyalakan DHCP di router: dua DHCP server di satu segmen saling berebut klien.`),
+          h('p', {}, h('b', {}, 'Leases (terlihat dari ARP)')), h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'MAC Address'), h('th', {}, 'Host Name'), h('th', {}, 'Diberikan oleh')), ...leases.map(x => h('tr', {}, ...x.map(c => h('td', {}, c))))));
+      } else if (page === 'dhcp') {
         const d = env.dhcp ?? (env as any)._dhcpOff ?? { start: '', end: '', gw: r.ip, dns: [r.ip], lease: 8 };
         const on = h('input', { type: 'checkbox', name: 'dhcp-on' }) as HTMLInputElement; on.checked = !!env.dhcp;
         const st = inp(d.start); st.name = 'dhcp-start'; const en = inp(d.end); en.name = 'dhcp-end';

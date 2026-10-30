@@ -9,7 +9,8 @@ const X = (l: number) => OX + l, Z = (l: number) => OZ + l;
 function canvasMat(w: number, h: number, draw: (g: CanvasRenderingContext2D, W: number, H: number) => void, emissive = 0) {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d')!; draw(g, w, h);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, emissive: emissive ? '#ffffff' : '#000000', emissiveMap: emissive ? t : null, emissiveIntensity: emissive });
+  // wall decals: pulled forward in depth so they never z-fight their frame/wall at a distance
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, emissive: emissive ? '#ffffff' : '#000000', emissiveMap: emissive ? t : null, emissiveIntensity: emissive, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
 }
 function fitText(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight = 'bold') {
   let fs = size; g.font = `${weight} ${fs}px Arial, sans-serif`;

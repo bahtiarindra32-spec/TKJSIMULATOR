@@ -208,6 +208,7 @@ function exitWalk() {
   $('hints').textContent = 'Klik/tarik untuk memutar · roda untuk zoom';
   if (document.pointerLockElement) document.exitPointerLock();
   missionUI.setHudVisible(false); noc.setHudVisible(false);
+  prompt.hide(); $('hudHint').textContent = '';   // the walk prompt ([F] Buka pintu…) used to stay on screen over the orbit views
 }
 $('enter').onclick = enterWalk;
 const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => { player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3); } });
@@ -276,7 +277,7 @@ function collide(p: THREE.Vector3, feet: number) {
     const ew = v.lane.axis === 'EW', half = v.len / 2, w = v.len > 10 ? 1.3 : v.len < 2.5 ? 0.45 : 0.95;
     vehicleBoxes.push({ minX: o.x - (ew ? half : w), maxX: o.x + (ew ? half : w), minZ: o.z - (ew ? w : half), maxZ: o.z + (ew ? w : half), minY: 0, maxY: 3 });
   }
-  closedDoorBoxes(p.x, p.z, vehicleBoxes);
+  closedDoorBoxes(p.x, p.z, vehicleBoxes, feet);
   vertical.closedBoxes(player.level, vehicleBoxes);
   resolveCircle(p, feet, RADIUS, vehicleBoxes);
 }
@@ -328,6 +329,7 @@ const liftInd = (() => { const e = document.createElement('div'); e.id = 'liftin
 let nearAnchor: string | null = null;
 let nearPc: (typeof PCS)[number] | null = null;
 let camDist = 2;
+const camSolids: AABB[] = [];
 pcos.onClose = () => {
   keys.clear(); last = performance.now();
   if (seat) { seat.phase = 'stand'; seat.t = 0; seat.fp = seat.tp.clone(); seat.fyaw = seat.tyaw; seat.fpitch = seat.tpitch; seat.tp = new THREE.Vector3(player.pos.x, player.pos.y + 1.62, player.pos.z); seat.tpitch = -0.08; }
@@ -370,7 +372,7 @@ function interact() {
   const sp = nearSpot(); if (sp) { noc.useSpot(sp.id); return; }
   const rk = nearRack();
   if (rk && rk !== 'MDF' && !nearPc) { keys.clear(); noc.openRack(rk); return; }
-  const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y);
+  const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y, 1.7, player.yaw);
   if (door && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
   if (!nearAnchor && nearPc) { sitAt(nearPc); return; }
   if (!nearAnchor) return;
@@ -426,13 +428,20 @@ function watchFps(realDt: number) {
 }
 /** inside the hotel only the floors around the camera can be seen: hide the others (big draw-call saving on every quality level) */
 const LEVEL_GROUPS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF'].map((n, i) => ({ lv: i + 1, batch: hotelBatches.get(n)!, group: hotel.getObjectByName(n)! }));
-let cullKey = '';
+let cullKey = '', cullLv = 1;
 function cullHotel() {
   const inside = mode === 'walk' && insideHotel(camera.position.x, camera.position.z) && camera.position.y < 27;
-  let lvCam = 1; LEVELS.forEach((L, i) => { if (camera.position.y >= L.elev - 0.2) lvCam = i + 1; });
-  const key = inside ? `in${lvCam}` : cutaway ? 'cut' : 'out';
+  // hysteresis: the level only changes 0.35 m past a floor line, so head bob on the stairs / the lift crossing a slab
+  // no longer flips the culled set every few frames (floors popping in and out = blinking)
+  const cy = camera.position.y;
+  while (cullLv < LEVELS.length && cy >= LEVELS[cullLv].elev + 0.35) cullLv++;
+  while (cullLv > 1 && cy < LEVELS[cullLv - 1].elev - 0.35) cullLv--;
+  const lvCam = cullLv;
+  // in the stair/lift core (or riding) the open shaft shows two floors up and down
+  const span = vertical.busy() || verticalZones.some(v => camera.position.x > v.x0 && camera.position.x < v.x1 && camera.position.z > v.z0 && camera.position.z < v.z1) ? 2 : 1;
+  const key = inside ? `in${lvCam}:${span}` : cutaway ? 'cut' : 'out';
   if (key === cullKey) return; cullKey = key;
-  for (const g of LEVEL_GROUPS) { const vis = !inside || Math.abs(g.lv - lvCam) <= 1; g.group.visible = vis; g.batch.visible = vis && !(cutaway && g.lv >= 2); }
+  for (const g of LEVEL_GROUPS) { const vis = !inside || Math.abs(g.lv - lvCam) <= span; g.group.visible = vis; g.batch.visible = vis && !(cutaway && g.lv >= 2); }
   if (!inside && cutaway) setCutaway(true);
 }
 
@@ -516,10 +525,19 @@ function updateWalk(dt: number) {
     const side = new THREE.Vector3(Math.cos(view.yaw), 0, -Math.sin(view.yaw)).multiplyScalar(0.35);
     let d = 0.3; const q = new THREE.Vector3();
     const ceil = indoor ? player.pos.y + 2.25 : 1e9;
-    while (d < wantD) { q.copy(head).addScaledVector(back, d + 0.1).add(side); if (blocked(q.x, q.z, q.y, 0.12) || q.y > ceil || q.y < player.pos.y + 0.2) break; d += 0.1; }
-    camDist += (d - camDist) * Math.min(1, (d < camDist ? 20 : 5) * dt);
+    // closed doors / closed lift landing doors count as walls for the camera too (it used to slide through a closed door into the room behind)
+    camSolids.length = 0; if (indoor) { closedDoorBoxes(head.x, head.z, camSolids, player.pos.y); vertical.closedBoxes(player.level, camSolids); }
+    // 0.22 m clearance: the near plane's corners reach ~0.22 m from the eye, so a closer wall gets clipped open
+    while (d < wantD) { q.copy(head).addScaledVector(back, d + 0.1).add(side); if (blocked(q.x, q.z, q.y, 0.22, camSolids) || q.y > ceil || q.y < player.pos.y + 0.2) break; d += 0.1; }
+    camDist = d < camDist ? d : camDist + (d - camDist) * Math.min(1, 5 * dt);   // pull in at once (no frame inside a wall), ease back out
     camera.position.copy(head).addScaledVector(back, camDist).add(side);
     camera.position.y = Math.max(camera.position.y, player.pos.y + 0.25) + fx.dip * 0.5;
+    if (inCar) { // keep the camera inside the car (its walls are not colliders; outside them the near plane cut the car open)
+      const cx = wx(HOTEL_ORIGIN[0] + (player.pos.x > wx(HOTEL_ORIGIN[0] + 21) ? 22 : 20));
+      camera.position.x = THREE.MathUtils.clamp(camera.position.x, cx - 0.62, cx + 0.62);
+      camera.position.z = THREE.MathUtils.clamp(camera.position.z, wz(HOTEL_ORIGIN[1] + 12.45), wz(HOTEL_ORIGIN[1] + 13.62));
+      camera.position.y = Math.min(camera.position.y, player.pos.y + 2.1);
+    }
     camera.rotation.set(pitch, view.yaw, 0, 'YXZ');
   }
   // what is in reach
@@ -536,7 +554,7 @@ function updateWalk(dt: number) {
   }
   let hint = '', at: THREE.Vector3 | null = null;
   const sp = ride ? null : nearSpot();
-  const dr = !ride && !sp && insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y) : null;
+  const dr = !ride && !sp && insideHotel(player.pos.x, player.pos.z) ? nearestDoor(player.pos.x, player.pos.z, player.pos.y, 1.7, player.yaw) : null;
   if (ride) hint = '';
   else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
   else if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { hint = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; at = new THREE.Vector3(dr.cx, dr.y0 + 1.45, dr.cz); if (inVertical(player.pos.x, player.pos.z)) hint += atLift() ? ' · [E] Panggil lift (pilih lantai)' : ' · [E] Naik tangga · [Q] Turun tangga'; }
@@ -725,6 +743,11 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
   noc, missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
+  /** QA: is a point (city coords) inside a static collider (r = padding) */
+  blockedAt: (X: number, Z: number, y: number, r = 0) => blocked(wx(X), wz(Z), y, r),
+  /** QA: camera pose + view (city coords) and a fixed look direction for screenshot probes */
+  camPose: () => ({ x: cityX(camera.position.x), z: cityZ(camera.position.z), y: camera.position.y, near: camera.near, far: camera.far, third: thirdPerson }),
+  setThird: (v: boolean) => { thirdPerson = v; },
   /** QA: walkability grid of a hotel level (local metres, -1..31 x -1..21). 0 blocked, 1 standable+reachable from seed, 2 standable but unreachable */
   reach: (lv: number, seedX = 1, seedZ = 11, st = 0.2) => {
     const feet = LEVELS[lv - 1].elev + 0.12, x0 = -1, z0 = -1, W = Math.round(32 / st), H = Math.round(22 / st);

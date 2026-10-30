@@ -10,7 +10,7 @@ export interface Host { ip: string; name: string; mac: string; ttl: number; web?
 /** Pluggable services (Linux DNS server, edge router) so the sim stays one source of truth. */
 export const HOOKS = {
   /** a DNS server at this IP answers itself (undefined = not this server) */
-  dns: new Map<string, (name: string, a: Adapter, env: Env) => { ip: string } | null | 'timeout'>(),
+  dns: new Map<string, (name: string, a: Adapter, env: Env) => { ip: string } | null | 'timeout' | 'servfail'>(),
   /** can this segment reach the internet right now (edge router WAN / NAT / ACL)? */
   internet: (_env: Env, _src: string, _dst: string, _proto: 'icmp' | 'udp53' | 'tcp80') => true as boolean,
 };
@@ -23,6 +23,8 @@ export interface Env {
   dhcp: DhcpCfg | null; dnsSrv: DnsCfg; suffix: string;
   hosts: Host[]; internet: boolean; adapter: string; wireless: boolean;
   leases: Map<string, string>;
+  /** who hands out leases on this segment when it is not the router itself (lab: srv-nusa 192.168.10.5) */
+  dhcpServer?: string;
 }
 
 const mkEnv = (id: EnvId, vlan: number, label: string, net: string, prefix: number, suffix: string, adapter: string, wireless: boolean, hosts: Host[], pool: [number, number], lease: number): Env => {
@@ -269,7 +271,7 @@ export function live(a: Adapter, env: Env = envOf(a.pc)): Live {
       const ip = allocate(env, a);
       if (!ip) return apipa(a);
       const d = env.dhcp!;
-      a.lease = { ip, t: Date.now(), prefix: env.prefix, gw: d.gw, dns: [...d.dns], env: env.id, server: env.gateway };
+      a.lease = { ip, t: Date.now(), prefix: env.prefix, gw: d.gw, dns: [...d.dns], env: env.id, server: env.dhcpServer ?? env.gateway };
     }
     if (!a.lease.ip) return { ip: '', prefix: 0, gw: '', dns: [], apipa: false, ok: false, why: 'released' };
     const dns = a.dnsAuto ? a.lease.dns : [a.dns1, a.dns2].filter(s => parseIp(s) !== null);
@@ -321,7 +323,8 @@ export function onSegment(l: Live, env: Env, self?: Adapter) {
 }
 
 /** Resolve a name like Windows' resolver (configured DNS servers in order). */
-export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: string } | null | 'timeout' {
+/** null = NXDOMAIN, 'timeout' = no server answered, 'servfail' = a server answered SERVFAIL (e.g. its zone failed to load). */
+export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: string } | null | 'timeout' | 'servfail' {
   const n = name.toLowerCase().replace(/\.$/, '');
   if (parseIp(n) !== null) return { ip: n, via: '' };
   if (n === 'localhost') return { ip: '127.0.0.1', via: '' };
@@ -329,7 +332,7 @@ export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: 
   if (!l.ok || !l.dns.length) return null;
   for (const d of l.dns) {
     if (ping(a, env, d, true).kind !== 'reply') continue;
-    const hk = HOOKS.dns.get(d); if (hk) { const x = hk(n, a, env); return x && x !== 'timeout' ? { ip: x.ip, via: d } : x; }
+    const hk = HOOKS.dns.get(d); if (hk) { const x = hk(n, a, env); return x && typeof x === 'object' ? { ip: x.ip, via: d } : x; }
     const r = routerOf(env);
     if (r && d === r.ip) { const x = routerAnswer(env, n, l.ip); if (x === 'refused') continue; return x === null ? null : x === 'timeout' ? 'timeout' : { ip: x.ip, via: d }; }
     if (PUBLIC_DNS.includes(d)) { if (!HOOKS.internet(env, l.ip, d, 'udp53')) continue; return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null; }
@@ -408,7 +411,7 @@ export function healthy(a: Adapter, env: Env = envOf(a.pc)) {
   if (isWireless(a.pc)) { const q = quality(a.pc); if (!q || !q.ok) return false; }
   if (ping(a, env, l.gw || '0.0.0.0', true).kind !== 'reply') return false;
   const r = resolve(a, env, 'cari.id');
-  return !!r && r !== 'timeout' && ping(a, env, r.ip, true).kind === 'reply';
+  return !!r && typeof r === 'object' && ping(a, env, r.ip, true).kind === 'reply';
 }
 
 /** Windows retries DHCP on its own: a client whose lease was NAKed (stale subnet) or that sits on APIPA

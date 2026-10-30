@@ -132,13 +132,13 @@ const host = () => ENVS.lab.hosts.find(h => h.ip === SRV.ip)!;
 function syncHost() { const hh = host(); hh.down = !SRV.power || !SRV.cable; applyDhcp(); }
 
 /** bind9 answering a client */
-function answer(n: string, a: Adapter | null): { ip: string } | null | 'timeout' {
+function answer(n: string, a: Adapter | null): { ip: string } | null | 'timeout' | 'servfail' {
   if (!SVC.bind9.active) return 'timeout';
   const zone = SRV.zone; let name = n.toLowerCase().replace(/\.$/, '');
   for (let hop = 0; hop < 4; hop++) {
     const rel = name === zone ? '@' : name.endsWith(`.${zone}`) ? name.slice(0, -zone.length - 1) : (!name.includes('.') ? name : null);
     if (rel === null) break;
-    if (!LOADED.length) return 'timeout';                      // zone failed to load: SERVFAIL
+    if (!LOADED.length) return 'servfail';                     // zone failed to load: bind9 answers SERVFAIL (not NXDOMAIN)
     const r = LOADED.find(x => x.name === rel && x.type !== 'NS');
     if (!r) return null;                                        // NXDOMAIN inside our zone
     if (r.type === 'A') return { ip: r.val };
@@ -157,6 +157,7 @@ export function webPage(): string | null { return SVC.apache2.active && SRV.powe
 
 export function initLinux() {
   if (!ENVS.lab.hosts.some(h => h.ip === SRV.ip)) ENVS.lab.hosts.push({ ip: SRV.ip, name: SRV.name, mac: '52-54-00-10-00-05', ttl: 64, web: 'linux' });
+  ENVS.lab.dhcpServer = SRV.ip;   // the router's own DHCP is off on the lab segment; isc-dhcp-server on srv-nusa serves it
   for (const s of Object.keys(SVC) as Svc[]) start(s);
   syncHost();
 }
@@ -228,9 +229,9 @@ export class LinuxShell implements Shell {
         const name = a.find(x => !x.startsWith('@') && !x.startsWith('+') && !/^\d+\.\d+\.\d+\.\d+$/.test(x)); const srv = (a.find(x => x.startsWith('@'))?.slice(1)) ?? (c === 'nslookup' ? a.find(x => /^\d+\.\d+\.\d+\.\d+$/.test(x)) : undefined) ?? '127.0.0.1';
         if (!name) return `usage: ${c} name [@server]`;
         const r = srv === '127.0.0.1' || srv === SRV.ip || srv === 'localhost' ? answer(name, null) : srv === ENVS.lab.gateway ? ((x => x === 'refused' ? 'timeout' : x)(routerAnswer(ENVS.lab, name, SRV.ip))) : 'timeout';
-        if (c === 'host') return r === 'timeout' ? `;; connection timed out; no servers could be reached` : r === null ? `Host ${name} not found: 3(NXDOMAIN)` : `${name} has address ${r.ip}`;
-        if (c === 'nslookup') return r === 'timeout' ? `;; communications error to ${srv}#53: connection refused\n;; no servers could be reached` : `Server:\t\t${srv}\nAddress:\t${srv}#53\n\n` + (r === null ? `** server can't find ${name}: NXDOMAIN` : `Name:\t${name}\nAddress: ${r.ip}`);
-        return r === 'timeout' ? `;; communications error to ${srv}#53: ${SVC.bind9.active ? 'timed out' : 'connection refused'}\n;; no servers could be reached` : `; <<>> DiG 9.18.28 <<>> ${name}\n;; ->>HEADER<<- opcode: QUERY, status: ${r === null ? 'NXDOMAIN' : 'NOERROR'}\n;; ANSWER SECTION:\n${r === null ? '' : `${name}.\t604800\tIN\tA\t${r.ip}\n`}\n;; SERVER: ${srv}#53(${srv}) (UDP)`;
+        if (c === 'host') return r === 'timeout' ? `;; connection timed out; no servers could be reached` : r === 'servfail' ? `Host ${name} not found: 2(SERVFAIL)` : r === null ? `Host ${name} not found: 3(NXDOMAIN)` : `${name} has address ${r.ip}`;
+        if (c === 'nslookup') return r === 'timeout' ? `;; communications error to ${srv}#53: connection refused\n;; no servers could be reached` : `Server:\t\t${srv}\nAddress:\t${srv}#53\n\n` + (r === 'servfail' ? `** server can't find ${name}: SERVFAIL` : r === null ? `** server can't find ${name}: NXDOMAIN` : `Name:\t${name}\nAddress: ${r.ip}`);
+        return r === 'timeout' ? `;; communications error to ${srv}#53: ${SVC.bind9.active ? 'timed out' : 'connection refused'}\n;; no servers could be reached` : `; <<>> DiG 9.18.28 <<>> ${name}\n;; ->>HEADER<<- opcode: QUERY, status: ${r === 'servfail' ? 'SERVFAIL' : r === null ? 'NXDOMAIN' : 'NOERROR'}\n;; ANSWER SECTION:\n${r === null || r === 'servfail' ? '' : `${name}.\t604800\tIN\tA\t${r.ip}\n`}\n;; SERVER: ${srv}#53(${srv}) (UDP)`;
       }
       case 'named-checkzone': { const p = this.path(a[1] ?? `/etc/bind/db.${SRV.zone}`); const v = FILES.get(p); if (v === undefined) return `zone ${a[0] ?? ''}/IN: loading from master file ${a[1] ?? ''} failed: file not found`; const z = parseZone(v); return z.err ? `${z.err}\nzone ${a[0] ?? SRV.zone}/IN: loading from master file ${p} failed: syntax error` : `zone ${a[0] ?? SRV.zone}/IN: loaded serial ${z.serial}\nOK`; }
       case 'named-checkconf': return /forwarders\s*\{[^}]*\};/.test(FILES.get('/etc/bind/named.conf.options') ?? '') && /zone\s+"[^"]+"\s*\{[^}]*\};/.test(FILES.get('/etc/bind/named.conf.local') ?? '') ? '' : '/etc/bind/named.conf: missing \';\' before end of file';
@@ -254,7 +255,7 @@ export class LinuxShell implements Shell {
     if (raw) return rows.map(([m, ip]) => `lease ${ip} {\n  starts 5 2026/10/30 01:12:44;\n  binding state active;\n  hardware ethernet ${m.replace(/-/g, ':')};\n}`).join('\n') || '# no leases';
     return `MAC                IP              hostname        valid until\n${'-'.repeat(70)}\n` + rows.map(([m, ip]) => { const ad = [...ADAPTERS.values()].find(x => x.mac === m); return `${m.replace(/-/g, ':').padEnd(19)}${ip.padEnd(16)}${(ad?.host ?? '-').padEnd(16)}2026-10-31 08:12:44`; }).join('\n');
   }
-  private resolveLocal(n: string): string | null { if (parseIp(n) !== null) return n; if (n === 'localhost') return '127.0.0.1'; const r = answer(n, null); return r && r !== 'timeout' ? r.ip : null; }
+  private resolveLocal(n: string): string | null { if (parseIp(n) !== null) return n; if (n === 'localhost') return '127.0.0.1'; const r = answer(n, null); return r && typeof r === 'object' ? r.ip : null; }
   /** can srv-nusa reach this IP (same rules as a lab PC with a static address) */
   private reach(ip: string) {
     if (ip === '127.0.0.1' || ip === SRV.ip) return true;

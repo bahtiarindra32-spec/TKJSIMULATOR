@@ -7,7 +7,7 @@ import * as ND from '../assets/netdevices';
 const OX = wx(HOTEL_ORIGIN[0]), OZ = wz(HOTEL_ORIGIN[1]);
 const X = (lx: number) => OX + lx, Z = (lz: number) => OZ + lz;
 
-export interface DoorLeaf { piv: THREE.Group; slide: boolean; base: number; swing: number; slideDir: number; cx: number; cz: number; y0: number; open: number; want?: boolean; box: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number } }
+export interface DoorLeaf { piv: THREE.Group; slide: boolean; base: number; swing: number; lw: number; slideDir: number; cx: number; cz: number; y0: number; open: number; want?: boolean; box: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number } }
 /** every hinged/sliding door leaf in the hotel; animated by updateDoors() */
 export const doorLeaves: DoorLeaf[] = [];
 /** open doors when someone is near (auto-closer), hide upper-floor doors during the cutaway view */
@@ -23,9 +23,14 @@ export function updateDoors(dt: number, px: number, pz: number, py: number, hide
   }
 }
 /** nearest hinged door (sliding lobby doors stay automatic) */
-export function nearestDoor(px: number, pz: number, py: number, r = 1.7): DoorLeaf | null {
-  let best: DoorLeaf | null = null, bd = r * r;
-  for (const d of doorLeaves) { if (d.slide || Math.abs(py - d.y0) > 1.2) continue; const q = (px - d.cx) ** 2 + (pz - d.cz) ** 2; if (q < bd) { bd = q; best = d; } }
+export function nearestDoor(px: number, pz: number, py: number, r = 1.7, yaw?: number): DoorLeaf | null {
+  let best: DoorLeaf | null = null, bd = r * r, bs = Infinity;
+  for (const d of doorLeaves) {
+    if (d.slide || Math.abs(py - d.y0) > 1.2) continue; const q = (px - d.cx) ** 2 + (pz - d.cz) ** 2; if (q >= bd) continue;
+    // standing between two doors (corridor between facing rooms): prefer the one in front of the player, not the one behind
+    const score = yaw === undefined ? q : q + ((d.cx - px) * -Math.sin(yaw) + (d.cz - pz) * -Math.cos(yaw) < 0 ? 4 : 0);
+    if (score < bs) { bs = score; best = d; }
+  }
   return best;
 }
 export function toggleDoor(d: DoorLeaf) {
@@ -33,8 +38,16 @@ export function toggleDoor(d: DoorLeaf) {
   const v = !d.want;
   for (const o of doorLeaves) if (!o.slide && Math.abs(o.y0 - d.y0) < 0.1 && Math.hypot(o.cx - d.cx, o.cz - d.cz) < 0.05) o.want = v;
 }
-export function closedDoorBoxes(px: number, pz: number, out: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number }[]) {
-  for (const d of doorLeaves) if (d.open < 0.35 && Math.abs(px - d.cx) < 4 && Math.abs(pz - d.cz) < 4) out.push(d.box);
+export function closedDoorBoxes(px: number, pz: number, out: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number }[], py?: number) {
+  for (const d of doorLeaves) {
+    if (Math.abs(px - d.cx) > 4 || Math.abs(pz - d.cz) > 4 || (py !== undefined && Math.abs(py - d.y0) > 2.5)) continue;
+    if (d.open < 0.35) { out.push(d.box); continue; }
+    // an open hinged leaf is solid too (it used to be walk-through): box around the leaf from the hinge to its free edge
+    if (d.slide || d.open < 0.9) continue;
+    const th = d.piv.rotation.y, sg = d.piv.children[0].position.x >= 0 ? 1 : -1;
+    const hx = d.piv.position.x, hz = d.piv.position.z, fx = hx + sg * d.lw * Math.cos(th), fz = hz - sg * d.lw * Math.sin(th);
+    out.push({ minX: Math.min(hx, fx) - 0.03, maxX: Math.max(hx, fx) + 0.03, minZ: Math.min(hz, fz) - 0.03, maxZ: Math.max(hz, fz) + 0.03, minY: d.y0, maxY: d.box.maxY });
+  }
 }
 
 export interface LevelZone { name: string; level: number; x0: number; x1: number; z0: number; z1: number }
@@ -89,8 +102,9 @@ function wall(parent: THREE.Object3D, x1: number, z1: number, x2: number, z2: nu
     } else if (o.kind === 'door') {
       // open door leaf (rotated 80deg) so the passage stays walkable; frame around opening
       const leaf = o.mat ?? doorWood;
-      if (alongX) { box(g, X(s) - 0.05, y0, Z(c - thick / 2 - 0.02), 0.05, o.t, thick + 0.04, frameMat, undefined, false); box(g, X(e), y0, Z(c - thick / 2 - 0.02), 0.05, o.t, thick + 0.04, frameMat, undefined, false); }
-      else { box(g, X(c - thick / 2 - 0.02), y0, Z(s) - 0.05, thick + 0.04, o.t, 0.05, frameMat, undefined, false); box(g, X(c - thick / 2 - 0.02), y0, Z(e), thick + 0.04, o.t, 0.05, frameMat, undefined, false); }
+      // jambs stick 1 cm into the opening: a jamb face flush with the wall's end face z-fights (flickering stripes in every doorway)
+      if (alongX) { box(g, X(s) - 0.04, y0, Z(c - thick / 2 - 0.02), 0.05, o.t, thick + 0.04, frameMat, undefined, false); box(g, X(e) - 0.01, y0, Z(c - thick / 2 - 0.02), 0.05, o.t, thick + 0.04, frameMat, undefined, false); }
+      else { box(g, X(c - thick / 2 - 0.02), y0, Z(s) - 0.04, thick + 0.04, o.t, 0.05, frameMat, undefined, false); box(g, X(c - thick / 2 - 0.02), y0, Z(e) - 0.01, thick + 0.04, o.t, 0.05, frameMat, undefined, false); }
       const lw = o.w > 1.5 ? o.w / 2 : o.w;
       const leaves = o.w > 1.5 ? [s, e] : [s];
       const slide = !!o.name?.includes('P01');
@@ -106,7 +120,7 @@ function wall(parent: THREE.Object3D, x1: number, z1: number, x2: number, z2: nu
         if (alongX) piv.position.set(X(hinge), y0, Z(c)); else piv.position.set(X(c), y0, Z(hinge));
         piv.rotation.y = base;
         const cx = alongX ? X(o.c) : X(c), cz = alongX ? Z(c) : Z(o.c);
-        doorLeaves.push({ piv, slide, base, swing: (i ? 1 : -1) * 1.5, slideDir: (i ? -1 : 1) * -0.95 * lw, cx, cz, y0, open: 0,
+        doorLeaves.push({ piv, slide, base, swing: (i ? 1 : -1) * 1.55, lw, slideDir: (i ? -1 : 1) * -0.95 * lw, cx, cz, y0, open: 0,
           box: alongX ? { minX: X(s), maxX: X(e), minZ: Z(c) - 0.06, maxZ: Z(c) + 0.06, minY: y0, maxY: y0 + o.t } : { minX: X(c) - 0.06, maxX: X(c) + 0.06, minZ: Z(s), maxZ: Z(e), minY: y0, maxY: y0 + o.t } });
         g.add(piv);
       });
@@ -240,10 +254,14 @@ function sofa(p: THREE.Object3D, y: number, x: number, z: number, w: number, d: 
   return g;
 }
 function label(text: string, w: number, h: number, bg = '#13202b', fg = '#ffffff', accent = '#2bd46b') {
-  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: signTex(text, bg, fg, 1024, Math.round(1024 * h / w), accent), roughness: 0.5 }));
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: signTex(text, bg, fg, 1024, Math.round(1024 * h / w), accent), roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
 }
+/** underside of what is above a level: the next slab's ceiling grid (top of slab y+h+0.12, 0.2 slab + 0.03 grid) or the roof slab */
+const ceilY = (y: number, h: number) => (y + h >= ROOF_ELEV - 0.01 ? ROOF_ELEV - 0.2 : y + h + 0.12 - 0.23);
+/** flush lamp panels just under the ceiling (they used to sit at y+h-0.03, i.e. inside the slab above, so no lamp was ever visible) */
+function lampAt(p: THREE.Object3D, y: number, h: number, x: number, z: number, w = 0.6, d = 0.6) { box(p, X(x), ceilY(y, h) - 0.025, Z(z), w, 0.02, d, M.lampOn, undefined, false); }
 function ceilingLights(p: THREE.Object3D, y: number, h: number, x0: number, x1: number, z0: number, z1: number, step = 2.5) {
-  for (let x = x0 + step / 2; x < x1; x += step) for (let z = z0 + step / 2; z < z1; z += step) box(p, X(x - 0.3), y + h - 0.03, Z(z - 0.3), 0.6, 0.02, 0.6, M.lampOn, undefined, false);
+  for (let x = x0 + step / 2; x < x1; x += step) for (let z = z0 + step / 2; z < z1; z += step) lampAt(p, y, h, x - 0.3, z - 0.3);
 }
 
 // ---------- levels ----------
@@ -294,7 +312,7 @@ function buildL1(root: THREE.Object3D) {
   // D5 zones
   for (const [n, x0, x1, z0, z1] of [['L1_LOBI', 0, 14, 0, 12], ['L1_LOUNGE', 0, 10, 12, 20], ['L1_IT_OFFICE', 14, 22, 0, 10], ['L1_WORKSHOP', 22, 30, 0, 10], ['L1_CORRIDOR', 14, 30, 10, 12], ['L1_TOILET_M', 10, 12.5, 12, 20], ['L1_TOILET_F', 12.5, 15, 12, 20], ['L1_STAIR', 15, 19, 12, 20], ['L1_LIFT', 19, 23, 12, 20], ['L1_SERVER', 23, 30, 12, 20]] as [string, number, number, number, number][]) zone(1, n, x0, x1, z0, z1);
   ceilingLights(L, y, h, 0, 14, 0, 12, 3); ceilingLights(L, y, h, 14, 30, 0, 10, 2.6); ceilingLights(L, y, h, 0, 10, 12, 20, 3); ceilingLights(L, y, h, 23, 30, 12, 20, 2.3);
-  box(L, X(14), y + h - 0.03, Z(10.7), 16, 0.02, 0.6, M.lampOn, undefined, false);
+  lampAt(L, y, h, 14, 10.7, 16, 0.6);
 
   // D6 lobby + lounge
   const lob = group(L, 'L1_LOBI_PROPS');
@@ -417,7 +435,7 @@ function buildL1(root: THREE.Object3D) {
   group(sr, 'PROP_L1_UPS_02');
   put(sr, ND.signPlate('PROP_L1_SIGN_SERVER_01', { kind: 'server', text: 'RUANG SERVER · AKSES TERBATAS', w: 0.7, h: 0.25 }), 26.0, y + 2.0, 12.07, Math.PI);
   put(sr, ND.signPlate('PROP_L1_SIGN_NOFOOD_01', { kind: 'nofood', w: 0.3, h: 0.3 }), 24.5, y + 1.6, 12.07, Math.PI);
-  box(sr, X(29.1), sy, Z(12.55), 0.6, 1.9, 0.9, mat('#e7e9ea'), 'PROP_L1_PRECISION_AC_01'); box(sr, X(29.1), sy, Z(18.05), 0.6, 1.9, 0.9, mat('#e7e9ea'), 'PROP_L1_PRECISION_AC_02');
+  box(sr, X(29.1), sy, Z(13.3), 0.6, 1.9, 0.9, mat('#e7e9ea'), 'PROP_L1_PRECISION_AC_01'); /* stands on the raised floor (at Z12.55 it hung in the air over the door ramp) */ box(sr, X(29.1), sy, Z(18.05), 0.6, 1.9, 0.9, mat('#e7e9ea'), 'PROP_L1_PRECISION_AC_02');
   put(sr, ND.cableTray('PROP_L1_SRV_CABLE_TRAY_01', { length: 5.0, width: 0.4, cables: true, hangers: true }), 26.4, sy + 2.25, 17.5, 0);
   put(sr, ND.apar('PROP_L1_APAR_SERVER_01', { bracket: true }), 23.2, sy + 0.75, 12.6, -Math.PI / 2);
   box(sr, X(29.4), sy + 2.28, Z(12.25), 0.15, 0.1, 0.1, M.white, 'PROP_L1_CCTV_03');
@@ -428,7 +446,7 @@ function buildL1(root: THREE.Object3D) {
   // D10 toilets, stair, lift
   const tl = group(L, 'L1_CORE_PROPS');
   for (const [x0, tag] of [[10, 'M'], [12.5, 'F']] as [number, string][]) {
-    for (let i = 0; i < 2; i++) { box(tl, X(x0 + 0.6), y, Z(18.6 - i * 1.6), 0.4, 0.42, 0.65, M.white, `PROP_L1_WC_${tag}_0${i + 1}`); box(tl, X(x0 + 0.1), y, Z(17.6 - i * 1.6), 2.3, 2.0, 0.05, mat('#9fb4c2')); }
+    for (let i = 0; i < 2; i++) { box(tl, X(x0 + 0.6), y, Z(18.6 - i * 1.6), 0.4, 0.42, 0.6, M.white, `PROP_L1_WC_${tag}_0${i + 1}`); /* 0.6 deep: ends at the cubicle partition instead of poking through it (flush faces z-fought) */ box(tl, X(x0 + 0.1), y, Z(17.6 - i * 1.6), 2.3, 2.0, 0.05, mat('#9fb4c2')); }
     box(tl, X(x0 + 0.15), y + 0.8, Z(13.3), 0.5, 0.1, 0.6, M.white, `PROP_L1_SINK_${tag}_01`);
     box(tl, X(x0 + 0.07), y + 1.2, Z(13.2), 0.02, 0.8, 0.8, mat('#cfe3ee', { metalness: 0.9, roughness: 0.05 }));
     const s = label(tag === 'M' ? 'PRIA' : 'WANITA', 0.6, 0.18, tag === 'M' ? '#1e4f8a' : '#8a1e5a', '#fff', '#fff'); s.position.set(X(x0 + 1.25), y + 2.3, Z(11.93)); s.rotation.y = Math.PI; tl.add(s);
@@ -570,7 +588,8 @@ function wallTV(p: THREE.Object3D, y: number, lx: number, lz: number, yaw: numbe
   const h = w * 0.5625;
   const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, h + 0.04, 0.05), M.black); frame.position.set(0, 0, -0.03); g.add(frame);
   const scr = ND.monitor(`${name}_PANEL`, { screen }); scr.visible = false; // keep library screen material warm
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat('#10202c', { emissive: '#1d5a7a', emissiveIntensity: 0.55 })); face.position.set(0, 0, -0.057); face.rotation.y = Math.PI; g.add(face);
+  const fm = mat('#10202c', { emissive: '#1d5a7a', emissiveIntensity: 0.55 }); fm.polygonOffset = true; fm.polygonOffsetFactor = -1; fm.polygonOffsetUnits = -2;
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), fm); face.position.set(0, 0, -0.062);   // 7 mm proud of the bezel (was 2 mm: z-fought at a distance) face.rotation.y = Math.PI; g.add(face);
   return g;
 }
 function shelfUnit(p: THREE.Object3D, y: number, lx: number, lz: number, w: number, d: number, name: string, boxes = true) {
@@ -651,7 +670,7 @@ function buildHotelFloor(root: THREE.Object3D, lv: number) {
   for (const [nm, x0, x1, z0, z1] of [[`${tag}_CORRIDOR`, 0, 30, 10, 12], [`${tag}_HOUSEKEEPING`, 10, 12.5, 12, 20], [`${tag}_TOILET`, 12.5, 15, 12, 20], [`${tag}_LINEN`, 26.5, 30, 12, 20]] as [string, number, number, number, number][]) zone(lv, nm, x0, x1, z0, z1);
   for (let i = 0; i < 6; i++) zone(lv, `${tag}_ROOM_${lv}0${i + 1}`, i * 5, i * 5 + 5, 0, 10);
   zone(lv, `${tag}_ROOM_${lv}07`, 0, 5, 12, 20); zone(lv, `${tag}_ROOM_${lv}08`, 5, 10, 12, 20);
-  for (let x = 2.5; x < 30; x += 5) box(L, X(x - 0.3), y + h - 0.03, Z(10.7), 0.6, 0.02, 0.6, M.lampOn, undefined, false);
+  for (let x = 2.5; x < 30; x += 5) lampAt(L, y, h, x - 0.3, 10.7);
   return L;
 }
 
@@ -659,8 +678,9 @@ function buildRoof(root: THREE.Object3D) {
   const R = group(root, 'ROOF');
   const y = ROOF_ELEV;
   box(R, X(0), y - 0.2, Z(0), 30, 0.25, 20, mat('#8f8c86'), 'ROOF_SLAB');
-  for (const [x, z, w, d] of [[0, 0, 30, 0.2], [0, 19.8, 30, 0.2], [0, 0, 0.2, 20], [29.8, 0, 0.2, 20]]) box(R, X(x), y, Z(z), w, 1.0, d, extWallMat);
-  box(R, X(15), y, Z(12), 8, 3.0, 8, extWallMat, 'ROOF_MACHINE_ROOM');
+  // parapets stand 1 cm proud of the slab edge (flush faces z-fought along the whole roof line)
+  for (const [x, z, w, d] of [[-0.01, -0.01, 30.02, 0.21], [-0.01, 19.8, 30.02, 0.21], [-0.01, -0.01, 0.21, 20.02], [29.8, -0.01, 0.21, 20.02]]) box(R, X(x), y, Z(z), w, 1.0, d, extWallMat);
+  box(R, X(15), y, Z(12), 8, 3.0, 7.9, extWallMat, 'ROOF_MACHINE_ROOM');
   const dish = new THREE.Mesh(new THREE.SphereGeometry(0.9, 20, 10, 0, Math.PI * 2, 0, Math.PI / 3.2), mat('#f0f0f0', { side: THREE.DoubleSide }));
   dish.position.set(X(6), y + 1.4, Z(6)); dish.rotation.x = -Math.PI / 2 - 0.6; dish.name = 'PROP_ROOF_PARABOLA_01'; R.add(dish); cyl(R, X(6), y, Z(6), 0.05, 1.2, M.steel);
   cyl(R, X(24), y, Z(4), 0.06, 4.0, M.steel, 'PROP_ROOF_ANTENNA_01'); for (let k = 0; k < 3; k++) box(R, X(23.6), y + 2.5 + k * 0.5, Z(3.98), 0.8, 0.04, 0.04, M.steel, undefined, false);

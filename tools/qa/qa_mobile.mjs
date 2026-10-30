@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
 const out = {}; const errs = [];
-for (const [tag, vp] of [['land', { width: 844, height: 390 }], ['port', { width: 390, height: 844 }]]) {
+for (const [tag, vp] of [['land', { width: 844, height: 390 }], ['port', { width: 390, height: 844 }]].filter(([t]) => !process.argv[2] || process.argv[2].split(',').includes(t))) {
   const ctx = await b.newContext({ viewport: vp, isMobile: true, hasTouch: true, deviceScaleFactor: 1, userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36' });
   const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message.slice(0, 200)));
   await p.goto('http://127.0.0.1:8787/', { waitUntil: 'commit', timeout: 60000 });
