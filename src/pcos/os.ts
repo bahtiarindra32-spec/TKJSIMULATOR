@@ -4,6 +4,12 @@ import { ENVS, type Env, type Adapter, adapterOf, envOf, live, ping, resolve, ho
 import { networkOf, broadcastOf, prefixToMask } from '../game/missionLogic';
 import { APS, CLIENTS, AUTH, servingAp, quality, heardAt, pctOf, barsOf, channelClean, CHANNELS, type TxPower, type Heard } from './wifi';
 import { apPowered } from './net';
+import { LinuxShell, sshCheck, webPage, SRV } from './linux';
+import { nanoEditor } from './term';
+/** extra web apps served by simulated devices (Linux server, NAS, printers): up() false = connection refused */
+export const SITES: Record<string, { up?: (ip: string) => boolean; render: (ip: string, url: URL, os: PcOS) => HTMLElement }> = {};
+/** extra CMD commands (net use, ...) registered by device modules */
+export const CMD_EXT: Record<string, (args: string[], raw: string, os: PcOS) => string | Promise<string>> = {};
 
 type Attrs = Record<string, any>;
 function h(tag: string, a: Attrs = {}, ...kids: (Node | string | null | undefined | false)[]): HTMLElement {
@@ -49,7 +55,7 @@ const OSNAME = 'Jendela', CORP = 'Nusa Corporation', BUILD = '10.0.22631.4317';
 interface Win { id: string; el: HTMLElement; body: HTMLElement; title: string; icon: string; task: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }
 interface PcState { a: Adapter; readonly env: Env; signed: boolean; notes: string; history: string[] }
 
-export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg' | 'wifi' | 'portal'; pc: string; detail: any }
+export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg' | 'wifi' | 'portal' | 'ssh' | 'print' | 'netuse'; pc: string; detail: any }
 
 export class PcOS {
   readonly root: HTMLElement;
@@ -76,6 +82,12 @@ export class PcOS {
     this.root.addEventListener('contextmenu', e => e.preventDefault());
   }
   isOpen() { return this.root.classList.contains('open'); }
+  /** the PC that is open now (device modules use it for CMD commands and print jobs) */
+  current() { return this.cur ? { name: this.curName, label: this.label, a: this.cur.a, env: this.cur.env } : null; }
+  /** a small message box (device modules) */
+  message(title: string, msg: string, kind: 'info' | 'warn' | 'err' = 'info') { this.msgBox(title, msg, kind); }
+  /** open a window with custom content (device modules: printers, mapped drives) */
+  window(title: string, body: HTMLElement, w = 640, hh = 440) { return this.win({ title, icon: I.gear, w, h: hh, body }); }
   private get wl() { return isWireless(this.curName); }
   state(name: string) {
     let s = this.pcs.get(name);
@@ -99,7 +111,7 @@ export class PcOS {
     this.root.innerHTML = ''; this.wins = [];
     this.onClose?.();
   }
-  private emit(type: PcEvent['type'], detail: any) { this.onEvent?.({ type, pc: this.curName, detail }); }
+  emit(type: PcEvent['type'], detail: any) { this.onEvent?.({ type, pc: this.curName, detail }); }
 
   private keys(e: KeyboardEvent) {
     e.stopPropagation();
@@ -289,11 +301,12 @@ export class PcOS {
     const inRow = h('div', { class: 'in' }, prm, inp);
     const term = h('div', { class: 'cmd' }, out, inRow);
     let cwd = 'C:\\Users\\siswa', busy: { stop: () => void } | null = null, hi = s.history.length;
+    let sub: LinuxShell | null = null;   // an SSH session running inside this window
     const print = (t = '') => { for (const ln of t.split('\n')) out.append(h('div', { class: 'ln' }, ln)); term.scrollTop = term.scrollHeight; };
     print(`${OSNAME} Nusantara [Version ${BUILD}]\n(c) ${CORP}. All rights reserved.\n`);
     term.addEventListener('mouseup', () => { if (!getSelection()?.toString()) inp.focus(); });
     const w = this.win({ title: 'Command Prompt', icon: I.cmd, w: 860, h: 470, body: term, dark: true, focusEl: () => inp, onClose: () => busy?.stop() });
-    const done = () => { busy = null; inRow.style.display = ''; prm.textContent = `${cwd}>`; term.scrollTop = term.scrollHeight; inp.focus(); this.refreshTray(); };
+    const done = () => { busy = null; inRow.style.display = ''; prm.textContent = sub ? sub.prompt() : `${cwd}>`; (inp as HTMLInputElement).type = sub?.secret ? 'password' : 'text'; term.scrollTop = term.scrollHeight; inp.focus(); this.refreshTray(); };
     const seq = (lines: (string | (() => string))[], gap = 1000, first = 0): Promise<void> => new Promise(res => {
       let i = 0, t = 0; inRow.style.display = 'none';
       const stop = () => { clearTimeout(t); print('Control-C\n^C'); res(); };
@@ -307,10 +320,17 @@ export class PcOS {
       if (e.key === 'Tab') { e.preventDefault(); return; }
       if (e.key !== 'Enter') return;
       const raw = inp.value; inp.value = '';
+      if (sub) {
+        const sh = sub, sec = sh.secret; print(`${sh.prompt()}${sec ? '' : raw}`);
+        const r = sh.exec(raw.trim(), { edit: (p, tx, save) => nanoEditor(term, inRow, p, tx, save, () => inp.focus(), m => print(m)), close: () => { sub = null; } });
+        if (r === '\u001b') out.innerHTML = ''; else if (r) print(r);
+        if (raw.trim() && !sec) this.emit('ssh', { line: raw.trim(), shell: sub ? 'ok' : 'closed' });
+        done(); return;
+      }
       print(`${cwd}>${raw}`);
       if (raw.trim()) { s.history.push(raw); hi = s.history.length; }
       inRow.style.display = 'none';
-      await this.exec(raw.trim(), { print, seq, setBusy: (f: (() => void) | null) => { busy = f ? { stop: f } : null; }, cls: () => { out.innerHTML = ''; }, exit: () => this.closeWin(w), cwd: () => cwd, cd: (p: string) => { cwd = p; } });
+      await this.exec(raw.trim(), { print, seq, setBusy: (f: (() => void) | null) => { busy = f ? { stop: f } : null; }, cls: () => { out.innerHTML = ''; }, exit: () => this.closeWin(w), cwd: () => cwd, cd: (p: string) => { cwd = p; }, attach: (sh: LinuxShell) => { sub = sh; } });
       if (w.el.isConnected) { print(''); done(); }
     });
     term.addEventListener('keydown', e => { if (e.ctrlKey && (e.key === 'c' || e.key === 'C') && busy && !getSelection()?.toString()) { e.preventDefault(); busy.stop(); } });
@@ -319,7 +339,7 @@ export class PcOS {
     return w;
   }
 
-  private async exec(line: string, t: { print: (s?: string) => void; seq: (l: (string | (() => string))[], gap?: number, first?: number) => Promise<void>; setBusy: (f: (() => void) | null) => void; cls: () => void; exit: () => void; cwd: () => string; cd: (p: string) => void }) {
+  private async exec(line: string, t: { attach?: (sh: LinuxShell) => void; print: (s?: string) => void; seq: (l: (string | (() => string))[], gap?: number, first?: number) => Promise<void>; setBusy: (f: (() => void) | null) => void; cls: () => void; exit: () => void; cwd: () => string; cd: (p: string) => void }) {
     const s = this.cur!; const a = s.a, env = s.env;
     if (!line) return;
     const parts = line.split(/\s+/); const cmd = parts[0].toLowerCase(); const args = parts.slice(1); const al = args.map(x => x.toLowerCase());
@@ -345,6 +365,19 @@ export class PcOS {
       case 'getmac': t.print(`\nPhysical Address    Transport Name\n=================== ==========================================================\n${a.mac.toUpperCase()}   ${l.ok ? '\\Device\\Tcpip_{6D1A2F44-0B9C-4E2B-9C11-3F0A7B5E21D4}' : 'Media disconnected'}`); return;
       case 'ipconfig': return this.ipconfig(al, t, { adHead, adName, l, ll6, dot, fmtDate });
       case 'ping': return this.cmdPing(args, t);
+      case 'ssh': {
+        const tok = args.find(x => !x.startsWith('-') && x !== args[args.indexOf('-l') + 1 || -1]) ?? '';
+        let user = tok.includes('@') ? tok.split('@')[0] : (args[args.indexOf('-l') + 1] && args.includes('-l') ? args[args.indexOf('-l') + 1] : 'siswa');
+        const hostN = tok.includes('@') ? tok.split('@')[1] : tok;
+        if (!hostN) { t.print('usage: ssh [-l login_name] [user@]hostname'); return; }
+        const r = resolve(a, env, hostN);
+        if (r === null || r === 'timeout') { t.print(`ssh: Could not resolve hostname ${hostN}: No such host is known.`); return; }
+        const e = sshCheck(a, r.ip); this.emit('ssh', { target: r.ip, ok: !e, line });
+        if (e) { t.print(e); return; }
+        user = user.toLowerCase();
+        t.print(`The authenticity of host '${hostN} (${r.ip})' can't be established.\nED25519 key fingerprint is SHA256:q8VYk3tTkJ+nusa0srv5mT2pR1xLdC0h7bY9o4uE2wQ.\nWarning: Permanently added '${hostN}' (ED25519) to the list of known hosts.`);
+        t.attach?.(new LinuxShell('ssh', a.host, user)); return;
+      }
       case 'tracert': return this.cmdTracert(args, t);
       case 'nslookup': return this.cmdNslookup(args, t);
       case 'arp': {
@@ -371,6 +404,7 @@ export class PcOS {
         return;
       }
       default:
+        if (CMD_EXT[cmd]) { const r = await CMD_EXT[cmd](args, line, this); if (r) t.print(r); return; }
         t.print(`'${parts[0]}' is not recognized as an internal or external command,\noperable program or batch file.`);
     }
   }
@@ -772,6 +806,8 @@ export class PcOS {
       if (pr.kind !== 'reply') { err('Hmmm… can\'t reach this page', 'ERR_CONNECTION_TIMED_OUT', [`${host} took too long to respond.`, 'Checking the connection', 'Checking the proxy and the firewall', 'Running Network Diagnostics'], host); return; }
       const allHosts = Object.values(ENVS).flatMap(e => e.hosts);
       const web = allHosts.find(x => x.ip === r.ip)?.web ?? Object.values(INTERNET).find(x => x.ip === r.ip)?.web;
+      const ext = web ? SITES[web] : undefined;
+      if (ext?.up && !ext.up(r.ip)) { err('Hmmm… can\'t reach this page', 'ERR_CONNECTION_REFUSED', [`${host} refused to connect.`, 'Server bisa di-ping, tapi layanan web-nya tidak berjalan.'], host); return; }
       this.emit('browse', { url: url.href, ip: r.ip, web });
       if (!web) { err('Hmmm… can\'t reach this page', 'ERR_CONNECTION_REFUSED', [`${host} refused to connect.`, 'Perangkat ini tidak menjalankan web server.'], host); return; }
       set(host, this.site(web, r.ip, url, q => go(q)));
@@ -805,6 +841,7 @@ export class PcOS {
     if (kind === 'pos') return h('div', { class: 'web' }, h('div', { style: { background: '#0f7a4a', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, 'KasirKu POS · srv-pos'), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Server POS online'), h('p', {}, `Terminal kasir ini terhubung ke server POS ${ip}. Transaksi QRIS dan struk tersinkron.`)));
     if (kind === 'intranet') { const hostN = Object.values(ENVS).flatMap(e => e.hosts).find(x => x.ip === ip)?.name ?? url.hostname; return h('div', { class: 'web' }, h('div', { style: { background: '#5b2a86', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, `${hostN} · Intranet Nusantara Tech`), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Aplikasi internal berjalan'), h('p', {}, `Kamu membuka ${url.hostname} (${ip}). Nama ini diterjemahkan oleh DNS server jaringanmu.`))); }
     if (kind === 'wlc') return this.wlcUi();
+    if (SITES[kind]) return SITES[kind].render(ip, url, this);
     const renv = Object.values(ENVS).find(e => routerOf(e)?.ip === ip) ?? env;
     return this.routerUi(renv, ip);
   }
@@ -1040,3 +1077,13 @@ export class PcOS {
     return wrap;
   }
 }
+
+// srv-nusa intranet (apache2 on the Linux server): the page is the server's /var/www/html/index.html
+SITES.linux = {
+  up: () => webPage() !== null,
+  render: (ip, url) => {
+    const raw = (webPage() ?? '').replace(/<\/?(script|iframe|img|link|style|object|embed)[^>]*>/gi, '').replace(/\son\w+=("[^"]*"|'[^']*')/gi, '').replace(/(href|src)=("[^"]*"|'[^']*')/gi, '');
+    const body = h('div', { style: { padding: '20px 40px', maxWidth: '760px' } }); body.innerHTML = raw;
+    return h('div', { class: 'web' }, h('div', { style: { background: '#e95420', color: '#fff', padding: '14px 40px', fontSize: '20px', fontWeight: '700' } }, `${url.hostname} · ${SRV.name} (${ip}) · Apache/2.4.58 (Ubuntu)`), body);
+  },
+};

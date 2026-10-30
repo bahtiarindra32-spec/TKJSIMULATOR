@@ -15,6 +15,7 @@ import { Signals, Traffic, Pedestrians } from './game/traffic';
 import { MISSIONS } from './game/missions';
 import * as ND from './assets/netdevices';
 import { hotelAnchorsWorld } from './game/missionSystem';
+import { initLinux, linuxQa } from './pcos/linux';
 import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy } from './pcos/net';
 import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
 import { Vertical } from './game/vertical';
@@ -86,6 +87,7 @@ const pcos = new PcOS();
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));
+initLinux();
 // hotel-room laptops are Wi-Fi clients; guests already logged in to the captive portal
 for (const c of PCS) { const lv = +(/_L(\d)_/.exec(c.name)?.[1] ?? 1); if (lv >= 4) { registerClient(c.name, c.p.x, c.p.y, c.p.z, lv); AUTH.add(adapterOf(c.name).mac); } }
 // IDF wall racks of the office floors (one access switch + patch panel each); the player stands in front of them
@@ -189,6 +191,7 @@ function enterWalk() {
   touchUi?.onEnter();
   missionUI.setHudVisible(true); noc.setHudVisible(true);
   missions.start();
+  if (!QS.has('qa') || QS.has('tutor')) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
 }
 function exitWalk() {
   mode = 'orbit'; document.body.classList.remove('entered'); controls.enabled = true;
@@ -606,7 +609,7 @@ function frame() {
   }
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
-  noc.update(dt);
+  noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt);
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
   if (mode !== 'walk') { /* orbit */ }
   else if (seat) { updateSeat(dt); prompt.hide(); }
@@ -707,7 +710,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
-  noc, missions, pcos, pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
+  noc, missions, pcos, linux: linuxQa, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: walkability grid of a hotel level (local metres, -1..31 x -1..21). 0 blocked, 1 standable+reachable from seed, 2 standable but unreachable */
   reach: (lv: number, seedX = 1, seedZ = 11, st = 0.2) => {

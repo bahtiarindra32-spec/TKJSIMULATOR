@@ -6,7 +6,14 @@
 import { parseIp, ipStr, prefixToMask, networkOf, broadcastOf, parseMask } from '../game/missionLogic';
 import { APS, servingAp, quality, AUTH, setApOnlineFn, type Ap } from './wifi';
 
-export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string }
+export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string; down?: boolean }
+/** Pluggable services (Linux DNS server, edge router) so the sim stays one source of truth. */
+export const HOOKS = {
+  /** a DNS server at this IP answers itself (undefined = not this server) */
+  dns: new Map<string, (name: string, a: Adapter, env: Env) => { ip: string } | null | 'timeout'>(),
+  /** can this segment reach the internet right now (edge router WAN / NAT / ACL)? */
+  internet: (_env: Env, _src: string, _dst: string, _proto: 'icmp' | 'udp53' | 'tcp80') => true as boolean,
+};
 export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'none';
 export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
 export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
@@ -322,22 +329,26 @@ export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: 
   if (!l.ok || !l.dns.length) return null;
   for (const d of l.dns) {
     if (ping(a, env, d, true).kind !== 'reply') continue;
+    const hk = HOOKS.dns.get(d); if (hk) { const x = hk(n, a, env); return x && x !== 'timeout' ? { ip: x.ip, via: d } : x; }
     const r = routerOf(env);
-    if (r && d === r.ip) {                                         // the segment router's DNS forwarder
-      if (!env.dnsSrv.allow) continue;                              // refuses remote requests
-      const short = n.endsWith(`.${env.suffix}`) ? n.slice(0, -env.suffix.length - 1) : n;
-      const rec = env.dnsSrv.records.find(x => x.name.toLowerCase() === n || x.name.toLowerCase() === short);
-      if (rec) return { ip: rec.ip, via: d };
-      const host = env.hosts.find(h => h.name === short);
-      if (host) return { ip: host.ip, via: d };
-      if (!env.dnsSrv.upstream.some(u => PUBLIC_DNS.includes(u))) return 'timeout';
-      return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null;
-    }
-    if (PUBLIC_DNS.includes(d)) return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null;   // public DNS knows no internal names
+    if (r && d === r.ip) { const x = routerAnswer(env, n, l.ip); if (x === 'refused') continue; return x === null ? null : x === 'timeout' ? 'timeout' : { ip: x.ip, via: d }; }
+    if (PUBLIC_DNS.includes(d)) { if (!HOOKS.internet(env, l.ip, d, 'udp53')) continue; return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null; }
   }
   return 'timeout';
 }
 
+/** The DNS forwarder of a segment router answering `n` for a client at srcIp. */
+export function routerAnswer(env: Env, n: string, srcIp: string): { ip: string } | null | 'timeout' | 'refused' {
+  if (!env.dnsSrv.allow) return 'refused';
+  const short = n.endsWith(`.${env.suffix}`) ? n.slice(0, -env.suffix.length - 1) : n;
+  const rec = env.dnsSrv.records.find(x => x.name.toLowerCase() === n || x.name.toLowerCase() === short);
+  if (rec) return { ip: rec.ip };
+  const host = env.hosts.find(h => h.name === short);
+  if (host) return { ip: host.ip };
+  const up = env.dnsSrv.upstream.find(u => PUBLIC_DNS.includes(u));
+  if (!up || !HOOKS.internet(env, srcIp, up, 'udp53')) return 'timeout';
+  return INTERNET[n] ? { ip: INTERNET[n].ip } : null;
+}
 /** One ICMP echo from this adapter to an IP. */
 /** One ICMP echo; over Wi-Fi a weak or congested link adds delay and drops packets. */
 export function ping(a: Adapter, env: Env, target: string, quiet = false): PingRes {
@@ -358,7 +369,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   const seg = onSegment(l, env, a);
   if (networkOf(t, l.prefix) === networkOf(mine, l.prefix)) {
     // on-link: ARP on the wire works only if both really share the segment
-    const h = env.hosts.find(x => x.ip === target);
+    const h = env.hosts.find(x => x.ip === target && !x.down);
     const pc = [...ADAPTERS.values()].find(o => o !== a && o.enabled && linkUp(o) && envOf(o.pc) === env && live(o, env).ip === target);
     if (seg && (h || pc)) { if (!quiet) a.arp.set(target, h?.mac ?? pc!.mac); return { kind: 'reply', ip: target, ttl: h?.ttl ?? 128, ms: () => (Math.random() < 0.8 ? 0 : 1) }; }
     return seg && inEnv(target, env) ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
@@ -369,13 +380,14 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   if (!seg || !gwHost || gwHost.web !== 'router') return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
   for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && inEnv(target, e)) {
-    const h = e.hosts.find(x => x.ip === target);
+    const h = e.hosts.find(x => x.ip === target && !x.down);
     const mgmt = env.id === 'lab' && h?.web === 'router';                                          // IT/NOC (lab segment) may manage every router
     if (!h || (!mgmt && (env.id === 'guest' || e.id === 'guest' || env.id === 'kasir' || e.id === 'kasir'))) return { kind: 'timeout' };    // guest & POS segments are firewalled
     return { kind: 'reply', ip: h.ip, ttl: h.ttl - 1, ms: () => 1 + Math.round(Math.random() * 2) };
   }
   if (!env.internet) return { kind: 'timeout' };
-  if (env.id === 'guest' && !AUTH.has(a.mac)) return { kind: 'timeout' };          // captive portal: no internet before login
+  if (env.id === 'guest' && !AUTH.has(a.mac)) return { kind: 'timeout' };
+  if (!HOOKS.internet(env, l.ip, target, 'icmp')) return { kind: 'timeout' };          // captive portal: no internet before login
   const known = PUBLIC_DNS.includes(target) || Object.values(INTERNET).some(v => v.ip === target);
   if (!known) return { kind: 'timeout' };
   return { kind: 'reply', ip: target, ttl: target.startsWith('8.8') || target.startsWith('142.') ? 117 : 56, ms: () => 14 + Math.round(Math.random() * 18) };

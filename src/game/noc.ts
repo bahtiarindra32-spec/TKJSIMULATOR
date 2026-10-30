@@ -16,6 +16,9 @@ import { APS, AUTH, CLIENTS, servingAp, quality, heardAt, channelClean, overlap,
 import { HOTEL_ORIGIN, LEVELS, wx, wz } from '../data/city';
 import type { PcOS, PcEvent } from '../pcos/os';
 import { SwitchCli } from '../pcos/switchcli';
+import { EXT, DEVICES } from '../pcos/ext';
+import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
+import { Term } from '../pcos/term';
 import './noc.css';
 
 // ---------------------------------------------------------------- helpers
@@ -32,9 +35,10 @@ const poolSpace = (env: Env) => { if (!env.dhcp || poolProblem(env)) return 0; c
 const hostIp = (env: Env, n: number) => ipStr((networkOf(parseIp(env.gateway)!, env.prefix) + n) >>> 0);
 
 // ---------------------------------------------------------------- faults (tickets)
-export type FaultId = 'cable' | 'cablebad' | 'port' | 'vlan' | 'disabled' | 'released' | 'wrongip' | 'conflict' | 'gateway' | 'dns' | 'patch' | 'uplink' | 'loop' | 'portal' | 'appoe' | 'aprf' | 'dhcppool';
-interface FaultDef { cause: string; fix: string; symptom: string; hint: string; cp: string; wired: boolean; rank: number; wifi?: boolean }
-export const FAULTS: Record<FaultId, FaultDef> = {
+type BaseFault = 'cable' | 'cablebad' | 'port' | 'vlan' | 'disabled' | 'released' | 'wrongip' | 'conflict' | 'gateway' | 'dns' | 'patch' | 'uplink' | 'loop' | 'portal' | 'appoe' | 'aprf' | 'dhcppool';
+export type FaultId = BaseFault | (string & {});
+interface FaultDef { cause: string; fix: string; symptom: string; hint: string; cp: string; wired: boolean; rank: number; wifi?: boolean; ext?: boolean }
+export const FAULTS: Record<string, FaultDef> = {
   cable: { cause: 'Konektor RJ45 di PC lepas/longgar', fix: 'konektor dicolok ulang sampai terkunci', symptom: 'Ikon jaringan silang merah, internet mati total.', hint: 'Status adapter "Network cable unplugged" = lapisan fisik. Datangi PC, tekan C, periksa konektor.', cp: 'Fase E · Media transmisi', wired: true, rank: 0 },
   disabled: { cause: 'Adapter jaringan di-disable', fix: 'adapter di-enable lagi', symptom: 'Ikon jaringan hilang, PC tidak terhubung ke mana pun.', hint: 'Buka Network Connections. Adapter abu-abu = Disabled.', cp: 'Fase E · Konfigurasi klien', wired: false, rank: 0 },
   released: { cause: 'Alamat DHCP dilepas (release) dan belum diminta lagi', fix: 'ipconfig /renew', symptom: 'Terhubung tapi tidak dapat alamat IP.', hint: 'ipconfig: IPv4 kosong? Minta alamat lagi ke DHCP server.', cp: 'Fase F · DHCP', wired: false, rank: 0 },
@@ -55,7 +59,7 @@ export const FAULTS: Record<FaultId, FaultDef> = {
 };
 
 // ---------------------------------------------------------------- contract templates
-export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap';
+export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap' | 'tutor';
 interface TplDef { name: string; rank: number; xp: number; sla: number; cp: string; brief: string[] }
 export const TEMPLATES = {
   static: { name: 'Pasang IP Statis', rank: 0, xp: 120, sla: 420, cp: 'Fase E · Pengalamatan IPv4', brief: ['Beberapa PC butuh alamat tetap (mis. dipakai aplikasi absensi). Alamatnya sudah ditentukan di surat kerja.', 'Di PC: Network Connections › Properties › IPv4 › "Use the following IP address". Isi IP, subnet mask, gateway, DNS persis seperti surat kerja.', 'Uji dari PC itu: ping gateway lalu ping/buka situs. Alamat yang sudah dipakai perangkat lain akan bentrok.'] },
@@ -66,6 +70,10 @@ export const TEMPLATES = {
 } as Record<TplId, TplDef>;
 
 TEMPLATES.ap = { name: 'Ganti AP Koridor yang Rusak', rank: 2, xp: 300, sla: 1200, cp: 'Fase F · Jaringan nirkabel', brief: ['Satu AP koridor di lantai hotel rusak dan sudah diturunkan. Tamu di kamar sekitarnya mengeluh sinyal lemah.', 'Ambil AP pengganti, patch cord, kabel console + laptop, dan Wi-Fi analyzer di Lemari Alat. Pasang AP di bracket plafon koridor [F].', 'Di rak IDF lantai itu: patch outlet AP ke port switch di surat kerja, lalu console: interface gi1/0/N › switchport access vlan 40 › power inline auto › no shutdown › write memory.', 'Di PC Kantor IT, buka NusaWLC (http://192.168.10.20): adopsi AP. Lalu survei: berdiri di bawah AP, nyalakan analyzer [R], pilih kanal 1/6/11 yang tidak dipakai AP yang terdengar kuat di situ.', 'Selesai kalau laptop kamar di surat kerja bisa internet dengan sinyal bagus.'] };
+
+TEMPLATES.tutor = { name: 'Hari Pertama: Sambungkan PC Workshop', rank: 0, xp: 150, sla: 900, cp: 'Fase E · Media transmisi & pengalamatan IP', brief: ['Selamat datang di tim IT Nusantara Tech! Tugas pertamamu: satu PC di Workshop TKJ belum tersambung ke jaringan.', 'Ambil alat di Lemari Alat (Workshop TKJ): LAN tester dan satu patch cord.', 'Di meja PC itu, cek fisik [C / tombol Cek]: pasang patch cord dari outlet dinding ke PC, lalu tes kabelnya dengan LAN tester.', 'Nyalakan PC [F / tombol Aksi], buka Command Prompt, ketik ipconfig: catat IPv4 Address dan Default Gateway.', 'Ping alamat Default Gateway. Kalau ada Reply, PC sudah tersambung dan pekerjaan selesai.'] };
+/** steps of the first-day tutorial job, tracked from what the player really does */
+interface Tut { tested: boolean; ipconfig: boolean; gw: string }
 
 export const RANKS = [{ xp: 0, name: 'Magang' }, { xp: 500, name: 'Teknisi Junior' }, { xp: 1500, name: 'Teknisi' }, { xp: 3000, name: 'Network Engineer' }];
 const PRIO = { Tinggi: 240, Sedang: 420, Rendah: 600 } as const;
@@ -86,6 +94,7 @@ export interface Job {
   id: string; kind: 'ticket' | 'contract' | 'follow'; tpl: TplId | FaultId | 'follow'; title: string; who: string; prio: Prio;
   sla: number; age: number; status: 'open' | 'closed'; targets: Target[]; faults: FaultId[]; order: string[];
   envId: string; sw?: string; vlanName?: string; record?: { name: string; ip: string }; router?: { ip: string; prefix: number; start: string; end: string };
+  tut?: Tut;
   wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; swTouched?: boolean; apId?: string;
   /** legacy alias for the HUD/waypoint code: the next place to go */
   pc: PcInfo;
@@ -156,7 +165,17 @@ export class Noc {
     const prev = pcos.onEvent;
     pcos.onEvent = e => { prev?.(e); this.onPc(e); };
     for (const p of pcs) adapterOf(p.name);
+    for (const [id, x] of Object.entries(EXT)) FAULTS[id] = { ...x.def, wired: false, ext: true };
+    this.tutEl = h('div'); this.tutEl.id = 'tut-hint'; document.body.append(this.tutEl);
   }
+  private tutEl: HTMLElement;
+  /** set by the game every frame: is the player walking? (stuck detection for tutorial hints) */
+  playerMoving = false;
+  private stuck = { key: '', t: 0, idle: 0, wrong: 0, lvl: 0 };
+  /** first time in the game: start the tutorial job by itself */
+  maybeStartTutorial() { if (this.mode === 'idle' && !this.s.mastery.tutor && this.s.closed === 0) this.acceptContract('tutor', 1); }
+  /** events from devices that are not PCs (IP phones) or modules (QA) */
+  extEvent(e: PcEvent) { this.onPc(e); }
   private save() { try { localStorage.setItem(KEY, JSON.stringify(this.s)); } catch { /* ignore */ } }
   get xp() { return this.s.xp; }
   get stats() { return { ...this.s }; }
@@ -180,6 +199,7 @@ export class Noc {
   private needs(j: Job): Item[] {
     const need: Item[] = [];
     const isC = j.kind === 'contract';
+    if (j.tut) { const pc = j.targets[0].pc.name; if (!this.inv.tester && !j.tut.tested) need.push('tester'); if (this.noCord.has(pc) && this.inv.patch < 1) need.push('patch'); return need; }
     if (isC && j.tpl === 'ap') {
       const ap = this.jobAp(j)!;
       if (!ap.mounted && this.inv.ap < 1) need.push('ap');
@@ -211,9 +231,11 @@ export class Noc {
   spots(): { id: string; x: number; z: number; level: number; hint: string }[] {
     const out: { id: string; x: number; z: number; level: number; hint: string }[] = [];
     for (const j of this.openJobs()) { const ap = this.jobAp(j); if (ap && !ap.mounted) { const w = apWorld(ap); out.push({ id: ap.id, x: w.x, z: w.z, level: ap.level, hint: `[F] Pasang AP di bracket plafon (${ap.id})` }); } }
+    for (const d of DEVICES) out.push({ id: d.id, x: d.x, z: d.z, level: d.level, hint: d.hint() });
     return out;
   }
   useSpot(id: string) {
+    const dev = DEVICES.find(d => d.id === id); if (dev) { dev.use(); return; }
     const ap = APS.find(a => a.id === id); if (!ap || ap.mounted) return;
     if (this.inv.ap < 1) { this.toast('Kamu tidak membawa AP pengganti. Ambil di Lemari Alat (Workshop TKJ).', 3500); return; }
     this.inv.ap--; ap.mounted = true; this.onApVisual(ap);
@@ -225,6 +247,7 @@ export class Noc {
   private needsTone(j: Job) { return j.targets.find(t => this.unpatched(j, t.pc.name) && !panelOf(t.pc.name)!.pp.label && this.toneAt !== t.pc.name) ?? null; }
   private labelMissing(j: Job) { return j.kind === 'contract' && j.tpl === 'desk' ? j.targets.find(t => wallOk(t.pc.name) === false) ?? null : null; }
   nextStop(j: Job): PcInfo {
+    if (j.tut) return this.needs(j).length ? this.CABINET : j.targets[0].pc;
     if (j.kind === 'contract' && this.needs(j).length) return this.CABINET;
     if (j.kind === 'contract' && j.tpl === 'ap') {
       const ap = this.jobAp(j)!;
@@ -242,6 +265,7 @@ export class Noc {
   }
   nextHint(j: Job): string {
     const n = this.needs(j);
+    if (j.tut) { const st = this.tutStage(j); const pc = j.targets[0].pc.label; return st === 'tools' ? `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}` : st === 'cord' ? `${pc}: cek fisik [C], pasang patch cord outlet → PC` : st === 'test' ? `${pc}: cek fisik [C], tes kabel dengan LAN tester` : st === 'sit' ? `Nyalakan ${pc} [F]` : st === 'ipconfig' ? 'Command Prompt: ketik ipconfig' : st === 'ping' ? 'Command Prompt: ping alamat Default Gateway' : 'Selesai'; }
     if (j.kind === 'contract' && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.kind === 'contract' && j.tpl === 'ap') {
       const ap = this.jobAp(j)!, p = apPort(ap);
@@ -263,7 +287,8 @@ export class Noc {
     const t = j.targets.find(x => !x.ok);
     if (t) return `${t.pc.label}: ${t.note || 'belum sesuai surat kerja'}`;
     const u = j.targets.find(x => !x.tested);
-    if (u) return `Uji dari ${u.pc.label}: ${u.mode === 'browse' ? `buka ${u.browse}` : 'ping / buka situs'}`;
+    const xh = j.faults.map(f => EXT[f]?.testHint).find(Boolean);
+    if (u) return `Uji dari ${u.pc.label}: ${u.mode === 'browse' ? `buka ${u.browse}` : xh ?? 'ping / buka situs'}`;
     return 'Selesai';
   }
 
@@ -271,10 +296,11 @@ export class Noc {
   private ensureOffers() {
     if (this.offers.length) return;
     const rk = this.rankIndex();
-    const ids = (Object.keys(TEMPLATES) as TplId[]).filter(t => TEMPLATES[t].rank <= rk);
+    const ids = (Object.keys(TEMPLATES) as TplId[]).filter(t => TEMPLATES[t].rank <= rk && t !== 'tutor');
     const order = shuffle(ids);
     while (order.length < 3) order.push(pick(ids));
     this.offers = order.slice(0, 3).map(tpl => this.preview(tpl, Math.floor(Math.random() * 1e9)));
+    if (!this.s.mastery.tutor) this.offers.unshift(this.preview('tutor', 1));
   }
   private preview(tpl: TplId, seed: number): Offer {
     const r = mulberry(seed);
@@ -287,12 +313,15 @@ export class Noc {
       renum: `${env.label}: router diganti unit baru, jaringan pindah subnet.`,
       vlan: 'Kantor: beberapa meja dipindah ke jaringan kasir (VLAN 30).',
       ap: 'Hotel: satu AP koridor rusak, tamu di kamar sekitarnya mengeluh sinyal lemah.',
+      tutor: 'Workshop TKJ: satu PC praktik belum tersambung. Pekerjaan pertama untuk teknisi baru.',
     };
     return { tpl, seed, title: t.name, lines: [lines[tpl]], envLabel: env.label };
   }
   private pickEnv(tpl: TplId, r: () => number): Env {
     if (tpl === 'vlan') return ENVS.office;
     if (tpl === 'ap') return ENVS.guest;
+    if (tpl === 'tutor') return ENVS.lab;
+    if (tpl === 'renum') return ENVS.office;   // lab DHCP/DNS now live on the Linux server srv-nusa
     if (tpl === 'desk') return r() < 0.5 ? ENVS.lab : ENVS.office;
     return r() < 0.5 ? ENVS.lab : ENVS.office;
   }
@@ -326,7 +355,15 @@ export class Noc {
     const T = TEMPLATES[tpl];
     const j = this.newJob('contract', tpl, T.name, pick(WHO[env.id].who, r), 'Sedang', T.sla, env.id);
     const avail = shuffle(this.pcsIn(env), r);
-    if (tpl === 'static') {
+    if (tpl === 'tutor') {
+      const cab = this.CABINET;
+      const pc = this.wired().filter(p => p.level === 1 && envOf(p.name) === ENVS.lab && adapterOf(p.name).dhcp && healthy(adapterOf(p.name))).sort((a, b) => Math.hypot(a.x - cab.x, a.z - cab.z) - Math.hypot(b.x - cab.x, b.z - cab.z))[0];
+      if (pc) {
+        const a = adapterOf(pc.name); a.cable = false; this.noCord.add(pc.name); bounce(a);
+        j.targets.push(this.target(pc, 'dhcp')); j.tut = { tested: false, ipconfig: false, gw: env.gateway }; j.who = 'Kak Rani (pembimbing)';
+        j.order = [`${pc.label} (outlet ${outletOf(pc.name)}) belum tersambung: kabel dari outlet dinding ke PC belum dipasang.`, 'Ambil LAN tester dan 1 patch cord di Lemari Alat (Workshop TKJ).', 'Pasang patch cord dan tes kabelnya [C], nyalakan PC [F], lalu Command Prompt: ipconfig dan ping Default Gateway.'];
+      }
+    } else if (tpl === 'static') {
       const n = rk === 0 ? 2 : 3;
       const used: string[] = [];
       for (const pc of avail.slice(0, n)) {
@@ -433,6 +470,7 @@ export class Noc {
       const wf = !!force && !!FAULTS[force[i]].wifi;
       const pool = this.pcs.filter(p => !used.has(p.name) && (rk > 0 || p.level <= 3) && !(force && !wf && p.level > 3) && envOf(p.name).id !== 'none' && healthy(adapterOf(p.name))
         && !(wf && (!isWireless(p.name) || !this.bites(p.name, force![i])))
+        && !(force && EXT[force[i]] && !EXT[force[i]].eligible(p.name))
         && !(wide && (busySw.has(portOf(p.name)?.sw.name ?? '-') || !portOf(p.name) || (force![i] === 'uplink' && !portOf(p.name)!.sw.uplink))));
       if (!pool.length) break;
       const pc = pick(pool, rand); used.add(pc.name);
@@ -467,7 +505,7 @@ export class Noc {
     const sw = portOf(pc)?.sw;
     const ids = (Object.keys(FAULTS) as FaultId[]).filter(id => FAULTS[id].rank <= rk && id !== not && !(FAULTS[id].wired && isWireless(pc)) && !(id === 'released' && !adapterOf(pc).dhcp) && !(id === 'conflict' && env.hosts.length < 2)
       && !((id === 'uplink' || id === 'loop') && (swBusy || !sw || not !== undefined)) && !(id === 'uplink' && !sw?.uplink) && !(id === 'patch' && !isWired(pc))
-      && !(FAULTS[id].wifi && (!isWireless(pc) || not !== undefined || !this.bites(pc, id))) && !(id === 'dhcppool' && this.jobs.some(j => j.faults.includes('dhcppool'))));
+      && !(FAULTS[id].wifi && (!isWireless(pc) || not !== undefined || !this.bites(pc, id))) && !(id === 'dhcppool' && this.jobs.some(j => j.faults.includes('dhcppool'))) && !(EXT[id] && (not !== undefined || !EXT[id].eligible(pc) || this.jobs.some(j => j.faults.includes(id)))));
     const w = ids.map(id => { const m = this.s.mastery[id] ?? { ok: 0, miss: 0 }; return Math.max(0.3, 1 + m.miss * 1.5 - Math.min(m.ok, 4) * 0.2); });
     let r = rand() * w.reduce((a, b) => a + b, 0);
     for (let i = 0; i < ids.length; i++) { r -= w[i]; if (r <= 0) return ids[i]; }
@@ -500,6 +538,7 @@ export class Noc {
     const mask = maskStr(env.prefix);
     const staticGood = () => { a.dhcp = false; a.ip = this.freeIp(env, Math.random, 150, 190); a.mask = mask; a.gw = env.gateway; a.dns1 = env.gateway; a.dns2 = ''; a.dnsAuto = false; a.lease = undefined; };
     for (const f of t.faults) {
+      if (EXT[f]) { t.detail = EXT[f].inject(name); continue; }
       if (f === 'cable') { a.cable = false; bounce(a); }
       else if (f === 'cablebad') { a.broken = true; bounce(a); }
       else if (f === 'port' && p) p.port.shutdown = true;
@@ -576,7 +615,20 @@ export class Noc {
     const good = healthy(a, env);
     const l = live(a, env);
     t.note = '';
-    if (j.kind !== 'contract') { if (!good) t.note = 'belum normal'; return good; }
+    if (j.kind !== 'contract') {
+      const xs = j.faults.filter(f => EXT[f]).map(f => EXT[f]);
+      const hOk = xs.length && xs.every(x => x.health === false) ? true : good;
+      const ok = hOk && xs.every(x => x.ok(t.pc.name));
+      if (!ok) t.note = !hOk ? 'belum normal' : 'akar masalah belum beres';
+      return ok;
+    }
+    if (j.tut) {
+      if (this.noCord.has(t.pc.name)) { t.note = 'patch cord belum dipasang'; return false; }
+      if (!j.tut.tested) { t.note = 'kabel belum dites dengan LAN tester'; return false; }
+      if (!j.tut.ipconfig) { t.note = 'belum cek ipconfig di PC'; return false; }
+      if (!good) { t.note = 'belum terhubung'; return false; }
+      return true;
+    }
     if (j.tpl === 'desk' && this.noCord.has(t.pc.name)) { t.note = 'belum ada patch cord di meja'; return false; }
     if (j.tpl === 'desk' && this.unpatched(j, t.pc.name)) { const q = panelOf(t.pc.name)!; t.note = q.pp.patch ? `patch panel tersambung ke ${portName(q.pp.patch)}, surat kerja minta ${portName(j.swPort![t.pc.name])}` : 'outlet belum di-patch ke switch'; return false; }
     if (j.tpl === 'desk' && wallOk(t.pc.name) === false) { t.note = 'label outlet belum ada / belum sesuai patch panel'; return false; }
@@ -632,7 +684,13 @@ export class Noc {
   private onPc(e: PcEvent) {
     const lbl = this.pcLabel(e.pc);
     if (e.type === 'ipset') this.logAll(`${lbl}: IPv4 ${e.detail.dhcp ? 'diatur ke DHCP' : `statis ${e.detail.ip}/${e.detail.prefix} gw ${e.detail.gw || '-'} dns ${(e.detail.dns ?? []).join(', ') || '-'}`}`, e.pc);
-    if (e.type === 'cmd' && /^(ipconfig|ping|nslookup|tracert|arp)/i.test(e.detail?.line ?? '')) this.logAll(`${lbl}: ${String(e.detail.line).slice(0, 48)}`, e.pc);
+    if (e.type === 'cmd' && /^(ipconfig|ping|nslookup|tracert|arp|ssh|net)/i.test(e.detail?.line ?? '')) this.logAll(`${lbl}: ${String(e.detail.line).slice(0, 48)}`, e.pc);
+    if (e.type === 'ssh' && e.detail?.line && !e.detail.target) this.logAll(`srv-nusa (SSH dari ${lbl}): ${String(e.detail.line).slice(0, 48)}`);
+    if (e.type === 'print') this.logAll(`${lbl}: cetak ke ${e.detail?.printer ?? '?'} ${e.detail?.ok ? 'berhasil' : 'gagal'}`, e.pc);
+    if (e.type === 'netuse') this.logAll(`${lbl}: net use ${e.detail?.drive ?? ''} ${e.detail?.path ?? ''} ${e.detail?.ok ? 'berhasil' : 'gagal'}`, e.pc);
+    if ((e.type as string) === 'dial') this.logAll(`Telepon ${e.detail?.ext ?? ''}: panggil ${e.detail?.to ?? ''} ${e.detail?.ok ? 'tersambung' : 'gagal'}`);
+    if (e.type === 'cmd' && /^ipconfig\s*$|^ipconfig \/all/i.test(String(e.detail?.line ?? '').trim())) for (const j of this.openJobs()) if (j.tut && j.targets[0].pc.name === e.pc && !this.noCord.has(e.pc) && j.tut.tested && live(adapterOf(e.pc)).ok) j.tut.ipconfig = true;
+    if (e.type === 'cmd' && this.openJobs().some(j => j.tut && j.targets[0].pc.name === e.pc) && !/^(ipconfig|ping)/i.test(String(e.detail?.line ?? ''))) this.stuck.wrong += 4;
     if (e.type === 'cfg' && e.detail?.kind === 'wlc') { const d = e.detail; this.logAll(`NusaWLC ${d.ap}: ${d.adopt ? 'AP diadopsi' : d.ch !== undefined ? `kanal → ${d.ch}` : d.power !== undefined ? `daya TX → ${d.power}` : `radio ${d.radio ? 'ON' : 'OFF'}`}`); }
     else if (e.type === 'cfg' && !ENVS[e.detail?.env as keyof typeof ENVS]) { /* other devices log through their own events */ }
     else if (e.type === 'cfg') {
@@ -642,10 +700,12 @@ export class Noc {
     if (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') this.logAll(`${lbl}: ping ${e.detail.name || e.detail.target} berhasil`, e.pc);
     if (e.type === 'portal') this.logAll(`${lbl}: login captive portal (kamar ${e.detail?.room ?? '?'})`, e.pc);
     if (e.type === 'browse') this.logAll(`${lbl}: buka ${String(e.detail.url).replace(/^https?:\/\//, '').replace(/\/$/, '')}`, e.pc);
-    const test = (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') || e.type === 'browse';
-    if (!test) return;
+    const base = (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') || e.type === 'browse';
     for (const j of this.openJobs()) for (const t of j.targets) {
       if (t.pc.name !== e.pc) continue;
+      const xs = j.faults.filter(f => EXT[f]?.tested).map(f => EXT[f]);
+      if (xs.length ? !xs.every(x => x.tested!(e, t.pc.name)) : !base) continue;
+      if (j.tut && !(e.type === 'ping' && e.detail?.ok && e.detail?.target === live(adapterOf(e.pc)).gw)) continue;
       if (t.mode === 'browse') { const host = (() => { try { return new URL(e.detail?.url ?? '').hostname; } catch { return ''; } })(); const short = t.browse!.split('.')[0]; if (e.type !== 'browse' || (host !== t.browse && host !== short)) continue; }
       if (this.targetOk(j, t)) { t.ok = true; t.tested = true; }
     }
@@ -669,12 +729,16 @@ export class Noc {
     if (name === 'ANCHOR_WS_TOOLCAB_01') { this.openCabinet(); return true; }
     if (name === 'ANCHOR_SRV_NETRACK_01') { this.openRack('MDF'); return true; }
     if (name === 'ANCHOR_IT_NOC_01') { this.openBoard(); return true; }
+    if (name === 'ANCHOR_SRV_RACK_02') { this.openServer(); return true; }
+    if (name === 'ANCHOR_SRV_RACK_01' && this.edgeOpen) { this.edgeOpen(); return true; }
     return false;
   }
   anchorHint(name: string | null): string | null {
     if (name === 'ANCHOR_WS_TOOLCAB_01') return '[F] Lemari Alat (ambil/kembalikan alat)';
     if (name === 'ANCHOR_SRV_NETRACK_01') return '[F] Rak MDF (patch panel · switch · console)';
     if (name === 'ANCHOR_IT_NOC_01') return '[F] Papan kerja NOC';
+    if (name === 'ANCHOR_SRV_RACK_02') return '[F] Server Linux srv-nusa (console)';
+    if (name === 'ANCHOR_SRV_RACK_01' && this.edgeOpen) return '[F] Router edge R-EDGE (console)';
     return null;
   }
 
@@ -737,6 +801,7 @@ export class Noc {
       const leds = (side: string) => [1, 2, 3, 4, 5, 6, 7, 8].map(n => `<i class="tl ${bad.includes(n) ? '' : 'on'}" style="animation-delay:${n * 0.18}s">${n}</i>`).join('');
       out.innerHTML = `<div class="tester"><div><small>Unit utama</small>${leds('m')}</div><div><small>Unit remote</small>${leds('r')}</div></div><p>${a.broken ? 'Lampu 3 dan 6 tidak menyala: pasangan hijau putus. Patch cord rusak, ganti yang baru.' : 'Lampu 1–8 menyala berurutan di kedua unit: kabel baik (straight T568B).'}</p>`;
       this.logAll(`${this.pcLabel(pc)}: tes LAN tester → ${a.broken ? 'pin 3 & 6 putus' : 'kabel baik'}`, pc);
+      if (!a.broken) for (const jj of this.openJobs()) if (jj.tut && jj.targets[0].pc.name === pc) jj.tut.tested = true;
     }, 'btn', 'phys-test'));
     if (cord) acts.append(btn('Ganti patch cord', () => {
       if (this.inv.patch < 1) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa patch cord cadangan. Ambil di Lemari Alat.</p>'; return; }
@@ -944,6 +1009,7 @@ export class Noc {
   }
   private close(j: Job) {
     j.status = 'closed';
+    if (j.tut) { this.s.mastery.tutor = { ok: 1, miss: 0 }; this.tutEl.classList.remove('on'); }
     j.slaMet = j.age <= j.sla;
     const busy = new Set(this.openJobs().flatMap(x => x.targets.map(t => t.pc.name)));
     j.collateral = j.snap.filter(n => !busy.has(n) && !j.targets.some(t => t.pc.name === n) && !healthy(adapterOf(n)));
@@ -963,6 +1029,7 @@ export class Noc {
       f.targets = [this.target(pc, 'any')]; f.order = [`${pc.label} terputus setelah pekerjaan ${j.id}.`, 'Cari tahu apa yang berubah dan perbaiki.']; f.snap = this.snapshot();
       this.jobs.push(f);
     }
+    for (const f of j.faults) EXT[f]?.restore?.();
     this.pendingReport.push(j);
     if (this.trackedId === j.id) this.trackedId = this.openJobs()[0]?.id ?? null;
     this.toast(`${j.id} terverifikasi. Laporan kerja dibuat otomatis.`, 3200);
@@ -970,14 +1037,75 @@ export class Noc {
   }
 
   update(dt: number) {
-    if (this.mode === 'idle') { this.hud.innerHTML = ''; this.hud.classList.remove('on'); }
+    if (this.mode === 'idle') { this.hud.innerHTML = ''; this.hud.classList.remove('on'); if (this.stuck.lvl) { this.stuck.lvl = 0; this.tutEl.classList.remove('on'); } }
     this.hkT += dt; if (this.hkT > 60) { this.hkT = 0; dhcpHousekeeping(); }
     if (this.mode === 'idle') return;
     for (const j of this.openJobs()) j.age += dt;
     this.chkT -= dt; if (this.chkT <= 0) { this.chkT = 0.4; this.check(false); }
     if (this.pendingReport.length && !this.modal && !this.pcos.isOpen()) this.openReport(this.pendingReport.shift()!);
     this.hudT -= dt; if (this.hudT <= 0) { this.hudT = 0.25; this.renderHud(); }
+    this.tutorTick(dt);
   }
+  private tutStage(j: Job): 'tools' | 'cord' | 'test' | 'sit' | 'ipconfig' | 'ping' | 'done' {
+    const pc = j.targets[0].pc.name, t = j.tut!;
+    if (this.needs(j).length) return 'tools';
+    if (this.noCord.has(pc)) return 'cord';
+    if (!t.tested) return 'test';
+    if (!(this.pcos.isOpen() && this.pcos.current()?.name === pc) && !t.ipconfig) return 'sit';
+    if (!t.ipconfig) return 'ipconfig';
+    if (!j.targets[0].tested) return this.pcos.isOpen() ? 'ping' : 'sit';
+    return 'done';
+  }
+  /** contextual help only when the player seems stuck: no progress and idle, a wrong step, or a long time */
+  private tutorTick(dt: number) {
+    const j = this.openJobs().find(x => x.tut);
+    const S = this.stuck;
+    if (!j) { if (S.lvl) { this.tutEl.classList.remove('on'); S.lvl = 0; } return; }
+    const st = this.tutStage(j), key = `${st}|${this.inv.tester}|${this.inv.patch}|${this.pcos.isOpen()}`;
+    if (key !== S.key) { S.key = key; S.t = 0; S.idle = 0; S.wrong = 0; S.lvl = 0; this.tutEl.classList.remove('on'); return; }
+    S.t += dt; S.idle = this.playerMoving ? 0 : S.idle + dt; if (S.wrong > 0) S.wrong += dt;
+    // a wrong step: the PC is open but the cable is not done yet
+    if (this.pcos.isOpen() && (st === 'cord' || st === 'test' || st === 'tools')) S.wrong += dt;
+    const lvl = S.t > 70 || S.wrong > 14 ? 2 : (S.t > 22 && S.idle > 8) || S.t > 45 || S.wrong > 6 ? 1 : 0;
+    if (lvl === S.lvl) return; S.lvl = lvl;
+    if (!lvl) { this.tutEl.classList.remove('on'); return; }
+    const touch = document.body.classList.contains('touch');
+    const F = touch ? 'tombol F (Aksi)' : 'tombol F', C = touch ? 'tombol Cek' : 'tombol C', ip = j.tut!.gw;
+    const pcOpenWrong = this.pcos.isOpen() && (st === 'cord' || st === 'test' || st === 'tools');
+    const H: Record<string, [string, string]> = {
+      tools: ['Alat kerja ada di Lemari Alat, Workshop TKJ. Ikuti penanda hijau di layar.', `Berdiri di depan Lemari Alat lalu tekan ${F}. Ambil "LAN tester" dan "Patch cord" (Ambil 1).`],
+      cord: ['Kabel PC belum terpasang. Datangi PC yang ditandai.', `Di depan PC itu tekan ${C} untuk cek fisik, lalu pilih "Pasang patch cord".`],
+      test: ['Sebelum dipakai, kabel baru dites dulu.', `Buka cek fisik (${C}) di PC itu dan pilih "Tes kabel (LAN tester)": lampu 1–8 harus menyala berurutan.`],
+      sit: ['Kabel sudah baik. Sekarang nyalakan PC-nya.', `Di depan PC tekan ${F}. Di layar kunci, ${touch ? 'ketuk' : 'klik'} lalu Sign in.`],
+      ipconfig: ['Cek alamat IP yang didapat PC.', `Buka Command Prompt (ikon di desktop, ${touch ? 'ketuk' : 'klik dua kali'}), ketik ipconfig lalu Enter.`],
+      ping: ['Uji koneksi ke router (Default Gateway).', `Di Command Prompt ketik: ping ${ip}`],
+    };
+    const [a, b] = H[st] ?? ['', ''];
+    this.tutEl.innerHTML = `<b>Kak Rani:</b> ${pcOpenWrong ? 'PC belum bisa tersambung karena kabelnya belum beres. Tutup PC dulu (tombol keluar), lalu ' + a.charAt(0).toLowerCase() + a.slice(1) : a}${lvl >= 2 ? `<br><small>${b}</small>` : ''}`;
+    this.tutEl.classList.add('on');
+  }
+  /** QA */
+  tutorState() { const j = this.openJobs().find(x => x.tut); return j ? { stage: this.tutStage(j), hint: this.tutEl.classList.contains('on') ? this.tutEl.textContent : '', lvl: this.stuck.lvl, tut: { ...j.tut! }, pc: j.targets[0].pc.name } : null; }
+
+  // ---------------------------------------------------------------- Linux server srv-nusa (rack 2)
+  /** set by the edge-router module (opens its console in a board modal) */
+  edgeOpen: (() => void) | null = null;
+  term: Term | null = null;
+  openServer() {
+    const box = h('div', 'noc-box wide');
+    box.append(h('h2', '', `Rak 2 · Server Linux ${SRV.name} (${SRV.ip})`));
+    box.append(h('p', 'how', `Ubuntu Server 24.04 · layanan: isc-dhcp-server (DHCP lab), bind9 (DNS lab.smk.local), apache2 (intranet), ssh. LED power <b>${SRV.power ? 'hijau' : 'mati'}</b> · LED LAN ens18 <b>${SRV.cable ? 'hijau berkedip' : 'mati'}</b>. Login console atau SSH dari PC: akun <b>${SRV.user}</b>, sandi <b>${SRV.pass}</b>.`));
+    const rw0 = h('div', 'row left');
+    rw0.append(btn('Cabut & colok ulang kabel LAN', () => { const was = SRV.cable; SRV.cable = true; linuxQa.sync(); this.logAll(`${SRV.name}: kabel LAN ens18 dicolok ulang${was ? '' : ' (tadi lepas)'}`); this.check(false); this.openServer(); }, 'btn', 'srv-reseat'));
+    box.append(rw0);
+    const sh = new LinuxShell('console'); this.term = new Term(sh, `KVM console · ${SRV.name} · tty1`);
+    this.term.onLine = (line, sec) => { if (line && !sec && !/^(teknisi|root)$/.test(line)) this.logAll(`${SRV.name} (console): ${line.slice(0, 48)}`); this.check(false); };
+    box.append(this.term.root);
+    const rw = h('div', 'row'); rw.append(btn('Tutup [Esc]', () => this.closeModal(), 'btn', 'srv-close')); box.append(rw);
+    this.show(box, false); const tm = this.term; setTimeout(() => tm.focus(), 80);   // later than the F key that opened it
+  }
+  /** QA hook: type into the open server/router console */
+  termType(line: string) { this.term?.type(line); }
   private renderHud() {
     const open = this.openJobs();
     const done = this.jobs.length - open.length;
@@ -1006,7 +1134,7 @@ export class Noc {
     if (focusBtn) (this.modal.querySelector('button') as HTMLButtonElement | null)?.focus();
     if (!wasOpen) this.listeners.forEach(f => f(true));
   }
-  closeModal() { if (!this.modal) return; this.modal.remove(); this.modal = null; this.cli = null; this.sel = null; this.probing = false; this.listeners.forEach(f => f(false)); }
+  closeModal() { if (!this.modal) return; this.modal.remove(); this.modal = null; this.cli = null; this.term = null; this.sel = null; this.probing = false; this.listeners.forEach(f => f(false)); }
 
   openBoard(msg = '') {
     const box = h('div', 'noc-box');
