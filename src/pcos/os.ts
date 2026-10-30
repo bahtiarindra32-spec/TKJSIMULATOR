@@ -387,8 +387,8 @@ export class PcOS {
       lines.push(`${c.dot('Connection-specific DNS Suffix')}${a.dhcp && l.ok && !l.apipa ? env.suffix : ''}`);
       if (full) lines.push(`${c.dot('Description')}${(this.wl ? ENVS.guest.adapter : env.adapter)}`, `${c.dot('Physical Address')}${a.mac.toUpperCase()}`, `${c.dot('DHCP Enabled')}${a.dhcp ? 'Yes' : 'No'}`, `${c.dot('Autoconfiguration Enabled')}Yes`);
       lines.push(`${c.dot('Link-local IPv6 Address')}${c.ll6}${full ? '(Preferred)' : ''}`);
-      if (l.ok) {
-        const dup = conflict(l, env, a);
+      if (l.ok || l.apipa) {
+        const dup = l.ok && conflict(l, env, a);
         lines.push(`${c.dot(l.apipa ? 'Autoconfiguration IPv4 Address' : 'IPv4 Address')}${l.ip}${full ? (dup ? '(Duplicate)' : '(Preferred)') : ''}`, `${c.dot('Subnet Mask')}${maskStr(l.prefix)}`);
         if (full && a.dhcp && !l.apipa && a.lease) { lines.push(`${c.dot('Lease Obtained')}${c.fmtDate(new Date(a.lease.t))}`, `${c.dot('Lease Expires')}${c.fmtDate(new Date(a.lease.t + (env.dhcp?.lease ?? 8) * 3600e3))}`); }
       }

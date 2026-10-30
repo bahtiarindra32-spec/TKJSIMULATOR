@@ -205,7 +205,7 @@ export class Noc {
   jobAp(j: Job): Ap | null { return j.apId ? APS.find(a => a.id === j.apId) ?? null : null; }
   private unpatchedAp(j: Job) { const ap = this.jobAp(j); if (!ap) return false; const q = panelOf(ap.id); return !!q && q.pp.patch !== j.swPort?.[ap.id]; }
   /** an IT office PC (lab segment) from which the WLC and the routers can be managed */
-  private itPc(): PcInfo { return this.pcs.find(p => p.level === 1 && /_IT_/.test(p.name) && healthy(adapterOf(p.name))) ?? this.pcs.find(p => p.level === 1 && /_IT_/.test(p.name)) ?? this.CABINET; }
+  private itPc(): PcInfo { return this.pcs.find(p => p.level === 1 && /_ITOFFICE_/.test(p.name) && healthy(adapterOf(p.name))) ?? this.pcs.find(p => p.level === 1 && /_ITOFFICE_/.test(p.name)) ?? this.CABINET; }
   private apSpot(ap: Ap): PcInfo { const w = apWorld(ap); return { name: `SPOT-${ap.id}`, label: `Bracket plafon ${ap.id} · koridor L${ap.level}`, x: w.x, y: w.y - 1.6, z: w.z, level: ap.level }; }
   /** places in the world the board owns besides PCs/racks (AP mount brackets); main shows the prompt and calls useSpot */
   spots(): { id: string; x: number; z: number; level: number; hint: string }[] {
@@ -430,7 +430,9 @@ export class Noc {
     const used = new Set<string>(), busySw = new Set<string>();
     for (let i = 0; i < n; i++) {
       const wide = force && (force[i] === 'uplink' || force[i] === 'loop');
-      const pool = this.pcs.filter(p => !used.has(p.name) && (rk > 0 || p.level <= 3) && !(force && p.level > 3) && envOf(p.name).id !== 'none' && healthy(adapterOf(p.name))
+      const wf = !!force && !!FAULTS[force[i]].wifi;
+      const pool = this.pcs.filter(p => !used.has(p.name) && (rk > 0 || p.level <= 3) && !(force && !wf && p.level > 3) && envOf(p.name).id !== 'none' && healthy(adapterOf(p.name))
+        && !(wf && (!isWireless(p.name) || !this.bites(p.name, force![i])))
         && !(wide && (busySw.has(portOf(p.name)?.sw.name ?? '-') || !portOf(p.name) || (force![i] === 'uplink' && !portOf(p.name)!.sw.uplink))));
       if (!pool.length) break;
       const pc = pick(pool, rand); used.add(pc.name);
@@ -631,11 +633,14 @@ export class Noc {
     const lbl = this.pcLabel(e.pc);
     if (e.type === 'ipset') this.logAll(`${lbl}: IPv4 ${e.detail.dhcp ? 'diatur ke DHCP' : `statis ${e.detail.ip}/${e.detail.prefix} gw ${e.detail.gw || '-'} dns ${(e.detail.dns ?? []).join(', ') || '-'}`}`, e.pc);
     if (e.type === 'cmd' && /^(ipconfig|ping|nslookup|tracert|arp)/i.test(e.detail?.line ?? '')) this.logAll(`${lbl}: ${String(e.detail.line).slice(0, 48)}`, e.pc);
-    if (e.type === 'cfg') {
+    if (e.type === 'cfg' && e.detail?.kind === 'wlc') { const d = e.detail; this.logAll(`NusaWLC ${d.ap}: ${d.adopt ? 'AP diadopsi' : d.ch !== undefined ? `kanal → ${d.ch}` : d.power !== undefined ? `daya TX → ${d.power}` : `radio ${d.radio ? 'ON' : 'OFF'}`}`); }
+    else if (e.type === 'cfg' && !ENVS[e.detail?.env as keyof typeof ENVS]) { /* other devices log through their own events */ }
+    else if (e.type === 'cfg') {
       const d = e.detail, r = routerOf(ENVS[d.env as keyof typeof ENVS])?.name ?? 'router';
       this.logAll(d.kind === 'lan' ? `${r}: alamat LAN → ${d.ip}/${d.prefix}` : d.kind === 'dhcp' ? (d.on ? `${r}: DHCP pool ${d.start} – ${d.end}, gw ${d.gw}, dns ${d.dns.join(', ')}` : `${r}: DHCP server dimatikan`) : d.kind === 'dns' ? `${r}: DNS upstream ${d.upstream.join(', ') || '-'} · remote ${d.allow ? 'ya' : 'tidak'}` : d.kind === 'dnsrec' ? `${r}: record ${d.name} → ${d.ip}` : `${r}: record ${d.name} dihapus`);
     }
     if (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') this.logAll(`${lbl}: ping ${e.detail.name || e.detail.target} berhasil`, e.pc);
+    if (e.type === 'portal') this.logAll(`${lbl}: login captive portal (kamar ${e.detail?.room ?? '?'})`, e.pc);
     if (e.type === 'browse') this.logAll(`${lbl}: buka ${String(e.detail.url).replace(/^https?:\/\//, '').replace(/\/$/, '')}`, e.pc);
     const test = (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') || e.type === 'browse';
     if (!test) return;

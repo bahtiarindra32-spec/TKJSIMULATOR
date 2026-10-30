@@ -53,6 +53,8 @@ function buildLanes(): Lane[] {
 
 export class Traffic {
   vehicles: Vehicle[] = [];
+  /** every vehicle built; `vehicles` holds only the active ones (density setting for slow devices) */
+  private all: Vehicle[] = [];
   group = new THREE.Group();
   lanes = buildLanes();
   constructor(parent: THREE.Object3D, public signals: Signals) {
@@ -68,9 +70,16 @@ export class Traffic {
         const len = kind === 'bus' ? 12 : kind === 'motor' ? 1.8 : 4.5;
         const max = (lane.arterial ? rr(11, 14) : rr(7, 9)) * (kind === 'motor' ? 1.1 : 1);
         const v: Vehicle = { lane, t: lane.t0 + ((i + rand() * 0.5) / n) * L, speed: max, max, len, obj };
-        this.group.add(obj); this.vehicles.push(v);
+        this.group.add(obj); this.vehicles.push(v); this.all.push(v);
       }
     }
+  }
+  /** keep a fraction of each lane's vehicles (1 = all); hidden ones neither move nor collide */
+  setDensity(f: number) {
+    const byLane = new Map<Lane, Vehicle[]>();
+    for (const v of this.all) (byLane.get(v.lane) ?? byLane.set(v.lane, []).get(v.lane)!).push(v);
+    this.vehicles = [];
+    for (const list of byLane.values()) { const keep = Math.max(1, Math.ceil(list.length * f)); list.forEach((v, i) => { v.obj.visible = i < keep; if (i < keep) this.vehicles.push(v); }); }
   }
 
   /** distance along lane to the next stop line ahead, if signal says stop */
@@ -130,6 +139,9 @@ interface Ped { obj: THREE.Group; a: THREE.Vector3; b: THREE.Vector3; t: number;
 const PED_MIX: Outfit[] = ['office_batik', 'office_batik', 'office_white', 'office_white', 'student_m', 'student_m', 'student_f', 'student_f', 'hijab_woman', 'hijab_woman', 'hijab_woman', 'ojol', 'ojol', 'vendor', 'vendor', 'security', 'technician', 'technician'];
 export class Pedestrians {
   peds: Ped[] = [];
+  private all: Ped[] = [];
+  /** keep a fraction of the walkers (1 = all) */
+  setDensity(f: number) { const keep = Math.max(1, Math.ceil(3 * f)); this.peds = this.all.filter((p, i) => { const on = i % 3 < keep; p.obj.visible = on; return on; }); }
   group = new THREE.Group();
   constructor(parent: THREE.Object3D) {
     this.group.name = 'GAME_PEDESTRIANS'; parent.add(this.group);
@@ -149,7 +161,8 @@ export class Pedestrians {
       if (x0 >= 100 && z0 <= 45) { a.y = b.y = 0.03; }
       this.group.add(g);
       const speed = rr(0.9, 1.4) * (person.spec.female ? 0.95 : 1);
-      this.peds.push({ obj: g, a, b, t: rand(), sp: speed / a.distanceTo(b), person, speed, phase: rand() });
+      const pd: Ped = { obj: g, a, b, t: rand(), sp: speed / a.distanceTo(b), person, speed, phase: rand() };
+      this.peds.push(pd); this.all.push(pd);
     }
   }
   update(dt: number, time: number) {

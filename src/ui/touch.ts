@@ -31,12 +31,12 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
       <button data-k="KeyF" class="big f" id="t-f">F<small>Aksi</small></button>
       <button data-k="Space" class="mid">⤒<small>Lompat</small></button>
       <button data-run class="mid" id="t-run">»<small>Lari</small></button>
-      <button data-k="KeyE" class="sm">E<small>Naik</small></button>
-      <button data-k="KeyQ" class="sm">Q<small>Turun</small></button>
+      <button data-k="KeyE" class="sm" id="t-e">E<small>Naik</small></button>
+      <button data-k="KeyQ" class="sm" id="t-q">Q<small>Turun</small></button>
     </div>
     <div class="ttop">
       <button data-k="KeyT">Kerja</button><button data-k="KeyC">Cek</button><button data-k="KeyR">Wi-Fi</button>
-      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
+      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyG" id="t-gfx">Grafik</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
     </div>`;
   document.body.appendChild(root);
   const stop = (e: Event) => { e.stopPropagation(); };
@@ -87,7 +87,13 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
 
   // keep the F button labelled with what it will do
   const fb = root.querySelector<HTMLElement>('#t-f small')!;
-  setInterval(() => { const row = [...document.querySelectorAll('#iprompt.on .ip-row')].find(r => r.querySelector('kbd')?.textContent === 'F'); const p = row?.textContent?.replace(/^F/, '').trim(); fb.textContent = p ? p.split(' ').slice(0, 2).join(' ').slice(0, 14) : 'Aksi'; root.querySelector('#t-f')!.classList.toggle('ready', !!p); }, 250);
+  setInterval(() => { const row = [...document.querySelectorAll('#iprompt.on .ip-row')].find(r => r.querySelector('kbd')?.textContent === 'F'); const p = row?.textContent?.replace(/^F/, '').trim(); fb.textContent = p ? p.split(' ').slice(0, 2).join(' ').slice(0, 14) : 'Aksi'; root.querySelector('#t-f')!.classList.toggle('ready', !!p);
+    // E/Q only make sense at a stair or lift door: show them only when the prompt offers them
+    const keys = [...document.querySelectorAll('#iprompt.on kbd')].map(k => k.textContent);
+    (root.querySelector('#t-e') as HTMLElement).style.display = keys.includes('E') ? '' : 'none';
+    (root.querySelector('#t-q') as HTMLElement).style.display = keys.includes('Q') ? '' : 'none';
+    const gl = document.getElementById('btnGfx')?.textContent?.replace(/^Grafik: /, '').replace(' (otomatis)', ''); const gb = root.querySelector('#t-gfx') as HTMLElement; if (gl && gb.textContent !== 'Grafik ' + gl) gb.textContent = 'Grafik ' + gl;
+  }, 250);
 
   // iPhone Safari can't hide its bars for a page; Add to Home Screen opens the game without them
   let hinted = false;

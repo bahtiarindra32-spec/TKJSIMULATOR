@@ -28,6 +28,20 @@ for (const [tag, vp] of [['land', { width: 844, height: 390 }], ['port', { width
   await p.tap('#t-f'); for (let i = 0; i < 12 && !(await K(() => window.__kota.pcos.isOpen())); i++) await K(() => window.__kota.step(3));
   await p.waitForTimeout(400); out[tag + '_pc'] = await K(() => window.__kota.pcos.isOpen());
   await p.screenshot({ path: `/workspace/work/shots/m_${tag}_pc.png` });
+  if (tag === 'land') {   // lift panel by touch: walk (teleport) to the lift door, tap E, tap floor 5
+    await K(() => document.querySelector('#pcos .leave')?.click()); for (let i = 0; i < 12; i++) await K(() => window.__kota.step(3));
+    await K(() => { window.__kota.teleport(220 + 21, 168 + 10.9, 1, Math.PI); window.__kota.step(4); }); await p.waitForTimeout(400);
+    out.eVisible = await K(() => getComputedStyle(document.getElementById('t-e')).display !== 'none');
+    out.eHint = await K(() => window.__kota.state().hint);
+    await p.tap('#t-e'); await K(() => window.__kota.step(2)); await p.waitForTimeout(200);
+    out.liftPanel = await K(() => document.getElementById('liftpanel').classList.contains('on'));
+    await p.screenshot({ path: `/workspace/work/shots/m_land_liftpanel.png` });
+    await p.tap('#liftpanel button[name="lift-5"]').catch(e => out.tapErr = e.message.slice(0, 120));
+    for (let n = 0; n < 1500; n += 15) { await K(() => window.__kota.step(15, 1 / 30, false)); if (!(await K(() => window.__kota.vertical())).ride) break; }
+    out.liftLevel = await K(() => window.__kota.state().lv);
+    await K(() => { window.__kota.teleport(200, 140, 1, 0); window.__kota.step(4); }); await p.waitForTimeout(400);
+    out.eHiddenStreet = await K(() => getComputedStyle(document.getElementById('t-e')).display === 'none');
+  }
   await ctx.close();
 }
 console.log('RESULT', JSON.stringify(out), 'errs', JSON.stringify(errs.slice(0, 4)));

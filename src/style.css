@@ -94,3 +94,18 @@ html, body { height: 100%; height: 100dvh; }
   #hero .desc { display: none; } #hero .loc { display: none; } #enter { margin-top: 8px; }
   #views { bottom: 8px; } #compass { display: none; }
 }
+
+#liftpanel { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 40; display: none; flex-direction: column; gap: 8px; align-items: center; background: #15191d; border: 1px solid #3a4148; border-radius: 12px; padding: 12px 14px; color: #e8ecef; font: 600 12px/1.3 system-ui, sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+#liftpanel.on { display: flex; }
+#liftpanel .lp-h { color: #ff8a6a; letter-spacing: .05em; }
+#liftpanel .lp-g { display: grid; grid-template-columns: repeat(2, 54px); gap: 8px; direction: rtl; }
+#liftpanel .lp-g button { direction: ltr; width: 54px; height: 54px; border-radius: 50%; border: 2px solid #8a949c; background: radial-gradient(#e9eef1, #b9c2c8); color: #1b1f22; font: 700 20px/1 ui-monospace, monospace; cursor: pointer; touch-action: manipulation; }
+#liftpanel .lp-g button.sug { border-color: #48b4ff; box-shadow: 0 0 0 3px rgba(72,180,255,.35); }
+#liftpanel .lp-g button.cur { opacity: .45; cursor: default; }
+#liftpanel .lp-f { max-width: 140px; text-align: center; font-weight: 400; color: #aab4bb; font-size: 11px; }
+#liftpanel .lp-x { padding: 6px 16px; border-radius: 6px; border: 1px solid #555; background: #262c31; color: #ddd; font: inherit; }
+/* phones: lift panel in the middle (clear of the joystick and the action buttons), 4 columns so it fits a landscape screen */
+body.touch #liftpanel { right: auto; left: 50%; top: 54%; transform: translate(-50%, -50%); z-index: 60; padding: 10px 12px; gap: 6px; }
+body.touch #liftpanel .lp-g { grid-template-columns: repeat(4, 48px); }
+body.touch #liftpanel .lp-g button { width: 48px; height: 48px; font-size: 18px; }
+body.touch #liftpanel .lp-f { max-width: 230px; }

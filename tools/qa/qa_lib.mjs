@@ -1,22 +1,25 @@
 // Shared QA helpers: real keyboard/mouse input on the single-file build.
 import { chromium } from 'playwright';
-export async function boot(save) {
+export async function boot(save, opt = {}) {
   const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
-  const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+  b.on('disconnected', () => console.log('!! BROWSER DISCONNECTED', Date.now()));
+  const ctx = await b.newContext({ viewport: opt.viewport ?? { width: 960, height: 600 } });
+  await ctx.addInitScript(s => { try { if (s) localStorage.setItem('kotaNusantara.noc.v1', s); else if (!sessionStorage.getItem('qa-keep')) localStorage.removeItem('kotaNusantara.noc.v1'); sessionStorage.setItem('qa-keep', '1'); } catch {} }, save ? JSON.stringify(save) : null);
+  const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message.slice(0, 300))); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push('console: ' + m.text().slice(0, 200)); });
-  await p.goto('http://127.0.0.1:8787/', { waitUntil: 'commit', timeout: 60000 });
-  await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 120000 });
-  await p.evaluate(s => { if (s) localStorage.setItem('kotaNusantara.noc.v1', JSON.stringify(s)); else localStorage.removeItem('kotaNusantara.noc.v1'); }, save ?? null);
-  await p.reload({ waitUntil: 'commit' });
-  await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 120000 });
-  await p.waitForTimeout(1200);
+  p.on('crash', () => console.log('!! PAGE CRASH'));
+  const t0 = Date.now();
+  await p.goto('http://127.0.0.1:8787/?qa' + (opt.query ?? '&low'), { waitUntil: 'commit', timeout: 60000 });
+  await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 });
+  console.log('  boot', Date.now() - t0, 'ms');
   await p.evaluate(() => window.__kota.pause(true)); await p.evaluate(() => document.getElementById('enter').click()); await p.waitForTimeout(200);
   if ((await p.evaluate(() => window.__kota.state().mode)) !== 'walk') await p.evaluate(() => document.getElementById('enter').click());
   await p.evaluate(() => window.__kota.pause(true));
   const K = (f, a) => p.evaluate(f, a);
-  const shot = async n => { await p.screenshot({ path: `/workspace/work/shots/${n}.png` }); };
-  const step = (n = 3) => K(n => window.__kota.step(n), n);
-  const go = async (x, z, lv, yaw = 0) => { await K(([x, z, lv, yaw]) => { window.__kota.teleport(x, z, lv, yaw); window.__kota.step(3); }, [x, z, lv, yaw]); };
+  const shot = async n => { await p.evaluate(() => window.__kota.step(1)); await p.screenshot({ path: `/workspace/work/shots/${n}.png` }); };
+  const RENDER = !!process.env.RENDER;
+  const step = (n = 3) => K(([n, r]) => window.__kota.step(n, 1 / 30, r), [n, RENDER]);
+  const go = async (x, z, lv, yaw = 0) => { await K(([x, z, lv, yaw]) => { window.__kota.teleport(x, z, lv, yaw); window.__kota.step(3, 1 / 30, false); }, [x, z, lv, yaw]); };
   const pcInfo = name => K(n => { const c = window.__kota.pcs().find(c => c.name === n); return c; }, name);
   const goPc = async name => {
     const c = await pcInfo(name); const lv = +(/_L(\d)_/.exec(name)[1]);

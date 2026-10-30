@@ -80,9 +80,9 @@ export class Vertical {
   }
 
   /** E/Q in front of the lift or stair doors. Returns '' or a reason it cannot start. */
-  start(p: Rider, dir: 1 | -1): string {
+  start(p: Rider, dir: 1 | -1, target?: number): string {
     if (this.ride) return 'busy';
-    const to = THREE.MathUtils.clamp(p.level + dir, 1, LEVELS.length); if (to === p.level) return dir > 0 ? 'Ini lantai paling atas.' : 'Ini lantai paling bawah.';
+    const to = THREE.MathUtils.clamp(target ?? p.level + dir, 1, LEVELS.length); if (to === p.level) return target ? `Kamu sudah di lantai ${to}.` : dir > 0 ? 'Ini lantai paling atas.' : 'Ini lantai paling bawah.';
     const lx = p.pos.x - X(0);
     if (lx > 19) {
       const c = lx > 21 ? 22 : 20, cab = this.cabs.find(k => k.c === c)!;

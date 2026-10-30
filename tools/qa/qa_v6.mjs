@@ -26,7 +26,7 @@ for (const ph of phases) {
     if (ph === 'prompt') {
       await go(HO[0] + 18, HO[1] + 11, 1, 0); await step(3);
       const pr = await K(() => window.__kota.prompt()); console.log('  prompt near stair door:', pr); await shot('v6_prompt_door');
-      await goPc('PROP_L1_PC_IT_02').catch(() => {}); await step(3); console.log('  prompt at PC:', await K(() => window.__kota.prompt())); await shot('v6_prompt_pc');
+      await goPc('PROP_L1_PC_ITOFFICE_02').catch(() => {}); await step(3); console.log('  prompt at PC:', await K(() => window.__kota.prompt())); await shot('v6_prompt_pc');
       out.prompt = pr ? 'OK' : 'NONE';
     }
     if (ph === 'sit') {

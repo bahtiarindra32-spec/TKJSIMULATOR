@@ -5,7 +5,7 @@ const Q = await boot({ v: 1, xp: 3200, shifts: 0, closed: 0, slaMet: 0, seq: 0, 
 const { p, K, shot, step, go, goPc, goAnchor, press, openPc, openCmd, cmd, cmdText, closePc, modalText, mclick, job, consoleLines, report, browser, errs } = Q;
 const out = {};
 const close = () => K(() => window.__kota.noc.closeModal());
-const IT = 'PROP_L1_PC_IT_01';
+const IT = 'PROP_L1_PC_ITOFFICE_01';
 const tools = async (items, ap = 0, patch = 0) => { await goAnchor('CABINET'); await press('f'); for (const it of items) if (!(await K(i => window.__kota.noc.inv[i], it))) await mclick(`take-${it}`); for (let i = 0; i < ap; i++) await mclick('take-ap'); for (let i = 0; i < patch; i++) await mclick('take-patch'); console.log('  inv', JSON.stringify(await K(() => window.__kota.noc.inv))); await close(); };
 const rack = async lv => { const d = await K(l => window.__kota.idfs().find(x => x.level === l), lv); for (const [dx, dz] of [[0, 0], [0.3, 0], [-0.3, 0], [0, -0.3]]) { await go(d.x + dx, d.z + dz, lv); if (await K(() => window.__kota.nearRack())) break; } await press('f'); return modalText(); };
 const cli = async (sw, lines) => { await mclick(`console-${sw}`); await p.waitForTimeout(150); await p.click('.swcli .swin'); await p.keyboard.press('Enter'); const o = await consoleLines(lines); await mclick('console-close'); return o; };
