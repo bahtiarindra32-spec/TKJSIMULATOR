@@ -122,7 +122,7 @@ export class Menu {
         const w = el('label', 'pn-range'); const i = el('input') as HTMLInputElement; i.type = 'range'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(get()); i.name = name;
         const o = el('output', '', fmt(get())); i.addEventListener('input', () => { set(+i.value); o.textContent = fmt(+i.value); saveSettings(); h.applySettings(); }); w.append(i, o); return w; };
       row('Sensitivitas kamera', range(0.3, 2.5, 0.05, () => S.sens, v => (S.sens = v), v => `${v.toFixed(2)}×`, 'sens'));
-      row('Volume suara mesin', range(0, 100, 5, () => S.volume, v => (S.volume = v), v => `${v}%`, 'vol'));
+      row('Volume suara', range(0, 100, 5, () => S.volume, v => (S.volume = v), v => `${v}%`, 'vol'));
       row('Balik sumbu Y', seg([['0', 'Normal'], ['1', 'Terbalik']], () => (S.invertY ? '1' : '0'), v => { S.invertY = v === '1'; h.applySettings(); }, 'inv'));
       row('Kamera awal', seg([['0', 'Orang pertama'], ['1', 'Orang ketiga']], () => (S.third ? '1' : '0'), v => { S.third = v === '1'; h.applySettings(); }, 'cam'), 'V mengganti kamera kapan saja');
       row('Siklus siang-malam', seg([['1', 'Otomatis'], ['0', 'Berhenti']], () => (S.autoTime ? '1' : '0'), v => { S.autoTime = v === '1'; h.applySettings(); }, 'auto'), '1 hari = 24 menit · N untuk lompat waktu');

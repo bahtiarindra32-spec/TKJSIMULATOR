@@ -9,6 +9,9 @@ import { buildAutoColliders, buildGrid, resolveCircle, blocked, queryColliders }
 import { Motors, buildGroundBoxes, VMAX, type Bike } from './game/motor';
 import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS, vehicleLampMat } from './assets/vehicles';
 import { DayNight, type PresetId } from './world/daynight';
+import { Ambient } from './game/ambient';
+const ambient = new Ambient();
+addEventListener('pointerdown', () => ambient.start()); addEventListener('keydown', () => ambient.start());
 import { buildSouth, SOUTH_PEDS } from './world/south';
 import { Menu, settings, type QChoice } from './ui/menu';
 import { createPerson, randomSpec, walkPose, idlePose, typingPose, crouchPose, ridePose, WALK_STRIDE } from './assets/people';
@@ -301,7 +304,7 @@ function resumeGame() {
 }
 function toMainMenu() { menu.pause(false); menu.fade(() => { if (mode === 'walk') exitWalk(); showMenu(); }, QA); }
 function showMenu() { tourMode = false; document.body.classList.remove('tour', 'viewing'); goView('overview', true); setCutaway(false); menu.show(true); }
-function applySettings() { dn.auto = settings.autoTime; motors.engine.vol = settings.volume / 100; }
+function applySettings() { dn.auto = settings.autoTime; motors.engine.vol = settings.volume / 100; ambient.vol = settings.volume / 100 * 0.8; }
 function setQualityChoice(q: QChoice) { if (q === 'otomatis') { autoQ = true; fpsW.warm = 4; applyQuality(qName, 'start'); } else { autoQ = false; applyQuality(q, 'manual'); } }
 
 const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => lookBy(dx, dy) });
@@ -336,6 +339,7 @@ window.addEventListener('keydown', e => {
   if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked() && !e.repeat) { if (riding) { motors.resetToRoad(riding, rideDyn(riding)); } else noc.setAnalyzer(!noc.analyzerOn); }
   if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) noc.openBoard();
   if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen() && !riding) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
+  if (mode === 'walk' && e.code === 'KeyH' && riding && !e.repeat) ambient.horn(1);
   if (mode === 'walk' && e.code === 'KeyX' && !e.repeat && !riding && !uiBlocked()) setCrouch(!crouch.on);
   if (mode === 'walk' && e.code === 'Space') { e.preventDefault(); if (!riding && !missions.isModalOpen() && !e.repeat && crouch.on) setCrouch(false); else if (!riding && player.ground && !missions.isModalOpen() && !crouch.on) { player.vy = 4.4; player.ground = false; } }
   if (mode === 'walk' && e.code === 'KeyV') { thirdPerson = !thirdPerson; toast(thirdPerson ? 'Kamera orang ketiga (V untuk ganti)' : 'Kamera orang pertama (V untuk ganti)', 1800); }
@@ -666,7 +670,7 @@ function updateWalk(dt: number) {
     view.bodyYaw += dd * (1 - Math.exp(-dt * 10));
   } else if (!thirdPerson || ride) view.bodyYaw = view.yaw;
   avatar.root.position.copy(player.pos); avatar.root.rotation.y = view.bodyYaw + Math.PI;
-  if (moving) player.phase = (player.phase + (scriptedWalk || mv.length()) / (WALK_STRIDE * avatar.scale)) % 1;
+  if (moving) { const ph0 = player.phase; player.phase = (player.phase + (scriptedWalk || mv.length()) / (WALK_STRIDE * avatar.scale)) % 1; if (!ride && player.ground && ((ph0 < 0.5) !== (player.phase < 0.5))) ambient.step(crouch.on); }
   if (thirdPerson) {
     if (!player.ground && !ride) walkPose(avatar, 0.3, 0.9);
     else if (ck > 0.02) crouchPose(avatar, player.phase, moving ? Math.min(1, speed / 1.0) : 0, ck, performance.now() / 1000);
@@ -994,7 +998,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
-  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far);
+  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
   { const cd = mode === 'walk' ? Math.min(farBase, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase, 120) : 260); }
