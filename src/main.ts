@@ -10,7 +10,7 @@ import { Motors, buildGroundBoxes, VMAX, type Bike } from './game/motor';
 import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS, vehicleLampMat } from './assets/vehicles';
 import { DayNight, type PresetId } from './world/daynight';
 import { Ambient } from './game/ambient';
-import { HotelNpcs } from './game/hotelNpc';
+import { HotelNpcs, type TalkCtx } from './game/hotelNpc';
 const ambient = new Ambient();
 addEventListener('pointerdown', () => ambient.start()); addEventListener('keydown', () => ambient.start());
 import { buildSouth, SOUTH_PEDS } from './world/south';
@@ -537,6 +537,17 @@ function nearSpot() {
   if (best && best.r && nearPc && Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z) < bd) return null;
   return best;
 }
+function npcCtx(): TalkCtx {
+  const j = noc.jobs.find(x => x.id === noc.trackedId && x.status !== 'closed') ?? noc.jobs.find(x => x.status !== 'closed');
+  return { job: j ? { title: j.title, who: j.who, next: noc.nextHint(j), pcs: j.targets.map(t => t.pc.name), faults: j.faults, levels: j.targets.map(t => t.pc.level) } : null };
+}
+function nearNpcNow() {
+  if (ride || riding || seat || !insideHotel(player.pos.x, player.pos.z)) return null;
+  const n = hotelNpcs.nearest(player.pos, player.level, 1.7); if (!n) return null;
+  if (nearPc && !n.pc && Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z) < Math.hypot(n.p.root.position.x - player.pos.x, n.p.root.position.z - player.pos.z)) return null;
+  return n;
+}
+function talkNpc(n: NonNullable<ReturnType<typeof nearNpcNow>>) { toast(`${hotelNpcs.title(n)}: "${hotelNpcs.talk(n, npcCtx(), n.pc ?? nearPc?.name ?? null)}"`, 6500); }
 function interact() {
   if (uiBlocked() || ride) return;
   if (riding) { requestDismount(); return; }
@@ -544,6 +555,7 @@ function interact() {
   const sp = nearSpot(); if (sp) { noc.useSpot(sp.id); return; }
   const rk = nearRack();
   if (rk && rk !== 'MDF' && !nearPc) { keys.clear(); noc.openRack(rk); return; }
+  { const nn = nearNpcNow(); if (nn) { talkNpc(nn); return; } }
   const door = nearestDoor(player.pos.x, player.pos.z, player.pos.y, 1.7, player.yaw);
   if (door && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(door.cx - player.pos.x, door.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { toggleDoor(door); return; }
   if (!nearAnchor && nearPc) { sitAt(nearPc); return; }
@@ -736,6 +748,7 @@ function updateWalk(dt: number) {
   const nb = ride || sp ? null : nearBike();
   if (ride) hint = '';
   else if (nb) { hint = '[F] Naik motor'; at = new THREE.Vector3(nb.pos.x, nb.pos.y + 1.35, nb.pos.z); }
+  else if (!sp && nearNpcNow()) { const n = nearNpcNow()!; hint = `[F] Ngobrol dengan ${n.name}`; at = n.p.root.position.clone().setY(n.p.root.position.y + (n.kind === 'type' ? 1.45 : 1.9)); }
   else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
   else if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { hint = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; at = new THREE.Vector3(dr.cx, dr.y0 + 1.45, dr.cz); if (inVertical(player.pos.x, player.pos.z)) hint += atLift() ? ' · [E] Panggil lift (pilih lantai)' : ' · [E] Naik tangga · [Q] Turun tangga'; }
   else {
@@ -1000,7 +1013,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
-  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', player.level, seat?.pc.name ?? null); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
+  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', mode === 'walk' && !inside && Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + 15), player.pos.z - wz(HOTEL_ORIGIN[1] + 10)) < 70, player.level, seat?.pc.name ?? null, player.pos); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
   { const cd = mode === 'walk' ? Math.min(farBase, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase, 120) : 260); }

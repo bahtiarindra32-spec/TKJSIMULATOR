@@ -189,7 +189,8 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Bekas "Lahan Cadangan" (pagar proyek yang bisa ditembus) dihapus dan diisi: ruko di selatan Jl. Cempaka (barat dan timur), BLD_OFFICE_C1, BLD_APT_C1, BLD_APT_C2, BLD_OFFICE_C3, dan BLD_OFFICE_C2 di timur hotel. Semua padat (solidAudit 320 objek, 0 tembus).
 
 ### Update 31 Okt 2026: NPC hotel
-- Lobi L1: 2 resepsionis di balik meja, satpam dekat pintu, tamu check-in, orang lalu-lalang. Kantor L1-L3: karyawan duduk mengetik di sekitar separuh PC (NPC menghilang saat pemain memakai PC itu). Pantry L2/L3 orang ngobrol, koridor L2-L8 tamu berjalan. Hanya lantai pemain yang ditampilkan/di-update (hemat performa).
+- Lobi L1: 2 resepsionis di balik meja, satpam dekat pintu, tamu check-in, orang lalu-lalang. Kantor L1-L3: karyawan duduk mengetik di sekitar separuh PC (NPC menghilang saat pemain memakai PC itu). Pantry L2/L3 orang ngobrol, koridor L2-L8 tamu berjalan. NPC lantai pemain ±1 ditampilkan, lobi tetap terlihat dari luar; NPC tidak pernah menghilang mendadak: karyawan berdiri dan geser ke samping meja saat PC-nya mau dipakai.
+- Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
 
 ## 6. Perubahan dari PDF (hasil audit)
 1. Trotoar arteri 3 m menjadi 5 m (pedoman kawasan bisnis), lebar Sudirman/Thamrin menjadi 26 m.

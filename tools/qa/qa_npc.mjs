@@ -1,7 +1,22 @@
 import { boot } from './qa_lib.mjs';
-const { b, p, errs, K, go, step } = await boot(null);
-await K(() => window.__kota.state && 0);
-for (const [n, x, z, lv, yaw] of [['npc_l2', 236, 175, 2, 0], ['npc_l3', 230, 175, 3, 0], ['npc_l5', 224, 179, 5, Math.PI/2], ['npc_l2b', 236, 172.5, 2, Math.PI]]) {
-  await go(x, z, lv, yaw); await K(() => window.__kota.step(4, 1/30, true)); await p.screenshot({ path: `/workspace/work/shots/${n}.png` });
+const { b, p, errs, K, go, press } = await boot(null);
+const toast = () => K(() => document.getElementById('toast').textContent);
+const prompt = () => K(() => window.__kota.prompt());
+let ok = true;
+// resepsionis: berdiri di depan meja (lokal 8, 6.6 ada tamu) -> sisi lokal 7.2, 6.9
+await go(227.3, 175.6, 1, Math.PI); await K(() => window.__kota.step(3, 1/30, false));
+console.log('reception prompt:', await prompt()); await press('KeyF'); const t1 = await toast(); console.log('talk1:', t1); await press('KeyF'); console.log('talk2:', await toast());
+ok &&= /Ngobrol/.test(await prompt()) || /Resepsionis|Tamu|Satpam/.test(t1);
+// karyawan duduk di PC L2: cari PC L2 yang ada NPC, berdiri di belakang kursinya
+const pcs = await K(() => window.__kota.pcs().filter(c => /^PROP_L2_PC_/.test(c.name)));
+let talked = false;
+for (const c of pcs.slice(0, 12)) {
+  for (const [dx, dz] of [[0, 1.5], [0, -1.5]]) {
+    await go(c.x + dx, c.z + dz, 2, dz > 0 ? 0 : Math.PI); await K(() => window.__kota.step(2, 1/30, false));
+    const pr = await prompt(); if (!/Ngobrol/.test(pr)) continue;
+    await press('KeyF'); console.log('pc', c.name, '->', await toast());
+    await K(() => window.__kota.step(4, 1/30, false)); console.log('  after prompt:', await prompt()); talked = true; break;
+  }
+  if (talked) break;
 }
-console.log('npcs', await K(() => { const g = window.__kota && document; return 1; }), 'errors', JSON.stringify(errs)); await b.close();
+console.log('RESULT', JSON.stringify({ reception: ok, worker: talked }), 'errors', JSON.stringify(errs)); await b.close();
