@@ -201,12 +201,29 @@ for (const ph of phases) {
       await hold('s', 90);
     }
     if (ph === 'esc') {
+      // v9: Esc = pause menu; the rider stays on the bike and "Lanjutkan" resumes exactly there
       if (!(await st()).riding) { await bikeTo('PROP_MOTOR_05', 300, 61.75, Math.PI / 2); await mountBike('PROP_MOTOR_05'); }
       await hold('w', 30); const a = await mo();
-      await press('Escape'); const s = await st(); const b = await bike(a.id);
+      await press('Escape'); const s = await st(); const paused = await K(() => window.__kota.menu.paused()); const b = await bike(a.id);
       await K(() => document.getElementById('enter').click()); await K(() => window.__kota.pause(true)); await step(3); const s2 = await st(); const b2 = await bike(a.id);
-      console.log('  after Esc mode', s.mode, 'riding', s.riding, 'bike parked at', b.x.toFixed(2), b.z.toFixed(2), '| re-enter', s2.mode, s2.riding, 'speedo hidden', await K(() => !document.getElementById('speedo').classList.contains('on')));
-      out.esc = s.mode === 'orbit' && !s.riding && !b.ridden && s2.mode === 'walk' && Math.hypot(b2.x - b.x, b2.z - b.z) < 0.01 ? 'OK' : 'FAIL';
+      console.log('  after Esc mode', s.mode, 'paused', paused, 'riding', s.riding, 'bike at', b.x.toFixed(2), b.z.toFixed(2), '| resume', s2.mode, s2.riding, 'paused', await K(() => window.__kota.menu.paused()), 'speedo on', await K(() => document.getElementById('speedo').classList.contains('on')));
+      out.esc = s.mode === 'walk' && paused && s.riding === a.id && s2.riding === a.id && !(await K(() => window.__kota.menu.paused())) && Math.hypot(b2.x - b.x, b2.z - b.z) < 1.0 ? 'OK' : 'FAIL';
+    }
+    if (ph === 'smooth') {
+      // steering smoothness: per-frame change of steer / lean while tapping A at 30-40 km/h (keyboard is digital)
+      if (!(await st()).riding) { await bikeTo('PROP_MOTOR_05', 300, 61.75, Math.PI / 2); await mountBike('PROP_MOTOR_05'); }
+      await K(() => window.__kota.bikeSpeed(10)); await p.keyboard.down('w');
+      const ser = []; const sample = async () => { await frames(1); const m = await mo(); ser.push([m.steer, m.lean, await K(() => window.__kota.steerIn()), m.kmh]); };
+      for (let i = 0; i < 8; i++) await sample();
+      await p.keyboard.down('a'); for (let i = 0; i < 24; i++) await sample(); await p.keyboard.up('a');
+      for (let i = 0; i < 24; i++) await sample();
+      await p.keyboard.up('w');
+      let dS = 0, dL = 0, flips = 0; for (let i = 1; i < ser.length; i++) { dS = Math.max(dS, Math.abs(ser[i][0] - ser[i - 1][0])); dL = Math.max(dL, Math.abs(ser[i][1] - ser[i - 1][1])); if (i > 1 && Math.sign(ser[i][1] - ser[i - 1][1]) !== Math.sign(ser[i - 1][1] - ser[i - 2][1]) && Math.abs(ser[i][1] - ser[i - 1][1]) > 0.004) flips++; }
+      const peakIn = Math.max(...ser.map(x => x[2])); const t90 = ser.findIndex(x => x[2] > 0.9 * peakIn) - 8;
+      console.log('  steer/lean series', ser.filter((_, i) => i % 4 === 0).map(x => x.map(v => v.toFixed(3)).join('/')).join(' '));
+      console.log('  max dSteer/frame', dS.toFixed(4), 'max dLean/frame', dL.toFixed(4), 'lean reversals', flips, 'input 90% after', t90, 'frames', 'end steer', ser.at(-1)[0].toFixed(3), 'lean', ser.at(-1)[1].toFixed(3));
+      out.smooth = dS < 0.08 && dL < 0.045 && flips <= 2 && t90 >= 4 && Math.abs(ser.at(-1)[0]) < 0.02 ? 'OK' : 'FAIL';
+      await hold('s', 60);
     }
     if (ph === 'stuck') {
       // wedge the bike into a tower corner by teleport (overlapping): it must recover to the nearest road by itself; R also works

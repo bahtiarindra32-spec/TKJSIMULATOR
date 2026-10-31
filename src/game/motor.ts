@@ -29,7 +29,7 @@ const G = 9.81;
 
 export interface Bike {
   id: string; m: RideMotor; pos: THREE.Vector3; yaw: number; speed: number; steer: number; lean: number; pitch: number; vy: number;
-  ridden: boolean; stopT: number; stuckT: number; noProgT: number; hit: number; spinF: number; spinR: number; braking: boolean; footDown: number;
+  ridden: boolean; steerIn: number; leanV: number; stopT: number; stuckT: number; noProgT: number; hit: number; spinF: number; spinR: number; braking: boolean; footDown: number;
 }
 export interface BikeInput { throttle: number; brake: number; rear: boolean; steer: number }
 
@@ -73,6 +73,8 @@ export function groundAt(x: number, z: number, ref: number) {
 class Engine {
   ctx: AudioContext | null = null; gain: GainNode | null = null; o1: OscillatorNode | null = null; o2: OscillatorNode | null = null; lp: BiquadFilterNode | null = null;
   on = false;
+  /** master volume 0..1 (settings) */
+  vol = 0.7;
   start() {
     try {
       if (!this.ctx) {
@@ -96,7 +98,7 @@ class Engine {
     const f = rpm / 60;                                       // single cylinder 4-stroke: firing at rpm/120, harmonics
     this.o1.frequency.setTargetAtTime(f, t, 0.06); this.o2.frequency.setTargetAtTime(f / 2, t, 0.06);
     this.lp.frequency.setTargetAtTime(380 + 900 * Math.min(1, throttle * 0.6 + v * 0.6), t, 0.08);
-    this.gain.gain.setTargetAtTime(this.on && !document.hidden ? 0.035 + 0.035 * throttle : 0, t, 0.05);
+    this.gain.gain.setTargetAtTime(this.on && !document.hidden ? (0.035 + 0.035 * throttle) * this.vol / 0.7 : 0, t, 0.05);
   }
   stop() { this.on = false; if (this.ctx && this.gain) this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08); }
 }
@@ -114,7 +116,7 @@ export class Motors {
     this.group.name = 'GAME_MOTOR_MATIC'; parent.add(this.group);
     for (const s of BIKE_SPOTS) {
       const m = makeRideableMotor(s.color, s.id);
-      const b: Bike = { id: s.id, m, pos: new THREE.Vector3(wx(s.X), 0, wz(s.Z)), yaw: s.yaw, speed: 0, steer: 0.35, lean: 0.09, pitch: 0, vy: 0, ridden: false, stopT: 0, stuckT: 0, noProgT: 0, hit: 0, spinF: 0, spinR: 0, braking: false, footDown: 0 };
+      const b: Bike = { id: s.id, m, pos: new THREE.Vector3(wx(s.X), 0, wz(s.Z)), yaw: s.yaw, speed: 0, steer: 0.35, lean: 0.09, pitch: 0, vy: 0, ridden: false, steerIn: 0, leanV: 0, stopT: 0, stuckT: 0, noProgT: 0, hit: 0, spinF: 0, spinR: 0, braking: false, footDown: 0 };
       this.group.add(m.root); this.bikes.push(b);
     }
   }
@@ -170,6 +172,10 @@ export class Motors {
     this.extra = dyn;
     let worst = 0;
     b.braking = inp.brake > 0.05 || inp.rear;
+    // steering input smoothing (keyboard is digital, touch is analog: both ramp the same way)
+    { const u = THREE.MathUtils.clamp(inp.steer, -1, 1), cur = b.steerIn;
+      const rate = Math.abs(u) < 0.02 ? 3.6 : Math.sign(u) !== Math.sign(cur) && Math.abs(cur) > 0.05 ? 6.0 : 2.4;   // centre gently, reverse quickly, build up smoothly
+      const d = u - cur, mx = rate * dt; b.steerIn = cur + THREE.MathUtils.clamp(d * (1 - Math.exp(-dt * 9)) + Math.sign(d) * Math.min(Math.abs(d), mx * 0.25), -mx, mx); }
     for (let i = 0; i < n; i++) {
       // ---- longitudinal
       const v = b.speed;
@@ -184,16 +190,18 @@ export class Motors {
       if (inp.rear) b.speed -= Math.sign(b.speed) * Math.min(Math.abs(b.speed), REAR * h);
       if (inp.throttle <= 0.02 || b.speed < 0) { const loss = (ROLL + AERO * b.speed * b.speed) * h; b.speed -= Math.sign(b.speed) * Math.min(Math.abs(b.speed), loss); }
       if (Math.abs(b.speed) < 0.02 && inp.throttle <= 0.02 && inp.brake <= 0.05) b.speed = 0;
-      // ---- steering: wheel angle limited by speed so the lateral acceleration stays believable
+      // ---- steering (v9 smoothing): the wheel follows the smoothed input exponentially, never snaps;
+      // the wheel angle is limited by speed so lateral acceleration stays believable (speed-sensitive steer)
       const sp = Math.abs(b.speed);
       const maxSteer = Math.min(0.62, Math.atan((MOTOR_WHEELBASE * ALAT) / Math.max(0.01, sp * sp)));
-      const target = THREE.MathUtils.clamp(inp.steer, -1, 1) * maxSteer;
-      const rate = (Math.abs(target) < Math.abs(b.steer) ? 4.5 : 2.6) * h;
-      b.steer += THREE.MathUtils.clamp(target - b.steer, -rate, rate);
+      const target = THREE.MathUtils.clamp(b.steerIn, -1, 1) * maxSteer * (1 - 0.18 * Math.min(1, sp / VMAX));
+      b.steer += (target - b.steer) * (1 - Math.exp(-h * (sp < 2 ? 10 : 7)));
       const yawRate = (b.speed * Math.tan(b.steer)) / MOTOR_WHEELBASE;
       b.yaw += yawRate * h;
-      const leanT = THREE.MathUtils.clamp(Math.atan((b.speed * yawRate) / G), -0.72, 0.72);
-      b.lean += (leanT - b.lean) * (1 - Math.exp(-h * 7));
+      // lean: critically-damped spring toward the physical lean angle -> eases in and out, no wobble
+      const leanT = THREE.MathUtils.clamp(Math.atan((b.speed * yawRate) / G), -0.62, 0.62);
+      const KL = 55, CL = 2 * Math.sqrt(KL) * 0.95;
+      b.leanV += (KL * (leanT - b.lean) - CL * b.leanV) * h; b.lean += b.leanV * h;
       // ---- move
       this.fwd(b, f);
       const ox = b.pos.x, oz = b.pos.z;
@@ -245,8 +253,8 @@ export class Motors {
     m.stand.visible = parked; m.brake.visible = b.ridden && b.braking;
   }
   /** park where it stands: side stand down, bars turned left, slight lean onto the stand */
-  park(b: Bike) { b.ridden = false; b.speed = 0; b.vy = 0; b.steer = 0.35; b.lean = 0.09; b.braking = false; b.footDown = 0; this.render(b, 0); }
-  mount(b: Bike) { b.ridden = true; b.steer = 0; b.lean = 0; b.speed = 0; b.stopT = 0; b.stuckT = 0; b.noProgT = 0; b.footDown = 1; this.render(b, 0); }
+  park(b: Bike) { b.ridden = false; b.speed = 0; b.vy = 0; b.steer = 0.35; b.lean = 0.09; b.steerIn = 0; b.leanV = 0; b.braking = false; b.footDown = 0; this.render(b, 0); }
+  mount(b: Bike) { b.ridden = true; b.steer = 0; b.lean = 0; b.steerIn = 0; b.leanV = 0; b.speed = 0; b.stopT = 0; b.stuckT = 0; b.noProgT = 0; b.footDown = 1; this.render(b, 0); }
   /** does a bike footprint fit here? */
   fits(b: Bike, dyn: AABB[]) { const sx = b.pos.x, sz = b.pos.z; const c = new THREE.Vector3(); this.resolve(b, dyn, c); const ok = c.lengthSq() < 1e-6; b.pos.x = sx; b.pos.z = sz; return ok; }
   /** recovery: put the bike on the nearest road lane (left-hand traffic heading), clear of anything solid */
@@ -272,6 +280,6 @@ export class Motors {
       b.pos.y = this.groundUnder(b, 0.3).y;
       if (this.fits(b, dyn)) break;
     }
-    b.speed = 0; b.vy = 0; b.steer = 0; b.lean = 0; b.pitch = 0; b.stuckT = 0; b.noProgT = 0; b.hit = -1;
+    b.speed = 0; b.vy = 0; b.steer = 0; b.lean = 0; b.steerIn = 0; b.leanV = 0; b.pitch = 0; b.stuckT = 0; b.noProgT = 0; b.hit = -1;
   }
 }

@@ -18,21 +18,14 @@
 </head>
 <body>
   <div id="app"></div>
-  <div id="loading"><div class="ld-label">PROYEK TKJ / KOTA 001</div><div class="ld-title">Membangun Kota Nusantara…</div><div class="ld-bar"><i></i></div></div>
-  <div id="mask"></div>
-  <header id="ident">PROYEK TKJ <b>/</b> KOTA 001</header>
-  <section id="hero">
-    <h1>Kota<br />Nusantara</h1>
-    <h2>Nusantara Tech Hotel &amp; Office</h2>
-    <p class="desc">Kota fiktif 400 × 300 m bergaya Jakarta. Simpang Sudirman–Thamrin, ruko, pasar, masjid, kampung bergang, dan gedung 8 lantai dengan Workshop TKJ serta Ruang Server, dunia game simulasi jaringan untuk siswa SMK.</p>
-    <p class="loc"><span class="loc-k">LOKASI</span> <span id="locText">Ikhtisar kota dari arah barat laut</span></p>
-    <button id="enter" type="button">MASUK KOTA <span>→</span></button>
-  </section>
+  <div id="loading"><div class="ld-wrap"><div class="ld-label">PROYEK TKJ <b>/</b> KOTA 001</div><div class="ld-title">Kota Nusantara</div><div class="ld-sub" id="ldSub">Membangun kota…</div><div class="ld-bar"><i></i></div><div class="ld-tip">Tip: tekan <kbd>N</kbd> untuk melompat ke pagi, siang, sore, atau malam.</div></div></div>
+  <span id="locText" hidden></span>
+  <div id="clock"></div>
   <aside id="compass"><div class="dial"><i id="needle"></i><b>U</b></div><div class="coords"><span id="heading">—</span><span id="xyz">X — · Z —</span><span id="floor"></span></div></aside>
   <div id="hud-loc"><span class="loc-k">LOKASI</span> <span id="hudLoc"></span><span id="hudHint"></span></div>
   <nav id="views" aria-label="Pilihan tampilan"></nav>
   <div id="hints">Klik/tarik untuk memutar · roda untuk zoom</div>
-  <div id="toolbar"><button id="btnZones" type="button" title="Tampilkan zona (Z)">Zona</button><button id="btnExport" type="button" title="Ekspor adegan ke GLB untuk Blender">Ekspor GLB</button><button id="btnBack" type="button">← Ikhtisar</button></div>
+  <div id="toolbar"><button id="btnZones" type="button" title="Tampilkan zona (Z)">Zona</button><button id="btnExport" type="button" title="Ekspor adegan ke GLB untuk Blender">Ekspor GLB</button><button id="btnGfx" type="button" title="Ganti kualitas grafik (G)">Grafik</button><button id="btnBack" type="button">← Ikhtisar</button></div>
   <div id="crosshair"></div>
   <div id="toast"></div>
   <script type="module" src="/src/main.ts"></script>

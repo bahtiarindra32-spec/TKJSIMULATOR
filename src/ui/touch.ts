@@ -46,7 +46,7 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
     </div>
     <div class="ttop">
       <button data-k="KeyT">Kerja</button><button data-k="KeyC" class="walk-only">Cek</button><button data-k="KeyR" class="walk-only">Wi-Fi</button>
-      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyG" id="t-gfx">Grafik</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
+      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyN" id="t-time">Waktu</button><button data-k="KeyG" id="t-gfx">Grafik</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
     </div>`;
   document.body.appendChild(root);
   const stop = (e: Event) => { e.stopPropagation(); };

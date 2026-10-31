@@ -7,12 +7,15 @@ import { ZONES, ROADS, ROAD_SPEC, LEVELS, SPAWN, ANCHORS, HOTEL_ORIGIN, wx, wz }
 import { colliders, bakeStatic, setBakedVisible, type AABB } from './world/core';
 import { buildAutoColliders, buildGrid, resolveCircle, blocked, queryColliders } from './game/physics';
 import { Motors, buildGroundBoxes, VMAX, type Bike } from './game/motor';
-import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS } from './assets/vehicles';
+import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS, vehicleLampMat } from './assets/vehicles';
+import { DayNight, type PresetId } from './world/daynight';
+import { buildSouth, SOUTH_PEDS } from './world/south';
+import { Menu, settings, type QChoice } from './ui/menu';
 import { createPerson, randomSpec, walkPose, idlePose, typingPose, crouchPose, ridePose, WALK_STRIDE } from './assets/people';
 import { buildRoads } from './world/roads';
 import { buildGround, buildCity } from './world/buildings';
 import { buildHotel, updateDoors, closedDoorBoxes, nearestDoor, toggleDoor, blinkMaterials, insideHotel, zoneAt, verticalZones } from './world/hotel';
-import { buildStreetProps } from './world/props';
+import { buildStreetProps, lampLights } from './world/props';
 import { Signals, Traffic, Pedestrians } from './game/traffic';
 import { MISSIONS } from './game/missions';
 import * as ND from './assets/netdevices';
@@ -25,7 +28,7 @@ import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS }
 import { Vertical } from './game/vertical';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
 
-import { buildWayfinding } from './world/wayfinding';
+import { buildWayfinding, streetLabel } from './world/wayfinding';
 import { dressL1, l1Lights } from './world/interiorDressing';
 import { Minimap } from './ui/minimap';
 import { PcOS } from './pcos/os';
@@ -46,10 +49,13 @@ if (location.protocol.startsWith('http') && __BUILD__ !== 'dev') {
     if (b && b !== __BUILD__ && sessionStorage.getItem('kn-reloaded') !== b) { sessionStorage.setItem('kn-reloaded', b); location.replace(`${location.pathname}?v=${b}`); }
   }).catch(() => { /* offline / file:// */ });
 }
+// no service worker is ever registered by this game; remove any left over from an old build/PWA test so it cannot serve stale files
+if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
 const cityX = (x: number) => x + 200, cityZ = (z: number) => z + 150;
 
 // ---------- renderer / scene ----------
 const QS = new URLSearchParams(location.search);
+const QA0 = QS.has('qa');
 const TOUCH0 = isTouch();
 const renderer = new THREE.WebGLRenderer({ antialias: !TOUCH0, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, TOUCH0 ? 1 : 2));
@@ -76,6 +82,21 @@ dir.castShadow = true; dir.shadow.mapSize.set(4096, 4096); dir.shadow.bias = -0.
 const sc = dir.shadow.camera as THREE.OrthographicCamera; sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 1; sc.far = 700;
 scene.add(dir, dir.target);
 const interiorLight = new THREE.PointLight('#fff1dc', 0, 18, 1.4); scene.add(interiorLight);
+// ---------- day / night (1 game day = 24 real minutes; N or the menu jumps pagi/siang/sore/malam) ----------
+const dn = new DayNight({ renderer, scene, sky, hemi, dir, sun, vehicleLamp: vehicleLampMat() }, QS.has('t') ? +QS.get('t')! : 16.5);
+// night extras on Tinggi only: 4 real point lights that follow the street lamps nearest the camera + the bike's headlight spot.
+// They always exist (constant light count = no shader recompiles); visible only on Tinggi, intensity 0 by day.
+const nightLights = [0, 1, 2, 3].map(() => { const l = new THREE.PointLight('#ffc77a', 0, 30, 1.5); l.visible = false; scene.add(l); return l; });
+const headSpot = new THREE.SpotLight('#fff1d6', 0, 42, 0.42, 0.55, 1.3); headSpot.visible = false; scene.add(headSpot, headSpot.target);
+// cheap headlight on every quality level: an additive light pool on the road ahead of the ridden bike
+const headBeam = (() => {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 128; const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 118, 4, 32, 70, 70); gr.addColorStop(0, 'rgba(255,240,205,0.95)'); gr.addColorStop(0.45, 'rgba(255,232,190,0.45)'); gr.addColorStop(1, 'rgba(255,230,190,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 128);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(5, 12).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0, fog: false }));
+  m.name = 'MOTOR_LAMPU_SOROT'; m.renderOrder = 2; m.visible = false; scene.add(m); return m;
+})();
+let nightPickT = 0; const lastShadowFocus = new THREE.Vector3(1e9, 0, 0);
 
 // ---------- world ----------
 const world = new THREE.Group(); world.name = 'KOTA_NUSANTARA'; scene.add(world);
@@ -113,23 +134,24 @@ l1Lights(scene);
 const signals = new Signals(tls);
 const gameLayer = new THREE.Group(); gameLayer.name = 'GAME_LAYER'; scene.add(gameLayer);
 const traffic = new Traffic(gameLayer, signals);
-const peds = new Pedestrians(gameLayer);
+const peds = new Pedestrians(gameLayer, SOUTH_PEDS);
 const vertical = new Vertical(hotel, gameLayer);
 // The old linear quiz chain is retired: all work now comes from the NOC work board (game/noc.ts).
 const missions = { isModalOpen: () => false, hintFor: (_a: string | null): string | null => null, interact: (_a: string | null) => false, onModalChange: (_f: (o: boolean) => void) => {}, setPlayerPos: (_x: number, _z: number) => {}, current: () => ({ targetPos: null as { x: number; z: number } | null, targetY: 0, place: '' }), start: () => {} };
 const missionUI = { setHudVisible: (_v: boolean) => {} };
 const waypoint = createWaypoint();
 const missionMarker = createAnchorMarker(); gameLayer.add(missionMarker.group);
+const south = buildSouth(world);   // v9: Kota Selatan (own RNG, built after the seeded systems)
 buildAutoColliders(world); buildGrid();
 // rideable Motor Matic: flat ground boxes (asphalt 0.02, kerbs 0.17, sidewalks 0.15, parking slabs) + bike-only walls
 const motors = new Motors(gameLayer);
-buildGroundBoxes(['FASE_A_JALAN', 'FASE_B_TANAH_ZONA', 'FASE_E_PROPERTI_JALAN', 'PARKIR_MOTOR_01'].map(n => world.getObjectByName(n)!).filter(Boolean), o => o.name === 'JPO_01' || o.name === 'ZONE_OVERLAY');
+buildGroundBoxes(['FASE_A_JALAN', 'FASE_B_TANAH_ZONA', 'FASE_E_PROPERTI_JALAN', 'PARKIR_MOTOR_01', 'FASE_F_KOTA_SELATAN'].map(n => world.getObjectByName(n)!).filter(Boolean), o => o.name === 'JPO_01' || o.name === 'ZONE_OVERLAY');
 {
   const hb = { x0: wx(HOTEL_ORIGIN[0]), x1: wx(HOTEL_ORIGIN[0] + 30), z0: wz(HOTEL_ORIGIN[1]), z1: wz(HOTEL_ORIGIN[1] + 20) };
   motors.walls.push({ minX: hb.x0 - 0.1, maxX: hb.x1 + 0.1, minZ: hb.z0 - 0.1, maxZ: hb.z1 + 0.1, minY: -1, maxY: 40 }); // no riding into the hotel (lobby, lift, stairs)
   const jpo = world.getObjectByName('JPO_01');
   for (const st of jpo?.children ?? []) { const q = st.userData.stair; if (q) motors.walls.push({ minX: q.x0, maxX: q.x1, minZ: q.z0, maxZ: q.z1, minY: -1, maxY: 8 }); }
-  for (const w of [[-210, -199.5, -160, 160], [199.5, 210, -160, 160], [-210, 210, -160, -149.5], [-210, 210, 149.5, 160]]) motors.walls.push({ minX: w[0], maxX: w[1], minZ: w[2], maxZ: w[3], minY: -1, maxY: 40 });
+  for (const w of [[-210, -199.5, -160, 460], [199.5, 210, -160, 460], [-210, 210, -160, -149.5], [-210, 210, 448.2, 460]]) motors.walls.push({ minX: w[0], maxX: w[1], minZ: w[2], maxZ: w[3], minY: -1, maxY: 40 });
 }
 motors.settle();
 const zoneOverlay = world.getObjectByName('ZONE_OVERLAY')!;
@@ -139,6 +161,9 @@ const hotelBatches = new Map<string, THREE.Object3D>();
 for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => /^(DOOR_|LIFT_|PROP_L\d_CORRIDOR_AP_)/.test(o.name)); batches.add(b); hotelBatches.set(lvName, b); }
 for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_')));
 batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_B', o => o.name === 'ZONE_OVERLAY'));
+// south district: two halves so looking north (or from the old district) frustum-culls them
+batches.add(bakeStatic(south.west, 'BATCH_SELATAN_BARAT')); batches.add(bakeStatic(south.east, 'BATCH_SELATAN_TIMUR'));
+batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SELATAN_LAIN'));
 const upperParts = ['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
 
 // ---------- views ----------
@@ -155,6 +180,8 @@ const VIEWS: View[] = [
   { id: 'ruko', label: 'Ruko & Pasar', loc: 'Deretan ruko, pasar, dan masjid di sisi selatan Sudirman', pos: [118, 22, 148], target: [138, 4, 196] },
   { id: 'kampung', label: 'Kampung', loc: 'Kampung Melati: gang 3 m dan kabel listrik semrawut', pos: [8, 9, 168], target: [40, 2, 198] },
   { id: 'taman', label: 'Taman Kota', loc: 'Taman kota: jalur jogging, gazebo, air mancur', pos: [96, 22, 2], target: [140, 0, 32] },
+  { id: 'selatan', label: 'Kota Selatan', loc: 'Kota Selatan: ruko Jl. Anggrek, Lapangan Anggrek, kampung bergang, perkantoran', pos: [70, 70, 300], target: [170, 0, 400] },
+  { id: 'smk', label: 'SMK Nusantara', loc: 'SMK Nusantara (TKJ), Taman Dahlia, dan apartemen di Jl. Dahlia', pos: [200, 40, 470], target: [262, 4, 525] },
 ];
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -206,6 +233,7 @@ const crouch = { on: false, k: 0 };
 const CROUCH_TOP = 1.25, STAND_TOP = 1.75, EYE_STAND = 1.62, EYE_CROUCH = 1.05;
 /** the Motor Matic the player is riding (null = on foot) */
 let riding: Bike | null = null;
+let camRoll = 0; const camTgt = new THREE.Vector3();
 let mountT = 1, wantDismount = false, chaseYaw = 0, camDistR = 4, rideShake = 0, hitToastT = 0;
 const rideLook = { yaw: 0, pitch: -0.16, idle: 0 };
 const WALK_HINTS = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · X jongkok · V kamera · F interaksi · T papan kerja · C cek fisik · R Wi-Fi analyzer · E/Q tangga/lift · M peta · Esc keluar';
@@ -213,41 +241,93 @@ const RIDE_HINTS = 'W gas · S rem / mundur pelan · A/D belok · Spasi rem bela
 missions.onModalChange(open => { if (open) keys.clear(); });
 noc.toast = (s, ms) => toast(s, ms);
 noc.onModal(open => { if (open) keys.clear(); else last = performance.now(); });
-const uiBlocked = () => missions.isModalOpen() || pcos.isOpen() || noc.isModalOpen() || liftPanel.isOpen();
-function enterWalk() {
+const uiBlocked = () => missions.isModalOpen() || pcos.isOpen() || noc.isModalOpen() || liftPanel.isOpen() || menu.paused;
+/** true once the player has entered the city this session: entering again resumes where they left off */
+let started = false, tourMode = false;
+function enterWalk(fresh = !started) {
+  (document.activeElement as HTMLElement | null)?.blur?.();     // a focused menu button must never catch the next Space/Enter
+  menu.show(false); menu.pause(false); tourMode = false; document.body.classList.remove('tour');
   mode = 'walk'; document.body.classList.add('entered'); document.body.classList.remove('viewing'); setCutaway(false); controls.enabled = false; tween = null;
-  player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1;
-  riding = null; crouch.on = false; crouch.k = 0; document.body.classList.remove('riding', 'crouching');
-  $('hints').textContent = WALK_HINTS;
+  if (fresh) {
+    if (riding) forceDismount();
+    player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1; player.vy = 0; player.ground = true; vel.set(0, 0);
+    crouch.on = false; crouch.k = 0; document.body.classList.remove('riding', 'crouching'); thirdPerson = settings.third;
+    $('hints').textContent = WALK_HINTS;
+  } else {
+    // resume exactly where the player was: on foot, crouched, or on the bike
+    document.body.classList.toggle('crouching', crouch.on); document.body.classList.toggle('riding', !!riding);
+    if (riding) { speedo.classList.add('on'); motors.engine.start(); mountT = 1; chaseYaw = riding.yaw; }
+    $('hints').textContent = riding ? RIDE_HINTS : WALK_HINTS;
+  }
+  keys.clear(); last = performance.now();
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
   if (!isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
   touchUi?.onEnter();
   missionUI.setHudVisible(true); noc.setHudVisible(true);
   missions.start();
-  if (!QS.has('qa') || QS.has('tutor')) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
+  if (fresh && !started && (!QS.has('qa') || QS.has('tutor'))) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
+  started = true; menu.started = true;
 }
 function exitWalk() {
-  if (riding) forceDismount();
-  crouch.on = false; crouch.k = 0; document.body.classList.remove('crouching');
+  // the player's state is kept (position, crouch, the bike they sit on) so "Lanjutkan" resumes it
+  if (riding) { riding.speed = 0; motors.engine.stop(); speedo.classList.remove('on'); }
+  document.body.classList.remove('crouching', 'riding');
   mode = 'orbit'; document.body.classList.remove('entered'); controls.enabled = true;
   $('hints').textContent = 'Klik/tarik untuk memutar · roda untuk zoom';
   if (document.pointerLockElement) document.exitPointerLock();
   missionUI.setHudVisible(false); noc.setHudVisible(false);
   prompt.hide(); $('hudHint').textContent = '';   // the walk prompt ([F] Buka pintu…) used to stay on screen over the orbit views
 }
-$('enter').onclick = enterWalk;
+// ---------- title screen / pause ----------
+const menu = new Menu({
+  build: __BUILD__, touch: TOUCH0,
+  start: fresh => menu.fade(() => enterWalk(fresh), QA),
+  resume: () => { if (mode === 'walk' && menu.paused) resumeGame(); else menu.fade(() => enterWalk(false), QA); },
+  tour: () => menu.fade(() => { menu.show(false); tourMode = true; document.body.classList.add('tour'); goView('overview', true); }, QA),
+  toMainMenu: () => toMainMenu(),
+  setQuality: q => setQualityChoice(q),
+  setTime: id => { dn.goTo(id as PresetId); menu.setTimeActive(id[0].toUpperCase() + id.slice(1)); },
+  applySettings: () => applySettings(),
+});
+function openPause() {
+  if (mode !== 'walk' || menu.paused) return;
+  keys.clear(); releaseTouch(); drag = false; motors.engine.on = false; motors.engine.update(0, 0);
+  if (document.pointerLockElement) document.exitPointerLock();
+  prompt.hide(); menu.pause(true);
+}
+function resumeGame() {
+  menu.pause(false); keys.clear(); last = performance.now();
+  if (mode === 'walk' && !isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
+}
+function toMainMenu() { menu.pause(false); menu.fade(() => { if (mode === 'walk') exitWalk(); showMenu(); }, QA); }
+function showMenu() { tourMode = false; document.body.classList.remove('tour', 'viewing'); goView('overview', true); setCutaway(false); menu.show(true); }
+function applySettings() { dn.auto = settings.autoTime; motors.engine.vol = settings.volume / 100; }
+function setQualityChoice(q: QChoice) { if (q === 'otomatis') { autoQ = true; fpsW.warm = 4; applyQuality(qName, 'start'); } else { autoQ = false; applyQuality(q, 'manual'); } }
+
 const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => lookBy(dx, dy) });
 function lookBy(dx: number, dy: number) {
-  if (riding) { rideLook.yaw -= dx * 0.0022; rideLook.pitch = THREE.MathUtils.clamp(rideLook.pitch - dy * 0.0022, -0.6, 0.45); rideLook.idle = 0; return; }
-  player.yaw -= dx * 0.0022; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.0022, -1.3, 1.3);
+  const k = 0.0022 * settings.sens; dy *= settings.invertY ? -1 : 1;
+  if (riding) { rideLook.yaw -= dx * k; rideLook.pitch = THREE.MathUtils.clamp(rideLook.pitch - dy * k, -0.6, 0.45); rideLook.idle = 0; return; }
+  player.yaw -= dx * k; player.pitch = THREE.MathUtils.clamp(player.pitch - dy * k, -1.3, 1.3);
 }
-$('btnBack').onclick = () => goView('overview');
+$('btnBack').onclick = () => menu.fade(() => showMenu(), QA); $('btnBack').textContent = '← Menu';
 window.addEventListener('keydown', e => {
   if (pcos.isOpen() || noc.isModalOpen()) return;
   if (liftPanel.isOpen()) { if (!e.repeat) liftPanel.key(e.code); e.preventDefault(); return; }
-  if ((e.target as HTMLElement)?.tagName === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+  if (menu.open || menu.paused) {   // menus own the keyboard (their buttons get Enter/Space); Esc backs out one level
+    if (e.code === 'Escape' && !e.repeat) { if (menu.panelOpen()) menu.hidePanels(); else if (menu.paused) resumeGame(); }
+    return;
+  }
+  const tg = e.target as HTMLElement | null;
+  if (tg && (tg.tagName === 'BUTTON' || tg.tagName === 'INPUT')) {
+    // in the city a still-focused button (Mulai, a toolbar button…) must not swallow the key or be "clicked" by Space/Enter:
+    // that used to re-run Mulai on Space -> the player was put back at the spawn point instead of jumping
+    if (mode === 'walk') { tg.blur(); if (e.code === 'Space' || e.code === 'Enter') e.preventDefault(); }
+    else if (e.key === 'Enter' || e.key === ' ') return;
+  }
   keys.add(e.code);
-  if (e.code === 'Escape' && mode === 'walk') goView('overview');
+  if (e.code === 'Escape' && !e.repeat) { if (mode === 'walk') { keys.delete('Escape'); openPause(); return; } if (tourMode) { menu.fade(() => showMenu(), QA); return; } }
+  if (e.code === 'KeyN' && !e.repeat) { const l = dn.next(); toast(`Waktu: ${l}`, 1500); }
   if (e.code === 'KeyZ') toggleZones();
   if (e.code === 'KeyM' && mode === 'walk') minimap.toggle();
   if (e.code === 'KeyG') setQuality();
@@ -266,6 +346,13 @@ function releaseInput() { keys.clear(); releaseTouch(); drag = false; motors.eng
 window.addEventListener('blur', releaseInput);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
 renderer.domElement.addEventListener('click', () => { if (mode === 'walk' && !isTouch() && !uiBlocked() && !document.pointerLockElement) renderer.domElement.requestPointerLock?.(); });
+// Esc while the mouse is locked is eaten by the browser (it only unlocks): treat losing the lock in the city as "pause"
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement) return;
+  // our own exits (lift panel, PC, NOC dialogs) happen while that UI is already open: those never pause
+  if (mode !== 'walk' || uiBlocked() || seat || menu.paused) return;
+  setTimeout(() => { if (mode === 'walk' && !document.pointerLockElement && !uiBlocked() && !seat && !menu.paused && document.hasFocus()) openPause(); }, 90);
+});
 let drag = false, lx = 0, ly = 0;
 renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' && mode === 'walk') return; drag = true; lx = e.clientX; ly = e.clientY; });
 window.addEventListener('pointerup', () => (drag = false));
@@ -483,6 +570,7 @@ const QORDER: QName[] = ['tinggi', 'sedang', 'rendah', 'hemat'];
 let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : QS.has('low') || TOUCH0 ? 'rendah' : window.innerWidth <= 720 ? 'sedang' : 'tinggi';
 let quality = false;              // true = post-processing (AO) on
 let autoQ = !QS.has('q');         // the FPS watchdog may lower quality until the player picks one
+if (!QA0 && !QS.has('q') && !QS.has('low') && settings.quality !== 'otomatis') { qName = settings.quality; autoQ = false; }
 function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
   const Q = QUALITY[n], prevShadow = renderer.shadowMap.enabled; qName = n; quality = Q.ao;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.pr)); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
@@ -490,6 +578,7 @@ function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
   if (sh && dir.shadow.mapSize.x !== Q.shadow) { dir.shadow.mapSize.set(Q.shadow, Q.shadow); dir.shadow.map?.dispose(); (dir.shadow as { map: THREE.WebGLRenderTarget | null }).map = null; }
   if (prevShadow !== sh) scene.traverse(o => { const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined; if (m) (Array.isArray(m) ? m : [m]).forEach(x => (x.needsUpdate = true)); });
   farBase = Q.far; (scene.fog as THREE.Fog).near = Q.fog[0]; (scene.fog as THREE.Fog).far = Q.fog[1];
+  for (const l of nightLights) l.visible = n === 'tinggi'; headSpot.visible = n === 'tinggi'; renderer.shadowMap.needsUpdate = true;
   traffic.setDensity(Q.traffic); peds.setDensity(Q.peds);
   const b = document.getElementById('btnGfx'); if (b) b.textContent = `Grafik: ${Q.label}${autoQ ? ' (otomatis)' : ''}`;
   if (why === 'manual') toast(`Grafik: ${Q.label}${Q.ao ? ' (AO + bayangan)' : Q.shadow ? ' (bayangan, tanpa AO)' : ' (tanpa bayangan, jarak pandang pendek)'}`);
@@ -567,7 +656,7 @@ function updateWalk(dt: number) {
     const target = feetHeight(player.pos.x, player.pos.z, player.pos.y);
     if (player.pos.y <= target) { player.pos.y = target; player.vy = 0; player.ground = true; }
   }
-  player.pos.x = THREE.MathUtils.clamp(player.pos.x, -200, 200); player.pos.z = THREE.MathUtils.clamp(player.pos.z, -150, 150);
+  player.pos.x = THREE.MathUtils.clamp(player.pos.x, -200, 200); player.pos.z = THREE.MathUtils.clamp(player.pos.z, -150, 448);
   // avatar pose (a scripted walk in the lift/stairs animates too)
   const scriptedWalk = ride ? vertical.walkSpeed * dt : 0;
   const moving = mv.lengthSq() > 1e-7 || scriptedWalk > 0;
@@ -667,7 +756,7 @@ function mount(b: Bike) {
   if (!standForAction()) return;
   riding = b; motors.mount(b); mountT = 0; wantDismount = false;
   vel.set(0, 0); player.vy = 0; player.ground = true;
-  chaseYaw = b.yaw; rideLook.yaw = 0; rideLook.pitch = -0.16; rideLook.idle = 0; camDistR = 2.5;
+  chaseYaw = b.yaw; rideLook.yaw = 0; rideLook.pitch = -0.16; rideLook.idle = 0; camDistR = 2.5; camRoll = 0; camTgt.set(b.pos.x, b.pos.y + 1.3, b.pos.z);
   b.m.lean.add(avatar.root); avatar.root.position.set(0, 0, 0); avatar.root.rotation.set(0, Math.PI, 0);
   motors.engine.start();
   document.body.classList.add('riding'); speedo.classList.add('on');
@@ -683,7 +772,7 @@ function dismountSpot(b: Bike): THREE.Vector3 | null {
   const q = new THREE.Vector3();
   for (const [sx, sz] of tries) {
     q.copy(b.pos).addScaledVector(r, sx).addScaledVector(f, -sz);
-    if (insideHotel(q.x, q.z) || Math.abs(q.x) > 199 || Math.abs(q.z) > 149) continue;
+    if (insideHotel(q.x, q.z) || Math.abs(q.x) > 199 || q.z < -149 || q.z > 447.5) continue;
     const feet = feetHeight(q.x, q.z, b.pos.y + 0.2);
     if (Math.abs(feet - b.pos.y) > 0.35) continue;
     const t = q.clone(); t.y = feet; resolveCircle(t, feet, RADIUS + 0.03, dyn);
@@ -749,7 +838,9 @@ function updateRide(dt: number) {
   // camera: chase cam that lags the bike's heading, free look with mouse/drag that recentres when riding; or rider's eyes (V)
   rideLook.idle += dt;
   if (rideLook.idle > 1.4 && Math.abs(b.speed) > 1.5) { rideLook.yaw *= Math.exp(-dt * 2.2); rideLook.pitch += (-0.16 - rideLook.pitch) * (1 - Math.exp(-dt * 2)); }
-  chaseYaw += Math.atan2(Math.sin(b.yaw - chaseYaw), Math.cos(b.yaw - chaseYaw)) * (1 - Math.exp(-dt * 4.5));
+  // chase camera: follows the heading with a speed-dependent lag (lazy when slow, tighter when fast), rolls a little into the lean
+  chaseYaw += Math.atan2(Math.sin(b.yaw - chaseYaw), Math.cos(b.yaw - chaseYaw)) * (1 - Math.exp(-dt * (2.4 + 1.6 * Math.min(1, Math.abs(b.speed) / 10))));
+  camRoll += (b.lean * 0.2 - camRoll) * (1 - Math.exp(-dt * 4));
   const wantFov = 55 + 9 * Math.min(1, Math.abs(b.speed) / VMAX); fx.fov += (wantFov - fx.fov) * (1 - Math.exp(-dt * 4));
   if (Math.abs(camera.fov - fx.fov) > 0.01) { camera.fov = fx.fov; camera.updateProjectionMatrix(); }
   const shake = Math.sin(elapsed * 61) * rideShake * 0.4;
@@ -760,13 +851,14 @@ function updateRide(dt: number) {
     camera.rotation.set(THREE.MathUtils.clamp(rideLook.pitch + 0.1, -1.0, 0.6), b.yaw + rideLook.yaw, b.lean * 0.55, 'YXZ');
   } else {
     const yaw = chaseYaw + rideLook.yaw, pitch = THREE.MathUtils.clamp(rideLook.pitch, -0.6, 0.45);
-    const target = new THREE.Vector3(b.pos.x, b.pos.y + 1.3, b.pos.z);
+    camTgt.lerp(new THREE.Vector3(b.pos.x, b.pos.y + 1.3, b.pos.z), camTgt.distanceTo(b.pos) > 6 ? 1 : 1 - Math.exp(-dt * 14));
+    const target = camTgt.clone();
     const back = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const wantD = 4.2 + Math.abs(b.speed) * 0.05; let d = 0.5; const q = new THREE.Vector3();
     while (d < wantD) { q.copy(target).addScaledVector(back, d + 0.15); if (blocked(q.x, q.z, q.y, 0.22) || q.y < b.pos.y + 0.25) break; d += 0.15; }
     camDistR = d < camDistR ? d : camDistR + (d - camDistR) * Math.min(1, 3 * dt);
     camera.position.copy(target).addScaledVector(back, camDistR); camera.position.y = Math.max(camera.position.y, b.pos.y + 0.35) + shake;
-    camera.lookAt(target.x, target.y + 0.15, target.z);
+    camera.lookAt(target.x, target.y + 0.15, target.z); camera.rotateZ(camRoll);
   }
   // HUD
   const kmh = Math.round(Math.abs(b.speed) * 3.6);
@@ -813,7 +905,7 @@ function locationName(x: number, z: number): string {
   for (const r of ROADS) {
     const h = r.a[1] === r.b[1]; const c = h ? r.a[1] : r.a[0]; const half = ROAD_SPEC[r.kind].width / 2;
     const t = h ? X : Z, t0 = h ? r.a[0] : r.a[1], t1 = h ? r.b[0] : r.b[1];
-    if (Math.abs((h ? Z : X) - c) <= half && t >= t0 && t <= t1) return r.name.replace('ROAD_', 'Jl. ').replace('_', ' ');
+    if (Math.abs((h ? Z : X) - c) <= half && t >= t0 && t <= t1) return streetLabel(r.name);
   }
   const zn = ZONES.find(zz => X >= zz.x[0] && X <= zz.x[1] && Z >= zz.z[0] && Z <= zz.z[1]);
   return zn ? zn.name : 'Kota Nusantara';
@@ -833,20 +925,49 @@ $('btnExport').onclick = () => {
   }, 50);
 };
 
+// ---------- night extras: lamp point lights (Tinggi), the bike headlight ----------
+function updateNightExtras(dt: number) {
+  const night = dn.night, hi = qName === 'tinggi';
+  nightPickT -= dt;
+  if (hi && night > 0.3) {
+    if (nightPickT <= 0) {
+      nightPickT = 0.4; const c = camera.position;
+      const near = lampLights.map(p => ({ p, d: (p.x - c.x) ** 2 + (p.z - c.z) ** 2 })).sort((a, b) => a.d - b.d).slice(0, nightLights.length);
+      nightLights.forEach((l, i) => { const n = near[i]; if (n) l.position.copy(n.p).setY(7.6); });
+    }
+    const k = THREE.MathUtils.smoothstep(night, 0.3, 0.8) * 22; for (const l of nightLights) l.intensity = k;
+  } else for (const l of nightLights) l.intensity = 0;
+  const b = riding && mode === 'walk' ? riding : null;
+  const on = !!b && night > 0.25;
+  headBeam.visible = on;
+  if (b && on) {
+    const f = motors.fwd(b); (headBeam.material as THREE.MeshBasicMaterial).opacity = Math.min(1, (night - 0.25) * 2) * 0.55;
+    headBeam.position.set(b.pos.x + f.x * 7.2, b.pos.y + 0.035, b.pos.z + f.z * 7.2); headBeam.rotation.y = b.yaw;
+  }
+  headSpot.intensity = hi && on ? 60 * Math.min(1, (night - 0.25) * 2) : 0;
+  if (b && hi) { const f = motors.fwd(b); headSpot.position.set(b.pos.x + f.x * 0.7, b.pos.y + 0.95, b.pos.z + f.z * 0.7); headSpot.target.position.set(b.pos.x + f.x * 14, b.pos.y, b.pos.z + f.z * 14); }
+}
+
 // ---------- loop ----------
-let last = performance.now(), elapsed = 0, frameCount = 0;
+let last = performance.now(), elapsed = 0, frameCount = 0, flyA = 2.3, clockT = 0;
 const tmp = new THREE.Vector3();
 const lightBasis = new THREE.Matrix4(), lightBasisT = new THREE.Matrix4(), ZERO3 = new THREE.Vector3(), UP3 = new THREE.Vector3(0, 1, 0), sunNeg = new THREE.Vector3();
 /** ?qa: automated playtest starts paused (frames only advance through __kota.step), so software GL is not flooded with frames */
 const QA = new URLSearchParams(location.search).has('qa');
 let paused = QA, fixedDt = 0, skipRender = false, anaT = 0;
 function frame() {
-  const now = performance.now(); const realDt = (now - last) / 1000; const dt = fixedDt || Math.min(realDt, 0.05); last = now; elapsed += dt; const t = elapsed;
+  const now = performance.now(); const realDt = (now - last) / 1000; const dt0 = fixedDt || Math.min(realDt, 0.05); const dt = menu.paused ? 0 : dt0; last = now; elapsed += dt; const t = elapsed;
   watchFps(Math.min(realDt, 1));
-  if (mode === 'orbit') {
+  if (mode === 'orbit' && menu.open) {
+    // title screen: slow flyover around the hotel / Kota Selatan, time of day visible
+    flyA += dt0 * 0.045; const R = window.innerWidth < window.innerHeight ? 240 : 185;
+    camera.position.set(wx(225) + Math.cos(flyA) * R, 78 + Math.sin(flyA * 0.7) * 14, wz(250) + Math.sin(flyA) * R * 1.15);
+    controls.target.set(wx(220), 6, wz(240)); camera.lookAt(controls.target);
+  } else if (mode === 'orbit') {
     if (tween) { tween.t = Math.min(1, tween.t + dt / 1.6); const e = 1 - Math.pow(1 - tween.t, 3); camera.position.lerpVectors(tween.from, tween.to, e); controls.target.lerpVectors(tween.tf, tween.tt, e); if (tween.t >= 1) tween = null; }
     controls.update();
   }
+  { const fg = scene.fog as THREE.Fog, Qf = QUALITY[qName].fog, fn = mode === 'walk' ? Qf[0] : Math.max(Qf[0], 220), ff = mode === 'walk' ? Qf[1] : Math.max(Qf[1], 1300); if (fg.near !== fn || fg.far !== ff) { fg.near = fn; fg.far = ff; } }
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
   noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt);
@@ -872,7 +993,12 @@ function frame() {
   const ext = mode === 'walk' ? 60 : 130; if (sc.right !== ext) { sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.updateProjectionMatrix(); }
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
-  hemi.intensity = inside ? 1.25 : 0.75;
+  // day/night: interiors keep their indoor light level at any hour
+  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far);
+  if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
+  updateNightExtras(dt0);
+  { const cd = mode === 'walk' ? Math.min(farBase, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase, 120) : 260); }
+  clockT -= dt0; if (clockT <= 0) { clockT = 0.5; const ct = `${dn.clock()} · ${dn.label()}`; const ce = $('clock'); if (ce.textContent !== ct) ce.textContent = ct; menu.setClock(ct); menu.setTimeActive(dn.label()); }
   // HUD
   const d = new THREE.Vector3(); camera.getWorldDirection(d);
   const hdg = (Math.atan2(d.x, -d.z) * 180 / Math.PI + 360) % 360;
@@ -906,10 +1032,13 @@ function frame() {
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); });
 applyQuality(qName, 'start');
 $('btnGfx').onclick = () => setQuality();
+function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
 function missionTarget(): { x: number; z: number } | null { const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
 
 goView('overview', true);
-requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.opacity = '0'; setTimeout(() => l.remove(), 600); });
+applySettings();
+if (QA && !QS.has('menu')) menu.show(false); else menu.show(true);   // ?qa skips the title screen (?qa&menu keeps it for screenshots)
+requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classList.add('done'); $('ldSub').textContent = 'Siap'; setTimeout(() => { l.style.opacity = '0'; setTimeout(() => l.remove(), 520); }, QA ? 0 : 260); });
 
 // test hooks (used by automated playtest)
 (window as any).__kota = {
@@ -982,6 +1111,10 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.style.
     while (stack.length) { const k = stack.pop()!; const i = k % W, j = (k / W) | 0; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= W || b >= H) continue; const n = b * W + a; if (g[n] === 2) { g[n] = 1; stack.push(n); } } }
     return { W, H, st, x0, z0, data: Array.from(g).join('') };
   },
+  daynight: { get: () => ({ hour: dn.hour, night: dn.night, label: dn.label(), clock: dn.clock(), auto: dn.auto, exposure: renderer.toneMappingExposure, shadowAuto: renderer.shadowMap.autoUpdate, hemi: hemi.intensity, dir: dir.intensity, lamp: lampMatI() }), set: (h: number) => { dn.setHour(h); dn.apply(camera.position, camera.far); }, next: () => dn.next(), preset: (id: PresetId) => dn.goTo(id) },
+  menu: { open: () => menu.open, paused: () => menu.paused, started: () => started, show: () => showMenu(), pause: () => openPause(), resume: () => resumeGame(), mainMenu: () => { menu.pause(false); if (mode === 'walk') exitWalk(); showMenu(); } },
+  bounds: () => ({ minX: 0, maxX: 400, minZ: 0, maxZ: 600 }),
+  steerIn: () => riding?.steerIn ?? null,
   perf: () => ({ frames: frameCount, quality: qName, auto: autoQ, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
   setQ: (n: QName) => { autoQ = false; applyQuality(n, 'start'); },
   stats: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, colliders: colliders.length, vehicles: traffic.vehicles.length, peds: peds.peds.length }),

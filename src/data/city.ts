@@ -10,22 +10,35 @@ export const ROAD_SPEC = {
   gang: { width: 3, carriage: 3, lane: 3, lanesPerDir: 0, median: 0, sidewalk: 0 },
 } as const;
 
+/** city extent (metres). v9: the south district (Z 300..600) doubled the area */
+export const CITY_W = 400, CITY_D = 600;
+
 export const ROADS: Road[] = [
   { name: 'ROAD_SUDIRMAN', a: [0, 150], b: [400, 150], kind: 'arteri' },
-  { name: 'ROAD_THAMRIN', a: [200, 0], b: [200, 300], kind: 'arteri' },
+  { name: 'ROAD_THAMRIN', a: [200, 0], b: [200, 600], kind: 'arteri' },
   { name: 'ROAD_KEBONJERUK', a: [0, 60], b: [400, 60], kind: 'kolektor' },
   { name: 'ROAD_CEMPAKA', a: [0, 240], b: [400, 240], kind: 'kolektor' },
-  { name: 'ROAD_MELATI', a: [80, 0], b: [80, 300], kind: 'kolektor' },
-  { name: 'ROAD_KEMUNING', a: [320, 0], b: [320, 300], kind: 'kolektor' },
+  { name: 'ROAD_MELATI', a: [80, 0], b: [80, 600], kind: 'kolektor' },
+  { name: 'ROAD_KEMUNING', a: [320, 0], b: [320, 600], kind: 'kolektor' },
   { name: 'ROAD_GANG_01', a: [28, 161], b: [28, 234.5], kind: 'gang' },
   { name: 'ROAD_GANG_02', a: [52, 161], b: [52, 234.5], kind: 'gang' },
   { name: 'ROAD_GANG_03', a: [0, 198], b: [74.5, 198], kind: 'gang' },
-  { name: 'ROAD_GANG_04', a: [40, 245.5], b: [40, 300], kind: 'gang' },
+  { name: 'ROAD_GANG_04', a: [40, 245.5], b: [40, 324.5], kind: 'gang' },
   { name: 'ROAD_GANG_05', a: [0, 272], b: [74.5, 272], kind: 'gang' },
+  // ---- v9 Kota Selatan (south district)
+  { name: 'ROAD_ANGGREK', a: [0, 330], b: [400, 330], kind: 'kolektor' },
+  { name: 'ROAD_DAHLIA', a: [0, 450], b: [400, 450], kind: 'kolektor' },
+  { name: 'ROAD_FLAMBOYAN', a: [0, 570], b: [400, 570], kind: 'kolektor' },
+  { name: 'ROAD_GANG_06', a: [28, 335.5], b: [28, 444.5], kind: 'gang' },
+  { name: 'ROAD_GANG_07', a: [52, 335.5], b: [52, 444.5], kind: 'gang' },
+  { name: 'ROAD_GANG_08', a: [0, 390], b: [74.5, 390], kind: 'gang' },
+  { name: 'ROAD_GANG_09', a: [28, 455.5], b: [28, 564.5], kind: 'gang' },
+  { name: 'ROAD_GANG_10', a: [52, 455.5], b: [52, 564.5], kind: 'gang' },
+  { name: 'ROAD_GANG_11', a: [0, 510], b: [74.5, 510], kind: 'gang' },
 ];
 
 export const JUNCTIONS: [number, number][] = [];
-for (const x of [80, 200, 320]) for (const z of [60, 150, 240]) JUNCTIONS.push([x, z]);
+for (const x of [80, 200, 320]) for (const z of [60, 150, 240, 330, 450, 570]) JUNCTIONS.push([x, z]);
 export const SIGNALISED: [number, number][] = [[80, 150], [200, 150], [320, 150]];
 
 export interface Zone { name: string; x: [number, number]; z: [number, number]; ground: 'park' | 'plaza' | 'paving' | 'dirt' | 'kampung' | 'lot'; color: string }
@@ -42,6 +55,17 @@ export const ZONES: Zone[] = [
   { name: 'ZONE_KAMPUNG_B', x: [2, 74.5], z: [248, 298], ground: 'kampung', color: '#8bc34a' },
   { name: 'ZONE_CADANGAN_01', x: [326, 396], z: [165, 233], ground: 'lot', color: '#9e9e9e' },
   { name: 'ZONE_CADANGAN_02', x: [92, 396], z: [250, 298], ground: 'lot', color: '#757575' },
+  // ---- v9 Kota Selatan
+  { name: 'ZONE_KAMPUNG_C', x: [2, 74.5], z: [335.5, 444.5], ground: 'kampung', color: '#d4e157' },
+  { name: 'ZONE_KAMPUNG_D', x: [2, 74.5], z: [455.5, 564.5], ground: 'kampung', color: '#aed581' },
+  { name: 'ZONE_RUKO_ANGGREK', x: [86, 186], z: [336, 358], ground: 'paving', color: '#ab47bc' },
+  { name: 'ZONE_LAPANGAN', x: [92, 184], z: [362, 442], ground: 'park', color: '#66bb6a' },
+  { name: 'ZONE_PERKANTORAN_SELATAN', x: [214, 314], z: [336, 444], ground: 'plaza', color: '#5c6bc0' },
+  { name: 'ZONE_MASJID_SELATAN', x: [326, 396], z: [336, 444], ground: 'plaza', color: '#26c6da' },
+  { name: 'ZONE_RUKO_DAHLIA', x: [86, 186], z: [456, 478], ground: 'paving', color: '#8e24aa' },
+  { name: 'ZONE_TAMAN_DAHLIA', x: [92, 184], z: [482, 562], ground: 'park', color: '#43a047' },
+  { name: 'ZONE_SMK_APARTEMEN', x: [214, 314], z: [456, 564], ground: 'plaza', color: '#3949ab' },
+  { name: 'ZONE_RUKO_KEMUNING', x: [326, 396], z: [456, 564], ground: 'paving', color: '#7b1fa2' },
 ];
 
 export interface Tower { name: string; x: number; z: number; w: number; d: number; h: number; style: 'glass' | 'glass2' | 'apt' }
@@ -58,6 +82,15 @@ export const TOWERS: Tower[] = [
   { name: 'BLD_APT_2', x: 364, z: 14, w: 28, d: 30, h: 36, style: 'apt' },
   { name: 'BLD_APT_3', x: 332, z: 84, w: 58, d: 22, h: 20, style: 'apt' },
   { name: 'BLD_OFFICE_ANNEX', x: 262, z: 168, w: 25, d: 20, h: 40, style: 'glass2' },
+];
+/** v9 south district mid-rises (built by world/south.ts with its own RNG so the old district stays identical) */
+export const TOWERS_S: Tower[] = [
+  { name: 'BLD_OFFICE_S1', x: 220, z: 342, w: 32, d: 24, h: 32, style: 'glass2' },
+  { name: 'BLD_APT_S1', x: 270, z: 342, w: 26, d: 26, h: 42, style: 'apt' },
+  { name: 'BLD_APT_S2', x: 220, z: 392, w: 28, d: 44, h: 27, style: 'apt' },
+  { name: 'BLD_OFFICE_S2', x: 266, z: 396, w: 38, d: 30, h: 24, style: 'glass' },
+  { name: 'BLD_APT_S3', x: 220, z: 462, w: 40, d: 22, h: 30, style: 'apt' },
+  { name: 'BLD_OFFICE_S3', x: 272, z: 462, w: 34, d: 24, h: 45, style: 'glass' },
 ];
 
 // Kampung houses (C8)

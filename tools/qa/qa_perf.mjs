@@ -12,7 +12,7 @@ await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeou
 const boot = Date.now() - t0; console.log('  boot', boot);
 const K = (f, a) => p.evaluate(f, a);
 await p.tap('#enter'); await p.waitForTimeout(200); await K(() => window.__kota.pause(true));
-const SP = { street: [226, 162.5, 1, Math.PI], lobby: [228, 175, 1, 0], office: [232, 172, 2, Math.PI], hotel: [235, 179, 6, 0] };
+const SP = { south: [150, 334.5, 1, Math.PI], kampung: [28, 400, 1, Math.PI], street: [226, 162.5, 1, Math.PI], lobby: [228, 175, 1, 0], office: [232, 172, 2, Math.PI], hotel: [235, 179, 6, 0] };
 const res = { tag, query, boot, throttle: rate, dpr: 2 };
 for (const s of spots) {
   const [x, z, lv, yaw] = SP[s];

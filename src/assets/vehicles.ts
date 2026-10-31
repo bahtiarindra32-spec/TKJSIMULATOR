@@ -37,6 +37,8 @@ const clsMat = (cls: Exclude<Cls, 'paint'>) => cached(`cls|${cls}`, () => {
     case 'lamp': return new THREE.MeshBasicMaterial({ vertexColors: true });
   }
 });
+/** shared lamp material of every vehicle (head/tail lights): main.ts brightens it at night */
+export const vehicleLampMat = () => clsMat('lamp') as THREE.MeshBasicMaterial;
 const wheelMat = () => cached('wheel', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide }));
 
 // ---------------------------------------------------------------- geometry kit

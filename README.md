@@ -174,6 +174,13 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - ✅ Kontrol sentuh: tombol E/Q hanya muncul di depan tangga/lift, panel lift di tengah layar, tombol F berlabel aksi yang tersedia.
 - ✅ Loading screen dengan penjaga error WebGL. Tidak ada resource jaringan eksternal (aman offline).
 
+### Update 30 Okt 2026 (v9)
+- Menu utama ala game: flyover kota 3D, Mulai/Lanjutkan, Mulai dari Awal, Jelajah Kota, Pengaturan (grafik, sensitivitas mouse, volume, invert Y, kamera, siklus hari), Kontrol, Tentang; layar loading; menu pause (Esc) dengan gaya sama. Responsif desktop/HP.
+- Siklus siang-malam: 1 hari game = 24 menit nyata; tombol **N** / tombol sentuh **Waktu** untuk Pagi/Siang/Sore/Malam; jam di HUD; lampu jalan, jendela, dan lampu kendaraan menyala saat malam.
+- Belokan motor lebih halus (setang, kemiringan, kamera mengikuti pelan).
+- Kota Selatan: kota diperluas 400x300 m menjadi 400x600 m: Jl. Anggrek, Jl. Dahlia, Jl. Flamboyan, Kampung C dan D dengan gang, ruko + minimarket, perkantoran/apartemen, Lapangan Anggrek, Masjid Al-Ikhlas, Taman Dahlia, SMK Nusantara, perumahan.
+- Perbaikan: Spasi setelah Esc tidak lagi mengembalikan pemain ke spawn; keluar-masuk menu mempertahankan posisi (termasuk jongkok/motor); lift tidak macet saat kunci mouse lepas; rumah baru padat (tidak bisa ditembus).
+
 ## 6. Perubahan dari PDF (hasil audit)
 1. Trotoar arteri 3 m menjadi 5 m (pedoman kawasan bisnis), lebar Sudirman/Thamrin menjadi 26 m.
 2. Zebra cross tengah ruas X=140 dan X=260 dihapus (arteri terbagi < 300 m dari simpang). Penyeberangan lewat JPO, total zebra 12.
@@ -209,6 +216,9 @@ kota-nusantara/
 
 Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordinat tabel PDF).
 Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
+
+## 7b. Validasi 30 Okt 2026 (v9)
+qa_v9 (Esc-Spasi, siang-malam, dunia selatan), qa_menu, qa_motor, qa_crouch, qa_v8a, qa_hotel, qa_mobile lulus. Belum: perbandingan performa HP (qa_perf perlu disesuaikan dengan menu), qa_tutor.
 
 ## 8. Validasi terakhir (30 Okt 2026, jongkok + motor)
 - `tools/qa/qa_motor.mjs` (keyboard nyata + emulasi sentuh) dan `tools/qa/qa_crouch.mjs`: naik/turun 6×, lari penuh di Jl. Kebon Jeruk, belok kiri/kanan, mundur, 85 km/j ke tembok menara/hotel/median dengan dt 1/30 dan 1/10 (tidak tembus), menabrak mobil dari belakang, naik/turun kerb, mencoba masuk pintu lobi, turun di samping tembok, kamera 1/3, modal/pause, kehilangan fokus, Esc, terjepit, joystick dilepas. Jongkok: kecepatan, kamera, meja, plafon, duduk di PC, tangga, lift, lompat, naik motor.

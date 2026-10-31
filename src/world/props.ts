@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { ROADS, ROAD_SPEC, JUNCTIONS, SIGNALISED, SPAWN, wx, wz } from '../data/city';
 import { M, box, boxC, cyl, group, mat, addCollider, signTex, rand, rr, pick, texMat, TEX } from './core';
 import { makeCar, makeMotor, randomCarKind } from '../assets/vehicles';
+import { STREET_LAMP } from './daynight';
 
 function instanced(parent: THREE.Object3D, name: string, geo: THREE.BufferGeometry, m: THREE.Material, mats: THREE.Matrix4[], shadow = true) {
   const im = new THREE.InstancedMesh(geo, m, mats.length); im.name = name;
@@ -40,25 +41,25 @@ export function buildStreetProps(world: THREE.Object3D) {
       if (r.kind === 'gang') continue;
       const h = r.a[1] === r.b[1]; const c = h ? r.a[1] : r.a[0];
       if (r.kind === 'arteri') {
-        for (let t = 15; t < (h ? 400 : 300); t += 30) { const X = h ? t : c, Z = h ? c : t; if (nearJunction(X, Z, 14)) continue; dM.push(T(wx(X), 0.25, wz(Z), h ? Math.PI / 2 : 0)); lampLights.push(new THREE.Vector3(wx(X), 8.6, wz(Z))); }
+        for (let t = (h ? r.a[0] : r.a[1]) + 15; t < (h ? r.b[0] : r.b[1]); t += 30) { const X = h ? t : c, Z = h ? c : t; if (nearJunction(X, Z, 14)) continue; dM.push(T(wx(X), 0.25, wz(Z), h ? Math.PI / 2 : 0)); lampLights.push(new THREE.Vector3(wx(X), 8.6, wz(Z))); }
       } else {
         let side = 1;
         const off = ROAD_SPEC.kolektor.carriage / 2 + 0.5;
-        for (let t = 17; t < (h ? 400 : 300); t += 35) {
+        for (let t = (h ? r.a[0] : r.a[1]) + 17; t < (h ? r.b[0] : r.b[1]); t += 35) {
           side *= -1; const X = h ? t : c + side * off, Z = h ? c + side * off : t;
           if (nearJunction(h ? t : c, h ? c : t, 10)) continue;
           // arm points toward road centre
           const ry = h ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : (side > 0 ? Math.PI : 0);
-          sM.push(T(wx(X), 0.15, wz(Z), ry));
+          sM.push(T(wx(X), 0.15, wz(Z), ry)); lampLights.push(new THREE.Vector3(wx(X), 8.6, wz(Z)));
         }
       }
     }
-    instanced(g, 'LAMPU_LENGAN_GANDA_POLE', dbl.pole, poleMat, dM); instanced(g, 'LAMPU_LENGAN_GANDA_HEAD', dbl.head, M.lampOn, dM, false);
-    instanced(g, 'LAMPU_LENGAN_TUNGGAL_POLE', sgl.pole, poleMat, sM); instanced(g, 'LAMPU_LENGAN_TUNGGAL_HEAD', sgl.head, M.lampOn, sM, false);
+    instanced(g, 'LAMPU_LENGAN_GANDA_POLE', dbl.pole, poleMat, dM); instanced(g, 'LAMPU_LENGAN_GANDA_HEAD', dbl.head, STREET_LAMP, dM, false);
+    instanced(g, 'LAMPU_LENGAN_TUNGGAL_POLE', sgl.pole, poleMat, sM); instanced(g, 'LAMPU_LENGAN_TUNGGAL_HEAD', sgl.head, STREET_LAMP, sM, false);
     // area lamps (multi-head)
     for (const [X, Z, nm] of [[265, 211, 'LAMPU_AREA_PARKIR_HOTEL'], [140, 30, 'LAMPU_AREA_TAMAN'], [150, 181, 'LAMPU_AREA_BELAKANG_RUKO']] as [number, number, string][]) {
       const a = group(g, nm); cyl(a, wx(X), 0, wz(Z), 0.15, 12, poleMat);
-      for (let k = 0; k < 4; k++) { const ang = k * Math.PI / 2; boxC(a, wx(X) + Math.cos(ang) * 0.6, 11.8, wz(Z) + Math.sin(ang) * 0.6, 0.6, 0.25, 0.6, M.lampOn); }
+      for (let k = 0; k < 4; k++) { const ang = k * Math.PI / 2; boxC(a, wx(X) + Math.cos(ang) * 0.6, 11.8, wz(Z) + Math.sin(ang) * 0.6, 0.6, 0.25, 0.6, STREET_LAMP); }
     }
     // gang lamps (low wall/pole lamps every 25 m)
     const gm: THREE.Matrix4[] = [];
@@ -68,7 +69,7 @@ export function buildStreetProps(world: THREE.Object3D) {
       for (let t = 6; t < len; t += 25) { const X = h ? r.a[0] + t : r.a[0] + 1.7, Z = h ? r.a[1] + 1.7 : r.a[1] + t; gm.push(T(wx(X), 0, wz(Z))); }
     }
     instanced(g, 'LAMPU_GANG_POLE', gangPole, poleMat, gm);
-    instanced(g, 'LAMPU_GANG_HEAD', new THREE.SphereGeometry(0.18, 8, 6).translate(0, 4.0, 0), M.lampOn, gm, false);
+    instanced(g, 'LAMPU_GANG_HEAD', new THREE.SphereGeometry(0.18, 8, 6).translate(0, 4.0, 0), STREET_LAMP, gm, false);
   }
 
   // E2 traffic lights + signs

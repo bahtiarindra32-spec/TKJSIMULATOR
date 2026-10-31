@@ -6,7 +6,7 @@ import { group, cyl, box, mat } from './core';
 
 const NICE: Record<string, string> = {
   ROAD_SUDIRMAN: 'Jl. Jend. Sudirman', ROAD_THAMRIN: 'Jl. M.H. Thamrin', ROAD_KEBONJERUK: 'Jl. Kebon Jeruk', ROAD_CEMPAKA: 'Jl. Cempaka',
-  ROAD_MELATI: 'Jl. Melati', ROAD_KEMUNING: 'Jl. Kemuning',
+  ROAD_MELATI: 'Jl. Melati', ROAD_KEMUNING: 'Jl. Kemuning', ROAD_ANGGREK: 'Jl. Anggrek', ROAD_DAHLIA: 'Jl. Dahlia', ROAD_FLAMBOYAN: 'Jl. Flamboyan',
 };
 export const streetLabel = (name: string) => NICE[name] ?? name.replace('ROAD_GANG_', 'Gang ').replace('ROAD_', 'Jl. ');
 

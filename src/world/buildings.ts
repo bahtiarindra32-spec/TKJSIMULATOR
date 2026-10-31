@@ -1,12 +1,13 @@
 // FASE B (tanah + zona) and FASE C (gedung kota, massa sederhana, tidak bisa dimasuki)
 import * as THREE from 'three';
 import { ZONES, TOWERS, KAMPUNG_HOUSES, wx, wz } from '../data/city';
+import { addWindowGlow, addNightMat } from './daynight';
 import { TEX, texMat, M, box, boxC, cyl, flat, group, mat, addCollider, facadeTex, signTex, gableGeo, rand, rr, pick } from './core';
 
 export function buildGround(world: THREE.Object3D) {
   const root = group(world, 'FASE_B_TANAH_ZONA');
-  // B1 ground 400 x 300 at -0.05
-  flat(root, wx(0), wz(0), 400, 300, -0.05, texMat(TEX.grass, 400 / 12, 300 / 12), 'GROUND_CITY');
+  // B1 ground 400 x 600 at -0.05 (v9: south district Z 300..600)
+  flat(root, wx(0), wz(0), 400, 600, -0.05, texMat(TEX.grass, 400 / 12, 600 / 12), 'GROUND_CITY');
   // outer land (beyond the city) – darker, fades into fog
   const outer = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), mat('#6b7656'));
   outer.position.y = -0.12; outer.receiveShadow = true; outer.name = 'GROUND_OUTER'; root.add(outer);
@@ -19,7 +20,9 @@ export function buildGround(world: THREE.Object3D) {
     if (Math.abs(x) < 260 && Math.abs(z) < 200) continue;
     const near = r < 650; const h = near ? rr(10, 35) : rr(25, 90) * (rand() > 0.85 ? 1.5 : 1);
     const w = rr(14, 36), d = rr(14, 36);
-    box(sk, x - w / 2, 0, z - d / 2, w, h, d, pick(skyMats), undefined, false);
+    const m = pick(skyMats);
+    if (z > 150 && z < 520 && Math.abs(x) < 300) continue;   // v9: the south district now stands here
+    box(sk, x - w / 2, 0, z - d / 2, w, h, d, m, undefined, false);
   }
 
   // B2/B3 zones: real ground finish per zone + a toggleable debug overlay (key Z)
@@ -36,15 +39,20 @@ export function buildGround(world: THREE.Object3D) {
   return root;
 }
 
-function facadeMats(kind: 'glass' | 'glass2' | 'apt', w: number, d: number, h: number, floorH: number, bay: number) {
+export function facadeMats(kind: 'glass' | 'glass2' | 'apt', w: number, d: number, h: number, floorH: number, bay: number) {
   const mk = (len: number) => {
     const t = facadeTex(kind, rand()); t.repeat.set(Math.max(1, Math.round(len / bay)), Math.max(1, Math.round(h / floorH)));
-    return new THREE.MeshStandardMaterial({ map: t, roughness: kind === 'apt' ? 0.85 : 0.25, metalness: kind === 'apt' ? 0 : 0.35, envMapIntensity: 1 });
+    const m = new THREE.MeshStandardMaterial({ map: t, roughness: kind === 'apt' ? 0.85 : 0.25, metalness: kind === 'apt' ? 0 : 0.35, envMapIntensity: 1 });
+    addWindowGlow(m, kind, t.repeat.x, t.repeat.y);
+    return m;
   };
   const roof = mat('#8d8f8c');
   const sx = mk(d), sz = mk(w);
   return [sx, sx, roof, roof, sz, sz];
 }
+
+/** a house/shop window that lights up at night (one shared material = no extra draw calls) */
+export const WIN_LIT = addNightMat(new THREE.MeshStandardMaterial({ color: '#2b3a44', roughness: 0.3, emissive: '#ffcf8a' }), 0, 1.4);
 
 export function buildCity(world: THREE.Object3D) {
   const root = group(world, 'FASE_C_GEDUNG_KOTA');
@@ -96,7 +104,7 @@ export function buildCity(world: THREE.Object3D) {
     sign.position.set(wx(X + 2.5), 3.6, wz(Z) - 0.05); sign.rotation.y = Math.PI; g.add(sign);
     // windows floors 2 & 3 (width 3)
     for (const y of [4.6, 8.0]) {
-      box(g, wx(X + 1), y, wz(Z) - 0.04, 3, 1.5, 0.05, mat('#41505a', { roughness: 0.2, metalness: 0.3 }));
+      box(g, wx(X + 1), y, wz(Z) - 0.04, 3, 1.5, 0.05, (n + (y > 6 ? 1 : 0)) % 3 === 0 ? WIN_LIT : mat('#41505a', { roughness: 0.2, metalness: 0.3 }));
       box(g, wx(X + 0.9), y - 0.12, wz(Z) - 0.25, 3.2, 0.12, 0.25, mat('#e5e1d8'));
     }
     // AC outdoor unit & water tank on roof
@@ -211,7 +219,7 @@ export function buildCity(world: THREE.Object3D) {
       const doorEast = [19, 44.5, 68, 26, 64].includes(X) ;
       const doorWest = [5, 30.5, 54, 5, 43].includes(X) && !doorEast;
       const dm = mat(pick(['#6b4226', '#3f5f7a', '#2f6b4f']));
-      const wn = mat('#2b3a44', { roughness: 0.3 });
+      const wn = i % 3 === 1 ? WIN_LIT : mat('#2b3a44', { roughness: 0.3 });
       if (doorEast) { box(h, wx(X + 6), 0, wz(Z + 3.55), 0.05, 2.1, 0.9, dm, `${nm}_DOOR`); box(h, wx(X + 6), 1.0, wz(Z + 1.2), 0.05, 1.2, 1.0, wn); box(h, wx(X + 6), 1.0, wz(Z + 5.8), 0.05, 1.2, 1.0, wn); }
       else if (doorWest) { box(h, wx(X) - 0.05, 0, wz(Z + 3.55), 0.05, 2.1, 0.9, dm, `${nm}_DOOR`); box(h, wx(X) - 0.05, 1.0, wz(Z + 1.2), 0.05, 1.2, 1.0, wn); box(h, wx(X) - 0.05, 1.0, wz(Z + 5.8), 0.05, 1.2, 1.0, wn); }
       else { box(h, wx(X + 2.55), 0, wz(Z) - 0.05, 0.9, 2.1, 0.05, dm, `${nm}_DOOR`); box(h, wx(X + 0.8), 1.0, wz(Z) - 0.05, 1.0, 1.2, 0.05, wn); box(h, wx(X + 4.2), 1.0, wz(Z) - 0.05, 1.0, 1.2, 0.05, wn); }

@@ -82,6 +82,8 @@ export class Traffic {
     for (const list of byLane.values()) { const keep = Math.max(1, Math.ceil(list.length * f)); list.forEach((v, i) => { v.obj.visible = i < keep; if (i < keep) this.vehicles.push(v); }); }
   }
 
+  /** render culling: vehicles far from the camera are hidden (still simulated and still solid) */
+  cull(cam: THREE.Vector3, d: number) { const d2 = d * d; for (const v of this.vehicles) { const o = v.obj.position; v.obj.visible = (o.x - cam.x) ** 2 + (o.z - cam.z) ** 2 < d2; } }
   /** distance along lane to the next stop line ahead, if signal says stop */
   private stopAhead(v: Vehicle, time: number): number {
     const { lane } = v; let best = Infinity;
@@ -143,7 +145,7 @@ export class Pedestrians {
   /** keep a fraction of the walkers (1 = all) */
   setDensity(f: number) { const keep = Math.max(1, Math.ceil(3 * f)); this.peds = this.all.filter((p, i) => { const on = i % 3 < keep; p.obj.visible = on; return on; }); }
   group = new THREE.Group();
-  constructor(parent: THREE.Object3D) {
+  constructor(parent: THREE.Object3D, extra: [number, number, number, number, number][] = []) {
     this.group.name = 'GAME_PEDESTRIANS'; parent.add(this.group);
     const routes: [number, number, number, number][] = [
       [10, 139.5, 190, 139.5], [210, 139.5, 390, 139.5], [10, 160.5, 190, 160.5], [212, 160.5, 390, 160.5],
@@ -164,7 +166,20 @@ export class Pedestrians {
       const pd: Ped = { obj: g, a, b, t: rand(), sp: speed / a.distanceTo(b), person, speed, phase: rand() };
       this.peds.push(pd); this.all.push(pd);
     }
+    // v9 south district: own RNG (the old district's walkers keep their seeded look/positions)
+    let sd = 777; const r2 = () => ((sd = (sd * 16807) % 2147483647) - 1) / 2147483646;
+    for (const [x0, z0, x1, z1, y] of extra) for (let k = 0; k < 3; k++) {
+      const person = createPerson(randomSpec(r2, PED_MIX[Math.floor(r2() * PED_MIX.length)]));
+      const a = new THREE.Vector3(wx(x0), y, wz(z0)), b = new THREE.Vector3(wx(x1), y, wz(z1));
+      const perp = new THREE.Vector3(-(b.z - a.z), 0, b.x - a.x).normalize().multiplyScalar((r2() - 0.5) * 1.0); a.add(perp); b.add(perp);
+      this.group.add(person.root);
+      const speed = 0.9 + r2() * 0.5;
+      const pd: Ped = { obj: person.root, a, b, t: r2(), sp: speed / a.distanceTo(b), person, speed, phase: r2() };
+      this.peds.push(pd); this.all.push(pd);
+    }
   }
+  /** render culling: walkers far from the camera are hidden (still simulated) */
+  cull(cam: THREE.Vector3, d: number) { const d2 = d * d; for (const p of this.peds) { const o = p.obj.position; p.obj.visible = (o.x - cam.x) ** 2 + (o.z - cam.z) ** 2 < d2; } }
   update(dt: number, time: number) {
     for (const p of this.peds) {
       p.t += p.sp * dt;
@@ -173,7 +188,7 @@ export class Pedestrians {
       const d = fwd ? p.b.clone().sub(p.a) : p.a.clone().sub(p.b);
       p.obj.rotation.y = Math.atan2(d.x, d.z);
       p.phase = (p.phase + p.speed * dt / (WALK_STRIDE * p.person.scale)) % 1;
-      walkPose(p.person, p.phase);
+      if (p.obj.visible) walkPose(p.person, p.phase);
     }
   }
 }
