@@ -185,6 +185,9 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Suara khas kota Indonesia, semua disintesis Web Audio (tanpa file luar): dengung lalu lintas (lebih ramai jam sibuk, sepi malam), motor lewat, klakson "tin tin", tukang bakso "ting-ting" sore-malam, burung pagi, jangkrik malam, langkah kaki (lebih pelan saat jongkok). Diredam saat di dalam gedung, diam saat menu/pause.
 - **H** = klakson saat naik motor. Volume diatur di Pengaturan > Volume suara.
 
+### Update 31 Okt 2026: lahan kosong dibangun
+- Bekas "Lahan Cadangan" (pagar proyek yang bisa ditembus) dihapus dan diisi: ruko di selatan Jl. Cempaka (barat dan timur), BLD_OFFICE_C1, BLD_APT_C1, BLD_APT_C2, BLD_OFFICE_C3, dan BLD_OFFICE_C2 di timur hotel. Semua padat (solidAudit 320 objek, 0 tembus).
+
 ## 6. Perubahan dari PDF (hasil audit)
 1. Trotoar arteri 3 m menjadi 5 m (pedoman kawasan bisnis), lebar Sudirman/Thamrin menjadi 26 m.
 2. Zebra cross tengah ruas X=140 dan X=260 dihapus (arteri terbagi < 300 m dari simpang). Penyeberangan lewat JPO, total zebra 12.

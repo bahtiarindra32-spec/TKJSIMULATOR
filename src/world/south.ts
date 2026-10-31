@@ -84,6 +84,9 @@ export function buildSouth(world: THREE.Object3D): SouthResult {
   rukoRow(east, 'RUKO_KEMUNING_S', 327, 543, 16, 'W');           // fronts on Jl. Kemuning, running north from Z 543
   minimarket(east, 'MINIMARKET_04', 327, 557, 'W');
   rukoRow(east, 'RUKO_ANGGREK_TIMUR', 326, 337, 7, 'N');
+  // v9.1: bekas lahan cadangan di selatan Jl. Cempaka
+  rukoRow(west, 'RUKO_CEMPAKA_S', 92, 247, 18, 'N');
+  rukoRow(east, 'RUKO_CEMPAKA_TIMUR', 326, 247, 13, 'N');
 
   // ---------- lapangan bola + tribun (B-R1)
   {

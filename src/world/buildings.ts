@@ -241,7 +241,7 @@ export function buildCity(world: THREE.Object3D) {
     const s = new THREE.Mesh(new THREE.PlaneGeometry(10, 1.6), new THREE.MeshStandardMaterial({ map: signTex('LAHAN CADANGAN · SEGERA DIBANGUN', '#f6b93b', '#1e272e', 1024, 160, '#1e272e') }));
     s.position.set(wx((x0 + x1) / 2), 1.2, wz(z0) - 0.06); s.rotation.y = Math.PI; res.add(s);
   };
-  hoard(327, 166, 395, 232); hoard(93, 251, 395, 297);
+  void hoard; // v9.1: lahan cadangan sudah dibangun (lihat south.ts), pagar proyek dihapus
 
   return root;
 }

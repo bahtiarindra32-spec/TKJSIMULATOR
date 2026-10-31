@@ -53,8 +53,8 @@ export const ZONES: Zone[] = [
   { name: 'ZONE_MASJID', x: [96, 126], z: [204, 232], ground: 'plaza', color: '#00bcd4' },
   { name: 'ZONE_KAMPUNG_A', x: [2, 74.5], z: [163, 232], ground: 'kampung', color: '#cddc39' },
   { name: 'ZONE_KAMPUNG_B', x: [2, 74.5], z: [248, 298], ground: 'kampung', color: '#8bc34a' },
-  { name: 'ZONE_CADANGAN_01', x: [326, 396], z: [165, 233], ground: 'lot', color: '#9e9e9e' },
-  { name: 'ZONE_CADANGAN_02', x: [92, 396], z: [250, 298], ground: 'lot', color: '#757575' },
+  { name: 'ZONE_CADANGAN_01', x: [326, 396], z: [165, 233], ground: 'paving', color: '#9e9e9e' },
+  { name: 'ZONE_CADANGAN_02', x: [92, 396], z: [250, 298], ground: 'paving', color: '#757575' },
   // ---- v9 Kota Selatan
   { name: 'ZONE_KAMPUNG_C', x: [2, 74.5], z: [335.5, 444.5], ground: 'kampung', color: '#d4e157' },
   { name: 'ZONE_KAMPUNG_D', x: [2, 74.5], z: [455.5, 564.5], ground: 'kampung', color: '#aed581' },
@@ -91,6 +91,12 @@ export const TOWERS_S: Tower[] = [
   { name: 'BLD_OFFICE_S2', x: 266, z: 396, w: 38, d: 30, h: 24, style: 'glass' },
   { name: 'BLD_APT_S3', x: 220, z: 462, w: 40, d: 22, h: 30, style: 'apt' },
   { name: 'BLD_OFFICE_S3', x: 272, z: 462, w: 34, d: 24, h: 45, style: 'glass' },
+  // v9.1: bekas lahan cadangan
+  { name: 'BLD_OFFICE_C1', x: 222, z: 260, w: 36, d: 30, h: 28, style: 'glass2' },
+  { name: 'BLD_APT_C1', x: 272, z: 260, w: 30, d: 30, h: 36, style: 'apt' },
+  { name: 'BLD_OFFICE_C2', x: 344, z: 182, w: 40, d: 36, h: 40, style: 'glass' },
+  { name: 'BLD_APT_C2', x: 110, z: 266, w: 60, d: 24, h: 21, style: 'apt' },
+  { name: 'BLD_OFFICE_C3', x: 336, z: 266, w: 50, d: 26, h: 22, style: 'glass2' },
 ];
 
 // Kampung houses (C8)
