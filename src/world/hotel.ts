@@ -172,7 +172,7 @@ const chairGeo = (() => {
 })();
 /** chair whose sitter looks toward `face` (N = -Z). office: 5-star swivel with armrests; cafe: 4-leg wood */
 function chair(p: THREE.Object3D, y: number, cx: number, cz: number, face: Face = 'N', m = M.fabric, kind: 'office' | 'cafe' = 'office') {
-  const g = new THREE.Group(); g.position.set(X(cx), y, Z(cz)); g.rotation.y = FACE_YAW[face]; p.add(g);
+  const g = new THREE.Group(); g.name = 'FURN_CHAIR'; g.position.set(X(cx), y, Z(cz)); g.rotation.y = FACE_YAW[face]; p.add(g);
   const add = (geo: THREE.BufferGeometry, mm: THREE.Material, x: number, yy: number, z: number, rx = 0, ry = 0) => { const o = new THREE.Mesh(geo, mm); o.position.set(x, yy, z); o.rotation.set(rx, ry, 0); o.castShadow = true; g.add(o); return o; };
   if (kind === 'office') {
     for (let k = 0; k < 5; k++) { const a = k * Math.PI * 2 / 5; add(chairGeo.star, M.black, 0, 0.06, 0, 0, a); add(chairGeo.caster, M.black, Math.cos(a) * 0.29, 0.028, -Math.sin(a) * 0.29); }

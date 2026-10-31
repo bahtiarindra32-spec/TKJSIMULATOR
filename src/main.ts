@@ -42,6 +42,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GfxTier } from './game/gfxTier';
 
 const $ = (id: string) => document.getElementById(id)!;
 // ---------- stale-cache guard: if the server has a newer build than this page, reload it once with a cache-busting query ----------
@@ -163,12 +164,15 @@ const zoneOverlay = world.getObjectByName('ZONE_OVERLAY')!;
 // render batches: one per region; hotel per level so the cutaway can hide upper floors
 const batches = new THREE.Group(); batches.name = 'RENDER_BATCHES'; scene.add(batches);
 const hotelBatches = new Map<string, THREE.Object3D>();
-for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => /^(DOOR_|LIFT_|PROP_L\d_CORRIDOR_AP_)/.test(o.name)); batches.add(b); hotelBatches.set(lvName, b); }
-for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_')));
+// graphics tiers: small baked props go into DETAIL sub-batches (hidden on Hemat / outdoor ones on Rendah); network gear never does
+const GEAR_RE = /(PC|MONITOR|OUTLET|PANEL|PATCH|RACK|SW|AP_|ROUTER|PRN|PHONE|NAS|SERVER|LABEL|NIC|CABLE|KABEL|IDF|MDF|UPS|ONT|DOOR|LIFT|STAIR|TANGGA|CHAIR|KURSI|DESK|MEJA|TABLE|SOFA|BED|RANJANG|SHELF|RAK|LEMARI|CABINET|COUNTER)/i;
+const OUT_DETAIL = { max: 0.9, tier: 'out' as const, keep: /(SIGN|RAMBU|TL_|HALTE|ZEBRA|BENCH|BANGKU|KURSI|CHAIR|MEJA|TABLE|GEROBAK|TENDA|WARUNG|KIOS|POT_|PAGAR|FENCE|RAIL)/i };
+for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => /^(DOOR_|LIFT_|PROP_L\d_CORRIDOR_AP_)/.test(o.name), { max: lvName === 'EXTERIOR' || lvName === 'ROOF' ? 0.9 : 0.35, tier: lvName === 'EXTERIOR' || lvName === 'ROOF' ? 'out' : 'in', keep: GEAR_RE }); batches.add(b); hotelBatches.set(lvName, b); }
+for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_'), n === 'FASE_A_JALAN' ? undefined : OUT_DETAIL));
 batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_B', o => o.name === 'ZONE_OVERLAY'));
 // south district: two halves so looking north (or from the old district) frustum-culls them
-batches.add(bakeStatic(south.west, 'BATCH_SELATAN_BARAT')); batches.add(bakeStatic(south.east, 'BATCH_SELATAN_TIMUR'));
-batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SELATAN_LAIN'));
+batches.add(bakeStatic(south.west, 'BATCH_SELATAN_BARAT', undefined, OUT_DETAIL)); batches.add(bakeStatic(south.east, 'BATCH_SELATAN_TIMUR', undefined, OUT_DETAIL));
+batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SELATAN_LAIN', undefined, OUT_DETAIL));
 const upperParts = ['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
 
 // ---------- views ----------
@@ -576,7 +580,9 @@ composer.addPass(new RenderPass(scene, camera));
 const gtao = new GTAOPass(scene, camera, window.innerWidth, window.innerHeight);
 gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
 gtao.blendIntensity = 0.85;
-composer.addPass(gtao); composer.addPass(new OutputPass());
+composer.addPass(gtao);
+composer.addPass(new OutputPass());
+const gfx = new GfxTier([world, batches]); gfx.collect();
 // ---------- graphics quality: automatic low mode for phones / slow GPUs, G or the Grafik button cycles ----------
 type QName = 'tinggi' | 'sedang' | 'rendah' | 'hemat';
 interface QProfile { label: string; pr: number; ao: boolean; shadow: number; far: number; fog: [number, number]; traffic: number; peds: number }
@@ -587,6 +593,12 @@ const QUALITY: Record<QName, QProfile> = {
   hemat: { label: 'Hemat', pr: 0.7, ao: false, shadow: 0, far: 260, fog: [55, 250], traffic: 0.2, peds: 0.34 },
 };
 const QORDER: QName[] = ['tinggi', 'sedang', 'rendah', 'hemat'];
+const QDESC: Record<QName, string> = {
+  tinggi: ' · AO, bayangan tajam, lampu malam, pohon & detail penuh, lalu lintas ramai',
+  sedang: ' · bayangan, pohon 80%, detail kecil tetap ada',
+  rendah: ' · tanpa bayangan, pohon 55%, detail kecil luar ruangan disembunyikan',
+  hemat: ' · material sederhana, pohon 30%, tanpa detail kecil, jarak pandang pendek',
+};
 let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : QS.has('low') || TOUCH0 ? 'rendah' : window.innerWidth <= 720 ? 'sedang' : 'tinggi';
 let quality = false;              // true = post-processing (AO) on
 let autoQ = !QS.has('q');         // the FPS watchdog may lower quality until the player picks one
@@ -600,8 +612,9 @@ function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
   farBase = Q.far; (scene.fog as THREE.Fog).near = Q.fog[0]; (scene.fog as THREE.Fog).far = Q.fog[1];
   for (const l of nightLights) l.visible = n === 'tinggi'; headSpot.visible = n === 'tinggi'; renderer.shadowMap.needsUpdate = true;
   traffic.setDensity(Q.traffic); peds.setDensity(Q.peds);
+  gfx.apply(n);
   const b = document.getElementById('btnGfx'); if (b) b.textContent = `Grafik: ${Q.label}${autoQ ? ' (otomatis)' : ''}`;
-  if (why === 'manual') toast(`Grafik: ${Q.label}${Q.ao ? ' (AO + bayangan)' : Q.shadow ? ' (bayangan, tanpa AO)' : ' (tanpa bayangan, jarak pandang pendek)'}`);
+  if (why === 'manual') toast(`Grafik: ${Q.label}${QDESC[n]}`);
   if (why === 'auto') toast(`FPS rendah: grafik diturunkan otomatis ke ${Q.label}. Tekan G / tombol Grafik untuk mengganti.`, 4200);
 }
 function setQuality(_q?: boolean) { autoQ = false; applyQuality(QORDER[(QORDER.indexOf(qName) + 1) % QORDER.length]); }
@@ -1017,6 +1030,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
+  gfx.update(dt || 0.016);
   dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', mode === 'walk' && !inside && Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + 15), player.pos.z - wz(HOTEL_ORIGIN[1] + 10)) < 70, player.level, seat?.pc.name ?? null, player.pos); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
@@ -1100,6 +1114,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
   },
   liftPos: () => ({ x: HOTEL_ORIGIN[0] + 21.5, z: HOTEL_ORIGIN[1] + 15 }),
   why: () => ({ ui: uiBlocked(), ride: !!ride, riding: !!riding, sp: nearSpot()?.id ?? null, rk: nearRack(), nb: !!nearBike(), nn: nearNpcNow()?.name ?? null, pc: nearPc?.name ?? null, an: nearAnchor }),
+  gfx: () => gfx.stats(),
   npcs: () => hotelNpcs.list.filter(n => n.p.root.visible).map(n => ({ name: n.name, role: n.role, kind: n.kind, level: n.level, pc: n.pc ?? null, x: n.p.root.position.x + 200, z: n.p.root.position.z + 150, y: n.p.root.position.y })),
   vertical: () => vertical.state(), seat: () => seat && { phase: seat.phase, t: seat.t }, prompt: () => { const e = document.getElementById('iprompt')!; return e.classList.contains('on') ? e.innerText.replace(/\n+/g, ' | ') : ''; },
   wifi: { APS, CLIENTS, quality: wifiQuality, servingAp, AUTH, env: (n: string) => envOf(n).id, healthy: (n: string) => healthy(adapterOf(n)) },

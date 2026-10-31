@@ -202,11 +202,17 @@ export function gableGeo(w: number, d: number, h: number, overhang = 0.4) {
 
 // ---------- static batching (render copy; originals stay in the scene graph, hidden, for naming/GLB export) ----------
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Object3D) => boolean = () => false) {
+/** detail: small meshes (largest side < max m) go into a child group 'DETAIL' (userData.tier) that the graphics tiers can hide.
+ *  Anything under an object whose name matches keep (network gear, outlets, labels...) always stays in the main batch. */
+export interface BakeDetail { max: number; tier: 'in' | 'out'; keep?: RegExp }
+const _bb = new THREE.Box3(), _sz = new THREE.Vector3();
+export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Object3D) => boolean = () => false, detail?: BakeDetail) {
   src.updateMatrixWorld(true);
   const buckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
-  const visit = (o: THREE.Object3D) => {
+  const dBuckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
+  const visit = (o: THREE.Object3D, kept: boolean) => {
     if (skip(o)) return;
+    kept ||= !!(detail?.keep && detail.keep.test(o.name));
     const m = o as THREE.Mesh;
     if (m.isMesh && !(m as any).isInstancedMesh && !Array.isArray(m.material) && m.visible) {
       let g = m.geometry.clone().applyMatrix4(m.matrixWorld);
@@ -214,19 +220,25 @@ export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Ob
       for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
       if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
       if (!g.attributes.normal) g.computeVertexNormals();
-      const b = buckets.get(m.material) ?? { geos: [], cast: false };
-      b.geos.push(g); b.cast ||= m.castShadow; buckets.set(m.material, b);
+      let small = false;
+      if (detail && !kept) { g.computeBoundingBox(); _bb.copy(g.boundingBox!).getSize(_sz); small = Math.max(_sz.x, _sz.y, _sz.z) < detail.max; }
+      const B = small ? dBuckets : buckets;
+      const b = B.get(m.material) ?? { geos: [], cast: false };
+      b.geos.push(g); b.cast ||= m.castShadow; B.set(m.material, b);
       m.visible = false; m.userData.baked = true;
     }
-    for (const c of o.children) visit(c);
+    for (const c of o.children) visit(c, kept);
   };
-  visit(src);
-  const out = new THREE.Group(); out.name = name;
-  for (const [material, b] of buckets) {
-    const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos);
-    if (!merged) continue;
-    const mesh = new THREE.Mesh(merged, material); mesh.castShadow = b.cast; mesh.receiveShadow = true; out.add(mesh);
-  }
+  visit(src, false);
+  const emit = (B: typeof buckets, out: THREE.Object3D) => {
+    for (const [material, b] of B) {
+      const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, material); mesh.castShadow = b.cast; mesh.receiveShadow = true; out.add(mesh);
+    }
+  };
+  const out = new THREE.Group(); out.name = name; emit(buckets, out);
+  if (detail && dBuckets.size) { const d = new THREE.Group(); d.name = 'DETAIL'; d.userData.tier = detail.tier; emit(dBuckets, d); out.add(d); }
   return out;
 }
 /** make baked originals visible again (for GLB export) */
