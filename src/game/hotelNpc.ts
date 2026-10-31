@@ -7,7 +7,7 @@ import { LEVELS, HOTEL_ORIGIN, wx, wz } from '../data/city';
 type Outfit = Parameters<typeof randomSpec>[1];
 export type Role = 'resepsionis' | 'satpam' | 'tamu' | 'karyawan' | 'teknisi';
 export interface TalkCtx { job: { title: string; who: string; next: string; pcs: string[]; faults: string[]; levels: number[] } | null }
-export interface Npc { p: Person; level: number; kind: 'type' | 'idle' | 'walk'; role: Role; name: string; said: number; talkT: number; pc?: string; seatYaw?: number; a?: THREE.Vector3; b?: THREE.Vector3; t: number; sp: number; phase: number }
+export interface Npc { p: Person; level: number; kind: 'type' | 'idle' | 'walk'; role: Role; name: string; said: number; talkT: number; pc?: string; seatYaw?: number; aside?: boolean; a?: THREE.Vector3; b?: THREE.Vector3; t: number; sp: number; phase: number }
 
 export class HotelNpcs {
   group = new THREE.Group(); list: Npc[] = []; private seed = 4242;
@@ -61,6 +61,11 @@ export class HotelNpcs {
       if (n.kind === 'type') typingPose(n.p, time + n.phase);
       else if (n.kind === 'idle') idlePose(n.p, time + n.phase);
       else {
+        { // berhenti kalau pemain menghalangi jalan (tidak menembus pemain)
+          const k0 = n.t % 2, dir = (k0 < 1 ? n.b!.clone().sub(n.a!) : n.a!.clone().sub(n.b!)).setY(0).normalize(), q = n.p.root.position;
+          const ax = q.x + dir.x * 0.6 - player.x, az = q.z + dir.z * 0.6 - player.z;
+          if (Math.abs(player.y - q.y) < 1.5 && ax * ax + az * az < 0.75 * 0.75) { idlePose(n.p, time + n.phase); continue; }
+        }
         n.t += n.sp * dt; const k = n.t % 2, f = k < 1 ? k : 2 - k;
         n.p.root.position.lerpVectors(n.a!, n.b!, f);
         const d = (k < 1 ? n.b!.clone().sub(n.a!) : n.a!.clone().sub(n.b!)); n.p.root.rotation.y = Math.atan2(d.x, d.z);
@@ -69,15 +74,24 @@ export class HotelNpcs {
     }
   }
 
+  /** badan NPC sebagai kotak padat untuk tabrakan pemain/kamera */
+  boxes(level: number, x: number, z: number, out: { minX: number; maxX: number; minZ: number; maxZ: number; minY: number; maxY: number }[]) {
+    if (!this.group.visible) return;
+    for (const n of this.list) {
+      if (n.level !== level || !n.p.root.visible || n.aside) continue; const q = n.p.root.position;
+      if (Math.abs(q.x - x) > 6 || Math.abs(q.z - z) > 6) continue;
+      const r = n.kind === 'type' ? 0.22 : 0.24; out.push({ minX: q.x - r, maxX: q.x + r, minZ: q.z - r, maxZ: q.z + r, minY: q.y, maxY: q.y + 1.7 });
+    }
+  }
   private nm(p: Person) { const F = ['Rina', 'Sari', 'Dewi', 'Putri', 'Ayu', 'Nurul', 'Fitri', 'Lestari'], M = ['Budi', 'Agus', 'Joko', 'Rudi', 'Dimas', 'Eko', 'Hendra', 'Fajar', 'Wahyu']; const L = p.spec.female ? F : M; return L[Math.floor(this.r() * L.length)]; }
   /** karyawan berdiri dari kursi dan geser ke samping meja (tidak menghilang) */
   standAside(n: Npc) {
     if (n.kind !== 'type') return; n.kind = 'idle'; const y = n.seatYaw!;
-    n.p.root.position.x += Math.cos(y) * 1.1; n.p.root.position.z -= Math.sin(y) * 1.1; n.pc = undefined;
+    n.p.root.position.x += Math.cos(y) * 1.1; n.p.root.position.z -= Math.sin(y) * 1.1; n.pc = undefined; n.aside = true;
   }
   nearest(pos: THREE.Vector3, level: number, r = 1.7) {
     let best: Npc | null = null, bd = r;
-    for (const n of this.list) { if (n.level !== level || !n.p.root.visible) continue; const d = Math.hypot(n.p.root.position.x - pos.x, n.p.root.position.z - pos.z); if (d < bd) { bd = d; best = n; } }
+    for (const n of this.list) { if (n.level !== level || !n.p.root.visible) continue; const d = Math.hypot(n.p.root.position.x - pos.x, n.p.root.position.z - pos.z) - (n.role === 'resepsionis' ? 1.0 : 0); if (d < bd) { bd = d; best = n; } } // resepsionis: diajak bicara dari seberang meja
     return best;
   }
   title(n: Npc) { return `${n.name} (${{ resepsionis: 'Resepsionis', satpam: 'Satpam', tamu: 'Tamu hotel', karyawan: 'Karyawan', teknisi: 'Teknisi gedung' }[n.role]})`; }
@@ -91,8 +105,8 @@ export class HotelNpcs {
       if (k >= 1) this.standAside(n); return L[Math.min(k, L.length - 1)];
     }
     if (n.role === 'karyawan' && n.pc && myPc === n.pc) { this.standAside(n); return 'Oh, mau pakai PC ini? Boleh, saya istirahat dulu ke pantry.'; }
-    if (j && (n.role === 'resepsionis' || n.role === 'satpam') && k % 3 === 0) return `Teknisi ya? Ada laporan dari ${j.who}: "${j.title}". Lokasinya di lantai ${[...new Set(j.levels)].join(', ') || '1'}.`;
-    if (j && n.role === 'karyawan' && j.levels.includes(n.level) && k % 2 === 0) return `Katanya ada yang lapor ${prob()} di lantai ini. Semoga cepat beres ya.`;
+    if (j && (n.role === 'resepsionis' || n.role === 'satpam') && k % 3 === 0) return `Teknisi ya? Ada laporan dari ${j.who}: ${j.title.replace(/\.$/, '')}. Lokasinya di lantai ${[...new Set(j.levels)].join(', ') || '1'}.`;
+    if (j && n.role === 'karyawan' && j.levels.includes(n.level) && k % 2 === 0) return `Katanya ada yang lapor di lantai ini, ${prob()}. Semoga cepat beres ya.`;
     if (j && n.role === 'tamu' && j.faults.some(f => ['portal', 'appoe', 'aprf', 'dhcppool'].includes(f)) && k % 2 === 0) return `Mas, Wi-Fi hotelnya kenapa ya? ${prob()[0].toUpperCase()}${prob().slice(1)}.`;
     const P: Record<Role, string[]> = {
       resepsionis: ['Selamat datang di Nusantara Tech Hotel & Office. Ada yang bisa dibantu?', 'Ruang IT dan workshop di lantai 1, lewat koridor sebelah kanan. Lemari alat ada di workshop.', 'Kantor di lantai 2 dan 3, kamar tamu lantai 4 sampai 8. Lift ada di tengah gedung.', 'Kalau ada keluhan jaringan, cek papan kerja ya (tombol T).'],

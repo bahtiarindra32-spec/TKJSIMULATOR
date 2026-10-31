@@ -406,6 +406,7 @@ function collide(p: THREE.Vector3, feet: number) {
   }
   closedDoorBoxes(p.x, p.z, vehicleBoxes, feet);
   vertical.closedBoxes(player.level, vehicleBoxes);
+  if (insideHotel(p.x, p.z)) hotelNpcs.boxes(player.level, p.x, p.z, vehicleBoxes);
   for (const b of motors.bikes) if (!b.ridden && Math.abs(b.pos.x - p.x) < 6 && Math.abs(b.pos.z - p.z) < 6) motors.boxesOf(b, vehicleBoxes);
   resolveCircle(p, feet, RADIUS, vehicleBoxes, crouch.on ? CROUCH_TOP : STAND_TOP);
 }
@@ -543,6 +544,7 @@ function npcCtx(): TalkCtx {
 }
 function nearNpcNow() {
   if (ride || riding || seat || !insideHotel(player.pos.x, player.pos.z)) return null;
+  if (nearAnchor && noc.anchorHint(nearAnchor)) return null;
   const n = hotelNpcs.nearest(player.pos, player.level, 1.7); if (!n) return null;
   if (nearPc && !n.pc && Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z) < Math.hypot(n.p.root.position.x - player.pos.x, n.p.root.position.z - player.pos.z)) return null;
   return n;
@@ -627,7 +629,9 @@ function cullHotel() {
   const span = vertical.busy() || verticalZones.some(v => camera.position.x > v.x0 && camera.position.x < v.x1 && camera.position.z > v.z0 && camera.position.z < v.z1) ? 2 : 1;
   const key = inside ? `in${lvCam}:${span}` : cutaway ? 'cut' : 'out';
   if (key === cullKey) return; cullKey = key;
-  for (const g of LEVEL_GROUPS) { const vis = !inside || Math.abs(g.lv - lvCam) <= span; g.group.visible = vis; g.batch.visible = vis && !(cutaway && g.lv >= 2); }
+  // from outside, upper floors keep only their baked shell (walls/windows/furniture); the loose dynamic bits (doors, lift
+  // doors, APs) of L2-L8 cannot be seen from the street and cost ~400 draw calls
+  for (const g of LEVEL_GROUPS) { const vis = !inside || Math.abs(g.lv - lvCam) <= span; g.group.visible = vis && (inside || cutaway || g.lv === 1); g.batch.visible = vis && !(cutaway && g.lv >= 2); }
   if (!inside && cutaway) setCutaway(true);
 }
 
@@ -1016,7 +1020,7 @@ function frame() {
   dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', mode === 'walk' && !inside && Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + 15), player.pos.z - wz(HOTEL_ORIGIN[1] + 10)) < 70, player.level, seat?.pc.name ?? null, player.pos); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
-  { const cd = mode === 'walk' ? Math.min(farBase, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase, 120) : 260); }
+  { const cd = mode === 'walk' ? Math.min(farBase * 0.4, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase * 0.25, 120) : 260); }
   clockT -= dt0; if (clockT <= 0) { clockT = 0.5; const ct = `${dn.clock()} · ${dn.label()}`; const ce = $('clock'); if (ce.textContent !== ct) ce.textContent = ct; menu.setClock(ct); menu.setTimeActive(dn.label()); }
   // HUD
   const d = new THREE.Vector3(); camera.getWorldDirection(d);
@@ -1095,6 +1099,8 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
     out.unshift('checked ' + checked); return out;
   },
   liftPos: () => ({ x: HOTEL_ORIGIN[0] + 21.5, z: HOTEL_ORIGIN[1] + 15 }),
+  why: () => ({ ui: uiBlocked(), ride: !!ride, riding: !!riding, sp: nearSpot()?.id ?? null, rk: nearRack(), nb: !!nearBike(), nn: nearNpcNow()?.name ?? null, pc: nearPc?.name ?? null, an: nearAnchor }),
+  npcs: () => hotelNpcs.list.filter(n => n.p.root.visible).map(n => ({ name: n.name, role: n.role, kind: n.kind, level: n.level, pc: n.pc ?? null, x: n.p.root.position.x + 200, z: n.p.root.position.z + 150, y: n.p.root.position.y })),
   vertical: () => vertical.state(), seat: () => seat && { phase: seat.phase, t: seat.t }, prompt: () => { const e = document.getElementById('iprompt')!; return e.classList.contains('on') ? e.innerText.replace(/\n+/g, ' | ') : ''; },
   wifi: { APS, CLIENTS, quality: wifiQuality, servingAp, AUTH, env: (n: string) => envOf(n).id, healthy: (n: string) => healthy(adapterOf(n)) },
   fov: () => camera.fov,
