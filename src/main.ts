@@ -43,6 +43,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GfxTier } from './game/gfxTier';
+import { buildHiDetail } from './world/hiDetail';
 
 const $ = (id: string) => document.getElementById(id)!;
 // ---------- stale-cache guard: if the server has a newer build than this page, reload it once with a cache-busting query ----------
@@ -582,7 +583,8 @@ gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.2, sc
 gtao.blendIntensity = 0.85;
 composer.addPass(gtao);
 composer.addPass(new OutputPass());
-const gfx = new GfxTier([world, batches]); gfx.collect();
+const hiDetail = buildHiDetail(scene, world, hotel);
+const gfx = new GfxTier([world, batches, hiDetail]); gfx.collect();
 // ---------- graphics quality: automatic low mode for phones / slow GPUs, G or the Grafik button cycles ----------
 type QName = 'tinggi' | 'sedang' | 'rendah' | 'hemat';
 interface QProfile { label: string; pr: number; ao: boolean; shadow: number; far: number; fog: [number, number]; traffic: number; peds: number }

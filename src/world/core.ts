@@ -211,7 +211,7 @@ export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Ob
   const buckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
   const dBuckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
   const visit = (o: THREE.Object3D, kept: boolean) => {
-    if (skip(o)) return;
+    if (skip(o) || !o.visible) return;   // hidden subtrees (car LOD stand-ins, already-baked originals) are not baked
     kept ||= !!(detail?.keep && detail.keep.test(o.name));
     const m = o as THREE.Mesh;
     if (m.isMesh && !(m as any).isInstancedMesh && !Array.isArray(m.material) && m.visible) {

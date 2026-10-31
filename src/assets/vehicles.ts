@@ -495,7 +495,27 @@ export function makeCar(kind: CarKind, color?: string) {
   const t = carTemplate(kind);
   const col = kind === 'taxi' ? '#3d9be0' : kind === 'angkot' ? '#4bb0e6' : kind === 'bus' ? '#1d5fbf' : (color ?? pickR(CAR_PAINTS));
   const g = instance(t, paintMat(col), `VEH_${kind.toUpperCase()}`);
-  g.userData.kind = kind; return g;
+  g.userData.kind = kind; addLowLod(g, kind, cached('low_' + col, () => new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, metalness: 0.2 }))); return g;
+}
+/** cars that carry a low-poly stand-in (graphics tiers Rendah/Hemat show it instead of the detailed body) */
+export const CAR_LODS: THREE.Group[] = [];
+const lowGeoCache = new Map<string, { body: THREE.BufferGeometry; dark: THREE.BufferGeometry }>();
+function addLowLod(g: THREE.Group, kind: string, paint: THREE.Material) {
+  let G = lowGeoCache.get(kind);
+  if (!G) {
+    const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3());
+    const W = sz.x * 0.96, L = sz.z, H = sz.y, cz = (bb.min.z + bb.max.z) / 2;
+    const tall = kind === 'bus' || kind === 'angkot';
+    const lower = new THREE.BoxGeometry(W, H * (tall ? 0.62 : 0.5), L * 0.98).translate(0, 0.28 + H * (tall ? 0.31 : 0.25) - 0.1, cz);
+    const cabin = new THREE.BoxGeometry(W * 0.86, H * (tall ? 0.3 : 0.36), L * (tall ? 0.95 : 0.52)).translate(0, H * (tall ? 0.8 : 0.72) - 0.05, cz + (tall ? 0 : L * 0.04));
+    const body = mergeGeometries([lower.toNonIndexed(), cabin.toNonIndexed()])!;
+    const wheels = (g.userData.wheels as THREE.Mesh[]).map(w => new THREE.CylinderGeometry(w.userData.r, w.userData.r, 0.2, 8).rotateZ(Math.PI / 2).translate(w.position.x, w.position.y, w.position.z).toNonIndexed());
+    const glass = new THREE.BoxGeometry(W * 0.87, H * (tall ? 0.18 : 0.22), L * (tall ? 0.96 : 0.53)).translate(0, H * (tall ? 0.8 : 0.72) - 0.02, cz + (tall ? 0 : L * 0.04)).toNonIndexed();
+    G = { body, dark: mergeGeometries([...wheels, glass])! }; lowGeoCache.set(kind, G);
+  }
+  const lo = new THREE.Group(); lo.name = 'LOD_LOW'; lo.visible = false;
+  const a = new THREE.Mesh(G.body, paint), b = new THREE.Mesh(G.dark, cached('lowDark', () => new THREE.MeshLambertMaterial({ color: '#1b1e22' })));
+  a.castShadow = b.castShadow = true; lo.add(a, b); g.add(lo); g.userData.lowLod = lo; CAR_LODS.push(g);
 }
 /** generic private car: Jakarta mix (MPVs dominate) */
 export function randomCarKind(): 'mpv' | 'sedan' | 'hatch' { const r = rnd(); return r < 0.5 ? 'mpv' : r < 0.78 ? 'hatch' : 'sedan'; }

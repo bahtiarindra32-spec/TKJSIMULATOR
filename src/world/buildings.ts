@@ -94,10 +94,9 @@ export function buildCity(world: THREE.Object3D) {
     box(g, wx(X), 0, wz(Z), 5, 10.5, 12, wm, `RUKO_${String(n).padStart(2, '0')}_MASS`);
     // rolling door 3.5 x 2.6 (front at Z=165 => world z = wz(165), facing -z)
     const rd = texMat(TEX.seng, 1, 1, { color: '#b9bec2', metalness: 0.4, roughness: 0.5 });
-    box(g, wx(X + 0.75), 0.15, wz(Z) - 0.06, 3.5, 2.6, 0.06, n % 3 === 0 ? rd : M.dark);
-    if (n % 3 !== 0) { // open shop: interior glow + goods
-      box(g, wx(X + 0.75), 0.15, wz(Z) - 0.02, 3.5, 2.6, 0.03, mat('#ffe7b8', { emissive: '#ffcf7a', emissiveIntensity: 0.35 }));
-    }
+    // closed shops: rolling door; open shops: lit interior back wall (it used to sit behind the dark panel, so every shop looked shut)
+    if (n % 3 === 0) box(g, wx(X + 0.75), 0.15, wz(Z) - 0.06, 3.5, 2.6, 0.06, rd);
+    else box(g, wx(X + 0.75), 0.15, wz(Z) - 0.03, 3.5, 2.6, 0.03, mat('#ffe7b8', { emissive: '#ffcf7a', emissiveIntensity: 0.35 }));
     // canopy/awning + signboard
     box(g, wx(X + 0.1), 3.0, wz(Z) - 1.4, 4.8, 0.1, 1.4, mat(pick(['#2f6fb3', '#c0392b', '#2e8b57', '#d35400'])));
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.8), new THREE.MeshStandardMaterial({ map: signTex(shopNames[n - 1], pick(['#b71c1c', '#0d47a1', '#1b5e20', '#f9a825', '#4a148c']), '#fff', 512, 96, '#ffffff') }));
