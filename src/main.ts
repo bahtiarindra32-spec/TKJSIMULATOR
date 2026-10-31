@@ -10,6 +10,7 @@ import { Motors, buildGroundBoxes, VMAX, type Bike } from './game/motor';
 import { MOTOR_GRIPS, MOTOR_STEER_PIVOT, MOTOR_STEER_AXIS, vehicleLampMat } from './assets/vehicles';
 import { DayNight, type PresetId } from './world/daynight';
 import { Ambient } from './game/ambient';
+import { HotelNpcs } from './game/hotelNpc';
 const ambient = new Ambient();
 addEventListener('pointerdown', () => ambient.start()); addEventListener('keydown', () => ambient.start());
 import { buildSouth, SOUTH_PEDS } from './world/south';
@@ -138,6 +139,7 @@ const signals = new Signals(tls);
 const gameLayer = new THREE.Group(); gameLayer.name = 'GAME_LAYER'; scene.add(gameLayer);
 const traffic = new Traffic(gameLayer, signals);
 const peds = new Pedestrians(gameLayer, SOUTH_PEDS);
+const hotelNpcs = new HotelNpcs(gameLayer, PCS);
 const vertical = new Vertical(hotel, gameLayer);
 // The old linear quiz chain is retired: all work now comes from the NOC work board (game/noc.ts).
 const missions = { isModalOpen: () => false, hintFor: (_a: string | null): string | null => null, interact: (_a: string | null) => false, onModalChange: (_f: (o: boolean) => void) => {}, setPlayerPos: (_x: number, _z: number) => {}, current: () => ({ targetPos: null as { x: number; z: number } | null, targetY: 0, place: '' }), start: () => {} };
@@ -998,7 +1000,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
-  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
+  dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', player.level, seat?.pc.name ?? null); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
   { const cd = mode === 'walk' ? Math.min(farBase, 240) : 700; traffic.cull(camera.position, cd); peds.cull(camera.position, mode === 'walk' ? Math.min(farBase, 120) : 260); }
