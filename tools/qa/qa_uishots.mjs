@@ -25,4 +25,8 @@ await p.evaluate(() => { const n = window.__kota.noc; n.openCabinet(); }); await
 await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); const j = n.jobs[0]; j.status = 'closed'; j.stars = 2; j.collateral = []; j.xp = 60; j.slaMet = true; n.openReport(j); }); await p.waitForTimeout(300); await S('report');
 await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); n.openNusa(); }); await p.waitForTimeout(300); await S('nusa');
 await p.evaluate(() => { window.__kota.noc.closeModal(); }); await p.evaluate(() => window.__kota.menu.pause()); await p.waitForTimeout(500); await S('pause');
+await p.evaluate(() => { const k = window.__kota; k.menu.resume(); k.noc.closeModal(); const m = k.scene.getObjectByName('PROP_L1_NOC_LIVE_SCREEN'); if (!m) return; const T = m.parent.parent.parent; const P = new T.position.constructor(); m.getWorldPosition(P); const n = new T.position.constructor(0, 0, -1).applyQuaternion(m.getWorldQuaternion(m.quaternion.clone())); k.player.pos.set(P.x + n.x * 2.4, k.player.pos.y, P.z + n.z * 2.4); k.player.level = 1; k.player.yaw = Math.atan2(n.x, n.z); k.player.pitch = 0.12; window.__wallok = true; });
+for (let i = 0; i < 3; i++) await p.evaluate(() => window.__kota.step(20, 1/30, true));
+await S('wall'); const wall = await p.evaluate(() => !!window.__wallok);
+console.log('WALL', wall);
 console.log('RESULT', JSON.stringify(errs)); await b.close();

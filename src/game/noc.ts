@@ -157,7 +157,7 @@ export class Noc {
   private pendingReport: Job[] = [];
   private hud: HTMLElement;
   private listeners = new Set<(open: boolean) => void>();
-  private hudT = 0; private chkT = 0; private hkT = 0;
+  private hudT = 0; private chkT = 0; private hkT = 0; private hudSig = ''; private hudFull = 0; private hudWalk = 0;
   readonly CABINET: PcInfo; readonly RACKP: PcInfo; readonly RACKS: Record<string, PcInfo> = {};
   toast: (s: string, ms?: number) => void = () => {};
   get tickets() { return this.jobs; }
@@ -1242,6 +1242,11 @@ export class Noc {
     const done = this.jobs.length - open.length;
     const j = this.tracked();
     this.hud.classList.add('on');
+    // contextual: full card when standing still or right after progress; compact strip while walking
+    const sig = j ? `${j.id}|${j.targets.map(t => +t.ok + +t.tested).join('')}|${this.nextHint(j)}` : '';
+    if (sig !== this.hudSig) { this.hudSig = sig; this.hudFull = 6; }
+    this.hudWalk = this.playerMoving ? this.hudWalk + 0.25 : 0; this.hudFull = Math.max(0, this.hudFull - 0.25);
+    this.hud.classList.toggle('compact', this.hudWalk > 2 && this.hudFull <= 0);
     const bag = [this.inv.tester && 'LAN tester', this.inv.console && 'console', this.inv.laptop && 'laptop', this.inv.patch && `${this.inv.patch}× patch cord`].filter(Boolean).join(' · ');
     if (!j) { this.hud.innerHTML = `<b>${this.mode === 'shift' ? `SHIFT ${this.shift}` : 'SURAT KERJA'}</b> · ${done}/${this.jobs.length} selesai<div class="keys"><kbd>T</kbd> Papan kerja</div>`; return; }
     const left = j.sla - Math.max(0, j.age);
@@ -1307,7 +1312,41 @@ export class Noc {
     if (this.mode === 'idle') row.append(btn('Mulai Shift', () => this.startShift(), 'btn', 'start-shift'));
     row.append(btn('Tutup [Esc]', () => this.closeModal()));
     box.append(row);
-    this.show(box);
+    box.classList.add('mon'); box.prepend(h('div', 'mon-bar', `<span>NOC-MON-01 · ${this.mode === 'idle' ? 'SURAT KERJA' : this.mode === 'shift' ? `SHIFT ${this.shift}` : 'KONTRAK'}</span><span>${this.openJobs().length} terbuka</span>`));
+    this.show(box); this.modal?.classList.add('dock');
+  }
+  /** live queue drawn on the NOC video wall in the L1 IT office (CanvasTexture, 1024x576) */
+  drawWall(g: CanvasRenderingContext2D, clock: string) {
+    const W = 1024, H = 576, Y = '#f0c02e';
+    g.fillStyle = '#0d0f12'; g.fillRect(0, 0, W, H);
+    g.fillStyle = Y; g.fillRect(0, 0, W, 6);
+    g.font = '700 30px Bahnschrift, "Arial Narrow", sans-serif'; g.fillStyle = '#ebe7de'; g.textAlign = 'left'; g.fillText('NOC NUSANTARA TECH', 32, 56);
+    g.font = '600 22px ui-monospace, Consolas, monospace'; g.fillStyle = '#8f969d'; g.textAlign = 'right';
+    g.fillText(`${this.mode === 'shift' ? `SHIFT ${this.shift}` : this.mode === 'contract' ? 'KONTRAK' : 'SIAGA'} · ${clock}`, W - 32, 56);
+    g.fillStyle = '#2a2e34'; g.fillRect(32, 76, W - 64, 2);
+    const jobs = this.jobs.slice(0, 6);
+    g.textAlign = 'left';
+    if (!jobs.length) {
+      g.font = '600 34px "Segoe UI", Roboto, sans-serif'; g.fillStyle = '#43c07f'; g.fillText('Semua layanan normal', 32, 150);
+      g.font = '24px "Segoe UI", Roboto, sans-serif'; g.fillStyle = '#c9c6be'; g.fillText('Tidak ada tiket terbuka. Ambil surat kerja atau mulai shift di papan kerja [T].', 32, 196);
+      return;
+    }
+    g.font = '600 18px ui-monospace, Consolas, monospace'; g.fillStyle = '#8f969d';
+    g.fillText('NO.', 32, 110); g.fillText('PRIO', 170, 110); g.fillText('GANGGUAN', 290, 110); g.fillText('SLA', 790, 110); g.fillText('STATUS', 880, 110);
+    jobs.forEach((t, i) => {
+      const y = 128 + i * 72, left = t.sla - Math.max(0, t.age);
+      if (t.id === this.trackedId) { g.fillStyle = 'rgba(240,192,46,.08)'; g.fillRect(24, y, W - 48, 64); g.fillStyle = Y; g.fillRect(24, y, 5, 64); }
+      g.fillStyle = '#ebe7de'; g.font = '600 22px ui-monospace, Consolas, monospace'; g.fillText(t.id, 32, y + 30);
+      g.fillStyle = t.prio === 'Tinggi' ? '#e2574c' : t.prio === 'Sedang' ? Y : '#5bb8d6'; g.fillRect(170, y + 12, 96, 26);
+      g.fillStyle = t.prio === 'Tinggi' ? '#fff' : '#17140a'; g.font = '700 16px ui-monospace, Consolas, monospace'; g.fillText(t.prio.toUpperCase(), 178, y + 31);
+      let tt = t.title; g.font = '22px "Segoe UI", Roboto, sans-serif'; while (g.measureText(tt).width > 480 && tt.length > 4) tt = tt.slice(0, -2); if (tt !== t.title) tt += '…';
+      g.fillStyle = '#ebe7de'; g.fillText(tt, 290, y + 30);
+      g.fillStyle = '#8f969d'; g.font = '17px "Segoe UI", Roboto, sans-serif'; g.fillText((t.order[0] ?? '').slice(0, 60), 290, y + 54);
+      g.font = '600 22px ui-monospace, Consolas, monospace';
+      g.fillStyle = t.status === 'closed' ? '#8f969d' : left < 0 ? '#e2574c' : left < 60 ? Y : '#ebe7de'; g.fillText(t.status === 'closed' ? '--:--' : mmss(left), 790, y + 30);
+      const st = t.status === 'closed' ? 'SELESAI' : t.age < 0 ? 'ANTRE' : `${t.targets.filter(x => x.ok && x.tested).length}/${t.targets.length}`;
+      g.fillStyle = t.status === 'closed' ? '#43c07f' : '#c9c6be'; g.fillText(st, 880, y + 30);
+    });
   }
   private abandon() {
     for (const j of this.openJobs()) j.status = 'closed';
@@ -1315,27 +1354,35 @@ export class Noc {
     this.openBoard('Surat kerja dibatalkan. Perubahan yang sudah kamu buat di jaringan tetap ada.');
   }
   openOrder(j: Job) {
-    const box = h('div', 'noc-box');
-    box.append(h('h2', '', `${j.kind === 'contract' ? 'Surat Perintah Kerja' : 'Tiket'} ${j.id} · ${esc(j.title)}`));
-    box.append(h('div', 'order', j.order.map(x => `<div>• ${esc(x)}${j.aiVoice && x.startsWith('Keluhan: ') ? ' <i class="ai-tag" title="Kalimat keluhan ditulis AI dari gejala aslinya">AI</i>' : ''}</div>`).join('')));
-    box.append(h('p', 'how', `SLA ${mmss(j.sla)} · ${j.kind === 'contract' ? TEMPLATES[j.tpl as TplId].cp : j.kind === 'ticket' ? FAULTS[j.faults[0]].cp : 'Konsekuensi pekerjaan sebelumnya'}`));
+    const box = h('div', 'noc-box paper');
+    const spk = j.kind === 'contract';
+    const cp = spk ? TEMPLATES[j.tpl as TplId].cp : j.kind === 'ticket' ? FAULTS[j.faults[0]].cp : 'Konsekuensi pekerjaan sebelumnya';
+    const comp = j.order.filter(x => x.startsWith('Keluhan: '));
+    const rest = j.order.filter(x => !x.startsWith('Keluhan: '));
+    box.append(h('div', 'pp-head', `<div><b>NUSANTARA TECH</b><small>Divisi IT &amp; Jaringan · Gedung Sudirman</small></div><div class="pp-no"><small>${spk ? 'SURAT PERINTAH KERJA' : 'TIKET GANGGUAN'}</small><b>${spk ? 'SPK' : 'TKT'}-${esc(j.id.replace(/^[A-Z]+-/, ''))}</b></div>`));
+    box.append(h('h2', '', esc(j.title)));
+    box.append(h('table', 'pp-fields', `<tr><th>Prioritas</th><td><span class="pr p-${j.prio}">${j.prio}</span></td><th>Batas waktu (SLA)</th><td class="mono">${mmss(j.sla)}</td></tr><tr><th>Kompetensi</th><td colspan="3">${esc(cp)}</td></tr>`));
+    if (rest.length) box.append(h('div', 'pp-sec', `<small>RINCIAN PEKERJAAN</small>${rest.map(x => `<div class="pp-line">${esc(x)}</div>`).join('')}`));
+    if (comp.length) box.append(h('div', 'pp-sec', `<small>KELUHAN PELAPOR</small>${comp.map(x => `<blockquote>${esc(x.slice(9))}${j.aiVoice ? ' <i class="ai-tag" title="Kalimat keluhan ditulis AI dari gejala aslinya">AI</i>' : ''}</blockquote>`).join('')}`));
+    box.append(h('div', 'pp-sign', `<div><small>Diterbitkan oleh</small><b>Kak Rani</b><span>Supervisor NOC</span></div><div><small>Teknisi pelaksana</small><b>${esc(this.rank())}</b><span>${j.status === 'closed' ? 'sudah dikerjakan' : 'tanda tangan setelah selesai'}</span></div><i class="stamp ${j.status === 'closed' ? 'done' : ''}">${j.status === 'closed' ? 'SELESAI' : 'DITERIMA'}</i>`));
     const rw = h('div', 'row');
-    if (j.kind === 'contract') rw.append(btn('Briefing', () => this.openBrief(j)));
+    if (spk) rw.append(btn('Briefing', () => this.openBrief(j)));
     rw.append(btn('Mulai kerja', () => this.closeModal(), 'btn pri', 'order-ok'));
     box.append(rw);
     this.show(box);
   }
   private openBrief(j: Job) {
     const T = TEMPLATES[j.tpl as TplId];
-    const box = h('div', 'noc-box');
+    const box = h('div', 'noc-box paper');
+    box.append(h('div', 'pp-head', `<div><b>NUSANTARA TECH</b><small>Catatan briefing supervisor</small></div><div class="pp-no"><small>BRIEFING</small><b>${esc(j.id)}</b></div>`));
     box.append(h('h2', '', `Briefing Kak Rani · ${T.name}`));
-    box.append(h('div', 'brief', T.brief.map((x, i) => `<p><b>${i + 1}.</b> ${esc(x)}</p>`).join('')));
+    box.append(h('ol', 'pp-brief', T.brief.map(x => `<li>${esc(x)}</li>`).join('')));
     const rw = h('div', 'row'); rw.append(btn('Lihat surat kerja', () => this.openOrder(j), 'btn pri', 'brief-ok')); box.append(rw);
     this.show(box);
   }
   private openReport(j: Job) {
     const box = h('div', 'noc-box');
-    box.append(h('h2', '', `Laporan kerja ${j.id} ${'★'.repeat(j.stars!)}${'☆'.repeat(3 - j.stars!)}`));
+    box.append(h('h2', '', `Laporan kerja ${j.id} <span class="stars">${'★'.repeat(j.stars!)}${'☆'.repeat(3 - j.stars!)}</span><i class="stamp done mini">SELESAI</i>`));
     const lines: string[] = [];
     lines.push(`<b>Pekerjaan:</b> ${esc(j.title)}`);
     if (j.kind === 'ticket') lines.push(`<b>Temuan:</b> ${j.detail ? esc(j.detail) + (j.faults.length > 1 ? ' + ' : '') : ''}${j.faults.filter((f, i) => !(i === 0 && j.detail)).map(f => `${FAULTS[f].cause} → ${FAULTS[f].fix}`).join(' + ')} <small>(${j.faults.map(f => FAULTS[f].cp).join(' · ')})</small>`);

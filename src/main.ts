@@ -172,6 +172,18 @@ const hotelBatches = new Map<string, THREE.Object3D>();
 const GEAR_RE = /(PC|MONITOR|OUTLET|PANEL|PATCH|RACK|SW|AP_|ROUTER|PRN|PHONE|NAS|SERVER|LABEL|NIC|CABLE|KABEL|IDF|MDF|UPS|ONT|DOOR|LIFT|STAIR|TANGGA|CHAIR|KURSI|DESK|MEJA|TABLE|SOFA|BED|RANJANG|SHELF|RAK|LEMARI|CABINET|COUNTER)/i;
 const OUT_DETAIL = { max: 0.9, tier: 'out' as const, keep: /(SIGN|RAMBU|TL_|HALTE|ZEBRA|BENCH|BANGKU|KURSI|CHAIR|MEJA|TABLE|GEROBAK|TENDA|WARUNG|KIOS|POT_|PAGAR|FENCE|RAIL)/i };
 for (const lvName of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR']) { const b = bakeStatic(hotel.getObjectByName(lvName)!, `BATCH_${lvName}`, o => /^(DOOR_|LIFT_|PROP_L\d_CORRIDOR_AP_)/.test(o.name), { max: lvName === 'EXTERIOR' || lvName === 'ROOF' ? 0.9 : 0.35, tier: lvName === 'EXTERIOR' || lvName === 'ROOF' ? 'out' : 'in', keep: GEAR_RE }); batches.add(b); hotelBatches.set(lvName, b); }
+// live NOC queue on the IT office video wall (status screen replaced by a CanvasTexture)
+const nocWall = (() => {
+  const vw = hotel.getObjectByName('PROP_L1_NOC_VIDEOWALL_01'); let src: THREE.Mesh | null = null;
+  vw?.traverse(o => { if (!src && (o as THREE.Mesh).isMesh && /status/.test(o.name)) src = o as THREE.Mesh; });
+  if (!vw || !src) return null;
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 576; const g = cv.getContext('2d')!;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const m = new THREE.Mesh((src as THREE.Mesh).geometry, new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  m.name = 'PROP_L1_NOC_LIVE_SCREEN'; m.position.z = -0.004; m.renderOrder = 2; vw.add(m);
+  return { g, tex, mesh: m };
+})();
+let nocWallT = 0, hintIdle = 0; const _nwp = new THREE.Vector3();
 for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_'), n === 'FASE_A_JALAN' ? undefined : OUT_DETAIL));
 batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_B', o => o.name === 'ZONE_OVERLAY'));
 // south district: two halves so looking north (or from the old district) frustum-culls them
@@ -272,7 +284,7 @@ function enterWalk(fresh = !started) {
     if (riding) { speedo.classList.add('on'); motors.engine.start(); mountT = 1; chaseYaw = riding.yaw; }
     $('hints').textContent = riding ? RIDE_HINTS : WALK_HINTS;
   }
-  keys.clear(); last = performance.now();
+  keys.clear(); last = performance.now(); hintIdle = 0;
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
   if (!isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
   touchUi?.onEnter();
@@ -948,8 +960,11 @@ const prompt = (() => {
   };
 })();
 
+const ZONE_LABEL: Record<string, string> = { LOBI: 'Lobi', LOUNGE: 'Lounge', IT_OFFICE: 'Kantor IT', WORKSHOP: 'Workshop TKJ', CORRIDOR: 'Koridor', TOILET_M: 'Toilet pria', TOILET_F: 'Toilet wanita', TOILET: 'Toilet', STAIR: 'Tangga', LIFT: 'Lift', SERVER: 'Ruang server', IDF: 'Ruang IDF', OPEN_OFFICE: 'Ruang kerja', MEETING_A: 'Ruang rapat A', MEETING_B: 'Ruang rapat B', PANTRY: 'Pantry', STORAGE: 'Gudang', HOUSEKEEPING: 'Housekeeping', LINEN: 'Ruang linen' };
+/** internal zone id (L2_OPEN_OFFICE, L5_ROOM_503) to a player-facing name */
+function zoneLabel(id: string) { const k = id.replace(/^L\d_/, ''); const r = /^ROOM_(\d+)$/.exec(k); return r ? `Kamar ${r[1]}` : ZONE_LABEL[k] ?? k.replace(/_/g, ' ').toLowerCase(); }
 function locationName(x: number, z: number): string {
-  if (insideHotel(x, z)) { const zn = zoneAt(x, z, player.level); return `BLD_HOTEL_NUSANTARA · L${player.level}${zn ? ' · ' + zn : ''}`; }
+  if (insideHotel(x, z)) { const zn = zoneAt(x, z, player.level); return `Nusantara Tech · Lantai ${player.level}${zn ? ' · ' + zoneLabel(zn) : ''}`; }
   const X = cityX(x), Z = cityZ(z);
   for (const r of ROADS) {
     const h = r.a[1] === r.b[1]; const c = h ? r.a[1] : r.a[0]; const half = ROAD_SPEC[r.kind].width / 2;
@@ -1020,6 +1035,8 @@ function frame() {
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
   noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt);
+  if (nocWall && (nocWallT -= dt0) <= 0) { nocWallT = 1; if (player.level === 1 && Math.hypot(player.pos.x - nocWall.mesh.getWorldPosition(_nwp).x, player.pos.z - _nwp.z) < 25) { noc.drawWall(nocWall.g, dn.clock()); nocWall.tex.needsUpdate = true; } }
+  hintIdle = keys.size > 0 && !uiBlocked() ? hintIdle + dt0 : hintIdle; document.body.classList.toggle('hints-off', hintIdle > 20);
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
   if (mode !== 'walk') { /* orbit */ }
   else if (seat) { updateSeat(dt); prompt.hide(); }
