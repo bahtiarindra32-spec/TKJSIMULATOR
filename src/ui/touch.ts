@@ -46,7 +46,7 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
     </div>
     <div class="ttop">
       <button data-k="KeyT">Kerja</button><button data-k="KeyC" class="walk-only">Cek</button><button data-k="KeyR" class="walk-only">Wi-Fi</button>
-      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyN" id="t-time">Waktu</button><button data-k="KeyG" id="t-gfx">Grafik</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
+      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyN" id="t-time">Waktu</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
     </div>`;
   document.body.appendChild(root);
   const stop = (e: Event) => { e.stopPropagation(); };
@@ -110,7 +110,6 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
     (root.querySelector('#t-e') as HTMLElement).style.display = keys.includes('E') ? '' : 'none';
     (root.querySelector('#t-q') as HTMLElement).style.display = keys.includes('Q') ? '' : 'none';
     root.querySelector('#t-crouch')!.classList.toggle('lock', document.body.classList.contains('crouching'));
-    const gl = document.getElementById('btnGfx')?.textContent?.replace(/^Grafik: /, '').replace(' (otomatis)', ''); const gb = root.querySelector('#t-gfx') as HTMLElement; if (gl && gb.textContent !== 'Grafik ' + gl) gb.textContent = 'Grafik ' + gl;
   }, 250);
 
   // iPhone Safari can't hide its bars for a page; Add to Home Screen opens the game without them

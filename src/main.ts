@@ -340,7 +340,6 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyN' && !e.repeat) { const l = dn.next(); toast(`Waktu: ${l}`, 1500); }
   if (e.code === 'KeyZ') toggleZones();
   if (e.code === 'KeyM' && mode === 'walk') minimap.toggle();
-  if (e.code === 'KeyG') setQuality();
   if (mode === 'walk' && (e.code === 'KeyE' || e.code === 'KeyQ') && !riding) changeFloor(e.code === 'KeyE' ? 1 : -1);
   if (mode === 'walk' && e.code === 'KeyF' && !e.repeat) interact();
   if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked() && !e.repeat) { if (riding) { motors.resetToRoad(riding, rideDyn(riding)); } else noc.setAnalyzer(!noc.analyzerOn); }
@@ -601,10 +600,12 @@ const QDESC: Record<QName, string> = {
   rendah: ' · tanpa bayangan, pohon 55%, detail kecil luar ruangan disembunyikan',
   hemat: ' · material sederhana, pohon 30%, tanpa detail kecil, jarak pandang pendek',
 };
-let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : QS.has('low') || TOUCH0 ? 'rendah' : window.innerWidth <= 720 ? 'sedang' : 'tinggi';
+// one look for everyone (user decision Nov 1, 2026): always the full 'tinggi' assets; ?q= stays for QA only.
+// On slow devices the watchdog only lowers render resolution / drops AO, never the assets.
+let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : 'tinggi';
 let quality = false;              // true = post-processing (AO) on
 let autoQ = !QS.has('q');         // the FPS watchdog may lower quality until the player picks one
-if (!QA0 && !QS.has('q') && !QS.has('low') && settings.quality !== 'otomatis') { qName = settings.quality; autoQ = false; }
+
 function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
   const Q = QUALITY[n], prevShadow = renderer.shadowMap.enabled; qName = n; quality = Q.ao;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.pr)); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
@@ -616,10 +617,10 @@ function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
   traffic.setDensity(Q.traffic); peds.setDensity(Q.peds);
   gfx.apply(n);
   const b = document.getElementById('btnGfx'); if (b) b.textContent = `Grafik: ${Q.label}${autoQ ? ' (otomatis)' : ''}`;
-  if (why === 'manual') toast(`Grafik: ${Q.label}${QDESC[n]}`);
-  if (why === 'auto') toast(`FPS rendah: grafik diturunkan otomatis ke ${Q.label}. Tekan G / tombol Grafik untuk mengganti.`, 4200);
+  void why; void QDESC; prScale = 1;
 }
-function setQuality(_q?: boolean) { autoQ = false; applyQuality(QORDER[(QORDER.indexOf(qName) + 1) % QORDER.length]); }
+function setQuality(_q?: boolean) { /* single graphics level: nothing to cycle */ }
+let prScale = 1;
 let farBase = 1600;
 /** FPS watchdog: after a warm-up, if the average frame rate stays low, step quality down one level */
 const fpsW = { t: 0, n: 0, warm: 4 };
@@ -627,7 +628,13 @@ function watchFps(realDt: number) {
   if (!autoQ || paused || fixedDt || mode !== 'walk' || uiBlocked() || document.hidden) { fpsW.t = fpsW.n = 0; return; }
   if (fpsW.warm > 0) { fpsW.warm -= realDt; return; }
   fpsW.t += realDt; fpsW.n++;
-  if (fpsW.t >= 4) { const fps = fpsW.n / fpsW.t; fpsW.t = fpsW.n = 0; const i = QORDER.indexOf(qName); if (fps < 24 && i < QORDER.length - 1) { applyQuality(QORDER[i + 1], 'auto'); fpsW.warm = 3; } }
+  if (fpsW.t >= 4) { const fps = fpsW.n / fpsW.t; fpsW.t = fpsW.n = 0; const i = QORDER.indexOf(qName); void i; if (fps < 24) lowerCost(); } }
+/** slow device: first drop the AO pass, then render at lower resolution (same assets, softer image) */
+function lowerCost() {
+  if (quality) { quality = false; fpsW.warm = 3; return; }
+  const base = Math.min(window.devicePixelRatio, QUALITY[qName].pr);
+  if (base * prScale <= 0.6) return;
+  prScale = Math.max(0.6 / base, prScale * 0.8); renderer.setPixelRatio(base * prScale); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); fpsW.warm = 3;
 }
 /** inside the hotel only the floors around the camera can be seen: hide the others (big draw-call saving on every quality level) */
 const LEVEL_GROUPS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF'].map((n, i) => ({ lv: i + 1, batch: hotelBatches.get(n)!, group: hotel.getObjectByName(n)! }));
@@ -1070,7 +1077,7 @@ function frame() {
 
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); });
 applyQuality(qName, 'start');
-$('btnGfx').onclick = () => setQuality();
+$('btnGfx').style.display = 'none';
 function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
 function missionTarget(): { x: number; z: number } | null { const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
 
@@ -1157,7 +1164,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
   menu: { open: () => menu.open, paused: () => menu.paused, started: () => started, show: () => showMenu(), pause: () => openPause(), resume: () => resumeGame(), mainMenu: () => { menu.pause(false); if (mode === 'walk') exitWalk(); showMenu(); } },
   bounds: () => ({ minX: 0, maxX: 400, minZ: 0, maxZ: 600 }),
   steerIn: () => riding?.steerIn ?? null,
-  perf: () => ({ frames: frameCount, quality: qName, auto: autoQ, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
+  perf: () => ({ frames: frameCount, prScale, quality: qName, auto: autoQ, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
   setQ: (n: QName) => { autoQ = false; applyQuality(n, 'start'); },
   stats: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, colliders: colliders.length, vehicles: traffic.vehicles.length, peds: peds.peds.length }),
 };

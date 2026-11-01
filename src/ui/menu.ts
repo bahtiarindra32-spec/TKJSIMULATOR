@@ -24,11 +24,11 @@ const ROWS_KB: [string, string][] = [
   ['W A S D', 'Jalan / gas, rem, belok (motor)'], ['Mouse', 'Menoleh (klik layar untuk mengunci kursor)'], ['Shift', 'Lari'], ['Spasi', 'Lompat · rem belakang (motor)'],
   ['X', 'Jongkok'], ['V', 'Kamera orang pertama / ketiga'], ['F', 'Interaksi: pintu, PC, rak, naik/turun motor'], ['E / Q', 'Naik / turun tangga · lift'],
   ['T', 'Papan kerja NOC'], ['C', 'Cek fisik perangkat'], ['R', 'Wi-Fi analyzer · kembalikan motor ke jalan'], ['M', 'Peta'], ['N', 'Ganti waktu: pagi → siang → sore → malam'],
-  ['G', 'Kualitas grafik'], ['Esc', 'Jeda / menu'],
+  ['Esc', 'Jeda / menu'],
 ];
 const ROWS_TOUCH: [string, string][] = [
   ['Joystick kiri', 'Jalan · di motor: dorong = gas, tarik = rem, kiri/kanan = belok (halus)'], ['Geser layar kanan', 'Menoleh'], ['F / Aksi', 'Interaksi · naik/turun motor'],
-  ['Lompat · Lari · Jongkok', 'Tombol kanan bawah'], ['Bar atas', 'Kerja, Cek, Wi-Fi, Kamera, Peta, Waktu, Grafik, Layar penuh'], ['Keluar', 'Jeda / menu'],
+  ['Lompat · Lari · Jongkok', 'Tombol kanan bawah'], ['Bar atas', 'Kerja, Cek, Wi-Fi, Kamera, Peta, Waktu, Layar penuh'], ['Keluar', 'Jeda / menu'],
 ];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -117,7 +117,6 @@ export class Menu {
       const row = (label: string, ctl: HTMLElement, hint = '') => { const r = el('div', 'pn-row'); const l = el('div', 'pn-l', `<b>${label}</b>${hint ? `<small>${hint}</small>` : ''}`); r.append(l, ctl); body.appendChild(r); };
       const seg = (opts: [string, string][], cur: () => string, set: (v: string) => void, name: string) => {
         const g = el('div', 'pn-seg'); for (const [v, lb] of opts) { const b = btn(lb, `${name}-${v}`, 'seg'); b.addEventListener('click', () => { set(v); saveSettings(); g.querySelectorAll('.seg').forEach(x => x.classList.toggle('on', x === b)); }); if (cur() === v) b.classList.add('on'); g.appendChild(b); } return g; };
-      row('Kualitas grafik', seg([['otomatis', 'Otomatis'], ['tinggi', 'Tinggi'], ['sedang', 'Sedang'], ['rendah', 'Rendah'], ['hemat', 'Hemat']], () => S.quality, v => { S.quality = v as QChoice; h.setQuality(S.quality); }, 'q'), 'Otomatis menurunkan grafik bila FPS rendah');
       const range = (min: number, max: number, step: number, get: () => number, set: (v: number) => void, fmt: (v: number) => string, name: string) => {
         const w = el('label', 'pn-range'); const i = el('input') as HTMLInputElement; i.type = 'range'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(get()); i.name = name;
         const o = el('output', '', fmt(get())); i.addEventListener('input', () => { set(+i.value); o.textContent = fmt(+i.value); saveSettings(); h.applySettings(); }); w.append(i, o); return w; };
