@@ -84,6 +84,8 @@ interface Tut { tested: boolean; ipconfig: boolean; gw: string }
 /** PCs of the SMK practice lab building: never part of internship jobs */
 const LABPC = /^PROP_LAB_/;
 export const DAY_PHASES = [{ name: 'Pagi', what: 'satu surat kerja instalasi' }, { name: 'Siang', what: 'shift helpdesk, beberapa tiket' }, { name: 'Sore', what: 'insiden: satu akar masalah, banyak pengguna' }];
+/** Job XP is scaled so rank-ups take days of work, not a handful of jobs (Teknisi Junior around day 2, Senior around day 15). */
+export const XP_RATE = 0.4;
 export const RANKS = [{ xp: 0, name: 'Magang' }, { xp: 800, name: 'Teknisi Junior' }, { xp: 2500, name: 'Teknisi' }, { xp: 5000, name: 'Network Engineer' }, { xp: 9000, name: 'Senior Network Engineer' }];
 const PRIO = { Tinggi: 240, Sedang: 420, Rendah: 600 } as const;
 type Prio = keyof typeof PRIO;
@@ -1151,7 +1153,7 @@ export class Noc {
     let stars = 3; if (!j.slaMet) stars--; if (j.collateral.length) stars--; if (j.wrong > 0 || swDirty) stars--;
     j.stars = Math.max(1, stars);
     const base = j.kind === 'contract' ? TEMPLATES[j.tpl as TplId].xp : j.kind === 'follow' ? 60 : 100 + (j.faults.some(f => FAULTS[f].rank > 0) ? 50 : 0) + (j.faults.length > 1 ? 60 : 0);
-    j.xp = Math.round(base * (j.stars === 3 ? 1.3 : j.stars === 2 ? 1 : 0.7)) + (j.hint ? 0 : 20);
+    j.xp = Math.round((base * (j.stars === 3 ? 1.3 : j.stars === 2 ? 1 : 0.7) + (j.hint ? 0 : 20)) * XP_RATE);
     this.s.closed++; if (j.slaMet) this.s.slaMet++; this.s.stars += j.stars; if (j.kind === 'contract') this.s.contracts++;
     for (const f of j.faults) { const m = this.s.mastery[f] ?? { ok: 0, miss: 0 }; if (j.stars >= 2) m.ok++; else m.miss++; this.s.mastery[f] = m; }
     if (j.kind === 'contract') { const m = this.s.mastery[j.tpl] ?? { ok: 0, miss: 0 }; if (j.stars >= 2) m.ok++; else m.miss++; this.s.mastery[j.tpl] = m; }
@@ -1419,7 +1421,7 @@ export class Noc {
       box.append(h('h3', '', d ? 'Kerja bebas (setelah hari ini selesai)' : 'Kerja bebas · surat kerja tersedia'));
       const grid = h('div', 'offers');
       this.offers.forEach((o, i) => {
-        const c = h('div', 'offer', `<b>${TEMPLATES[o.tpl].name}</b><small>${TEMPLATES[o.tpl].cp} · SLA ${Math.round(TEMPLATES[o.tpl].sla / 60)} menit · ${TEMPLATES[o.tpl].xp} XP</small><p>${esc(o.lines[0])}</p>`);
+        const c = h('div', 'offer', `<b>${TEMPLATES[o.tpl].name}</b><small>${TEMPLATES[o.tpl].cp} · SLA ${Math.round(TEMPLATES[o.tpl].sla / 60)} menit · ±${Math.round(TEMPLATES[o.tpl].xp * XP_RATE)} XP</small><p>${esc(o.lines[0])}</p>`);
         const ob = btn('Ambil', () => { this.closeModal(); this.acceptContract(o.tpl, o.seed); }, 'btn', `offer-${i}`); ob.disabled = !!this.s.day; c.append(ob);
         grid.append(c);
       });

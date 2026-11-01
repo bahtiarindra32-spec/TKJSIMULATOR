@@ -136,7 +136,7 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
 - Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
 - Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
-- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang (0) → Teknisi Junior (800 XP) → Teknisi (2.500) → Network Engineer (5.000) → Senior Network Engineer (9.000) tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
+- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang (0) → Teknisi Junior (800 XP) → Teknisi (2.500) → Network Engineer (5.000) → Senior Network Engineer (9.000) tersimpan di `localStorage` (`kotaNusantara.noc.v1`). XP per pekerjaan dikali 0,4 supaya naik pangkat butuh beberapa hari kerja (Teknisi Junior sekitar hari ke-2), bukan beberapa pekerjaan.
 
 ### Pengkabelan terstruktur (TIA-568)
 - Meja → patch cord → outlet dinding → kabel horizontal → patch panel di rak lantai → patch cord → port switch. Nomor outlet = nomor port patch panel (contoh `L2-07`); nomor port switch berbeda, seperti di gedung nyata. Tiap 4 outlet ada 1 outlet cadangan.
