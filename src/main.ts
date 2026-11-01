@@ -46,6 +46,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GfxTier } from './game/gfxTier';
 import { aiCfg } from './ai/nusa';
 import { buildHiDetail } from './world/hiDetail';
+import './ui/skin.css';   // Nusantara Tech UI skin: loaded last so it overrides module styles
 
 const $ = (id: string) => document.getElementById(id)!;
 // ---------- stale-cache guard: if the server has a newer build than this page, reload it once with a cache-busting query ----------

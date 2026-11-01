@@ -1,0 +1,28 @@
+// screenshots of every UI surface for layout review
+import { chromium } from 'playwright';
+const VP = process.env.VP === 'm' ? { width: 844, height: 390 } : { width: 1280, height: 720 };
+const tag = process.env.VP === 'm' ? 'm' : 'd';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage'] });
+const p = await b.newPage({ viewport: VP, hasTouch: tag === 'm' }); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.addInitScript(() => localStorage.removeItem('kotaNusantara.noc.v1'));
+await p.goto('http://127.0.0.1:8787/?qa&low' + (process.env.Q ?? '')); 
+await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 }); await p.waitForTimeout(800); await p.evaluate(() => { window.__kota.menu.show(); window.__kota.step(3, 1/30, true); }); await p.waitForTimeout(600);
+const S = async n => { await p.evaluate(() => window.__kota.step(1, 1/30, true)); await p.screenshot({ path: `/workspace/work/shots/ui_${tag}_${n}.png` }); };
+await S('title');
+await p.evaluate(() => document.getElementById('mnSettings')?.click()); await p.waitForTimeout(300); await S('settings');
+await p.evaluate(() => document.querySelector('.pn-head button, .pn-back')?.click()); await p.waitForTimeout(300);
+await p.evaluate(() => document.getElementById('mnAbout')?.click()); await p.waitForTimeout(300); await S('about');
+await p.evaluate(() => document.querySelector('.pn-head button, .pn-back')?.click()); await p.waitForTimeout(300);
+await p.evaluate(() => document.getElementById('enter').click()); await p.waitForTimeout(2500);
+await p.evaluate(() => window.__kota.menu.resume());
+await S('play');
+await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); n.abandon?.(); }); 
+await p.evaluate(() => { const n = window.__kota.noc; for (const j of n.jobs) j.status = 'closed'; n.mode = 'idle'; n.jobs = []; n.openBoard(); }); await p.waitForTimeout(300); await S('board_idle');
+await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); n.startShift(); }); await p.waitForTimeout(400); await S('board_shift');
+await p.evaluate(() => { const n = window.__kota.noc; n.openOrder(n.jobs[0]); }); await p.waitForTimeout(300); await S('order');
+await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); }); await p.waitForTimeout(300); await S('hud');
+await p.evaluate(() => { const n = window.__kota.noc; n.openCabinet(); }); await p.waitForTimeout(300); await S('tools');
+await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); const j = n.jobs[0]; j.status = 'closed'; j.stars = 2; j.collateral = []; j.xp = 60; j.slaMet = true; n.openReport(j); }); await p.waitForTimeout(300); await S('report');
+await p.evaluate(() => { const n = window.__kota.noc; n.closeModal(); n.openNusa(); }); await p.waitForTimeout(300); await S('nusa');
+await p.evaluate(() => { window.__kota.noc.closeModal(); }); await p.evaluate(() => window.__kota.menu.pause()); await p.waitForTimeout(500); await S('pause');
+console.log('RESULT', JSON.stringify(errs)); await b.close();

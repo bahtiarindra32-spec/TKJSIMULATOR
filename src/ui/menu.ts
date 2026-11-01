@@ -19,9 +19,9 @@ export interface MenuHooks {
 }
 
 const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5ff09a"/><stop offset="1" stop-color="#1aa257"/></linearGradient></defs>
-<rect x="6" y="30" width="9" height="26" rx="1.5" fill="#2a3a44"/><rect x="18" y="18" width="11" height="38" rx="1.5" fill="#34505f"/><rect x="32" y="8" width="12" height="48" rx="1.5" fill="url(#lg)"/><rect x="47" y="24" width="11" height="32" rx="1.5" fill="#2a3a44"/>
+<rect x="6" y="30" width="9" height="26" rx="1.5" fill="#2a3a44"/><rect x="18" y="18" width="11" height="38" rx="1.5" fill="#34505f"/><rect x="32" y="8" width="12" height="48" rx="1.5" fill="#f0c02e"/><rect x="47" y="24" width="11" height="32" rx="1.5" fill="#2a3a44"/>
 <g fill="#0c1014"><rect x="35" y="13" width="2.4" height="2.4"/><rect x="39" y="13" width="2.4" height="2.4"/><rect x="35" y="19" width="2.4" height="2.4"/><rect x="39" y="19" width="2.4" height="2.4"/><rect x="35" y="25" width="2.4" height="2.4"/><rect x="39" y="25" width="2.4" height="2.4"/></g>
-<path d="M10 28 C 18 12, 46 4, 56 20" fill="none" stroke="#5ff09a" stroke-width="1.6" stroke-dasharray="2.5 2.5"/><circle cx="10" cy="28" r="2.6" fill="#ffd400"/><circle cx="56" cy="20" r="2.6" fill="#ffd400"/><circle cx="38" cy="5" r="2.6" fill="#ffd400"/></svg>`;
+<path d="M10 28 C 18 12, 46 4, 56 20" fill="none" stroke="#f0c02e" stroke-width="1.6" stroke-dasharray="2.5 2.5"/><circle cx="10" cy="28" r="2.6" fill="#ebe7de"/><circle cx="56" cy="20" r="2.6" fill="#ebe7de"/><circle cx="38" cy="5" r="2.6" fill="#ebe7de"/></svg>`;
 
 const ROWS_KB: [string, string][] = [
   ['W A S D', 'Jalan / gas, rem, belok (motor)'], ['Mouse', 'Menoleh (klik layar untuk mengunci kursor)'], ['Shift', 'Lari'], ['Spasi', 'Lompat · rem belakang (motor)'],

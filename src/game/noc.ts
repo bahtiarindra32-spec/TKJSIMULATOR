@@ -802,7 +802,7 @@ export class Noc {
     box.append(pic);
     const state = !cord ? 'Belum ada patch cord dari outlet ke PC.' : !a.cable ? 'Konektor RJ45 di PC tidak terkunci (keluar setengah).' : 'Konektor terpasang dan terkunci.';
     const lbl = panelOf(pc)?.pp.label ?? '';
-    box.append(h('p', '', `${state}<br>LED link: <b>${led ? 'hijau menyala' : 'mati'}</b> · Label outlet: ${lbl ? `<b>${esc(lbl)}</b>` : '<i>tidak ada (belum dipasang / pudar)</i>'}${this.toneAt === pc ? '<br>🔊 Toner generator terpasang di outlet ini (nada berjalan di kabel horizontal ke patch panel).' : ''}`));
+    box.append(h('p', '', `${state}<br>LED link: <b>${led ? 'hijau menyala' : 'mati'}</b> · Label outlet: ${lbl ? `<b>${esc(lbl)}</b>` : '<i>tidak ada (belum dipasang / pudar)</i>'}${this.toneAt === pc ? '<br>Toner generator terpasang di outlet ini (nada berjalan di kabel horizontal ke patch panel).' : ''}`));
     void p;
     const out = h('div', 'tester-out');
     const acts = h('div', 'row left');
@@ -876,7 +876,7 @@ export class Noc {
       o.connect(g).connect(this.audio.destination); o.start(t); o.stop(t + 0.37);
     } catch { /* no audio */ }
   }
-  private probeText(v: number) { return v >= 0.5 ? `🔊🔊🔊 Nada keras (${Math.round(v * 100)}%): ini kabel outlet yang di-toner` : v >= 0.15 ? `🔉 Samar (${Math.round(v * 100)}%): induksi dari kabel sebelah` : v > 0 ? `🔈 Sangat samar (${Math.round(v * 100)}%)` : '… sunyi'; }
+  private probeText(v: number) { return v >= 0.5 ? `Nada keras (${Math.round(v * 100)}%): ini kabel outlet yang di-toner` : v >= 0.15 ? `Samar (${Math.round(v * 100)}%): induksi dari kabel sebelah` : v > 0 ? `Sangat samar (${Math.round(v * 100)}%)` : '… sunyi'; }
 
   openRack(id = 'MDF') {
     const R = this.RACKS[id] ?? this.RACKP;
@@ -1243,16 +1243,16 @@ export class Noc {
     const j = this.tracked();
     this.hud.classList.add('on');
     const bag = [this.inv.tester && 'LAN tester', this.inv.console && 'console', this.inv.laptop && 'laptop', this.inv.patch && `${this.inv.patch}× patch cord`].filter(Boolean).join(' · ');
-    if (!j) { this.hud.innerHTML = `<b>${this.mode === 'shift' ? `SHIFT ${this.shift}` : 'SURAT KERJA'}</b> · ${done}/${this.jobs.length} selesai<br><small>[T] Papan kerja</small>`; return; }
+    if (!j) { this.hud.innerHTML = `<b>${this.mode === 'shift' ? `SHIFT ${this.shift}` : 'SURAT KERJA'}</b> · ${done}/${this.jobs.length} selesai<div class="keys"><kbd>T</kbd> Papan kerja</div>`; return; }
     const left = j.sla - Math.max(0, j.age);
-    const rows = j.targets.slice(0, 5).map(t => `<div class="tg">${t.ok ? (t.tested ? '✅' : '🟡') : '⬜'} ${esc(t.pc.label)}${t.ok && !t.tested ? ' · <i>uji dari PC ini</i>' : ''}</div>`).join('');
+    const rows = j.targets.slice(0, 5).map(t => `<div class="tg"><i class="st ${t.ok ? (t.tested ? 'ok' : 'part') : 'no'}"></i>${esc(t.pc.label)}${t.ok && !t.tested ? ' <em>uji dari PC ini</em>' : ''}</div>`).join('');
     const g = this.globalProblem(j);
     this.hud.innerHTML = `<div class="top"><b>${this.mode === 'shift' ? `SHIFT ${this.shift}` : 'SURAT KERJA'}</b><span>${done}/${this.jobs.length} selesai</span></div>
       <div class="tk"><span class="pr p-${j.prio}">${j.prio}</span> <b>${j.id}</b> <span class="sla ${left < 0 ? 'late' : left < 60 ? 'warn' : ''}">SLA ${mmss(left)}</span></div>
-      <div class="ttl">${esc(j.kind === 'ticket' ? `“${j.title}”` : j.title)}</div>${rows}${g ? `<div class="gp">⬜ ${esc(g)}</div>` : ''}
-      <div class="nx">➜ ${esc(this.nextHint(j))}</div>
+      <div class="ttl">${esc(j.kind === 'ticket' ? `“${j.title}”` : j.title)}</div>${rows}${g ? `<div class="gp"><i class="st no"></i>${esc(g)}</div>` : ''}
+      <div class="nx">${esc(this.nextHint(j))}</div>
       ${j.hint && j.kind === 'ticket' ? `<div class="hint">Petunjuk: ${FAULTS[j.faults[0]].hint}</div>` : ''}
-      ${bag ? `<small>Dibawa: ${bag}</small><br>` : ''}<small>[T] Papan kerja · [J] Tanya Pak Nusa</small>`;
+      ${bag ? `<div class="bag">Dibawa: ${bag}</div>` : ''}<div class="keys"><kbd>T</kbd> Papan kerja <kbd>J</kbd> Pak Nusa</div>`;
   }
 
   // ---------------------------------------------------------------- UI
