@@ -858,6 +858,8 @@ export class Noc {
   labSetCord(pc: string, present: boolean) { const a = adapterOf(pc); if (present) { this.noCord.delete(pc); a.cable = true; } else { this.noCord.add(pc); a.cable = false; this.cordOf.delete(pc); } bounce(a); }
   labCord(pc: string) { return { present: !this.noCord.has(pc), crafted: this.cordOf.get(pc) ?? null }; }
   labTools() { return { ...this.inv }; }
+  /** RJ45 connectors on the bench: one per crimped end; a wasted cable wastes its connectors. */
+  rj45 = 10; rj45Used = 0;
   private crimpSt: { a: Wire[]; b: Wire[]; end: 'a' | 'b' | 'done'; tested: boolean; pool: Wire[] } | null = null;
   openCrimpBench(msg = '') {
     const st = this.crimpSt ??= { a: [], b: [], end: 'a', tested: false, pool: shuffle([...WIRES]) };
@@ -868,6 +870,7 @@ export class Noc {
     box.append(h('p', 'how', 'Konektor dilihat dari depan, klip menghadap ke bawah: pin 1 di kiri. Klik warna kabel berurutan dari pin 1 sampai 8.'));
     box.append(h('div', 'plugs', plug(st.a, 'Ujung A', st.end === 'a') + plug(st.b, 'Ujung B', st.end === 'b')));
     if (msg) box.append(h('p', 'msg', msg));
+    box.append(h('p', 'how', `Konektor RJ45 di meja: <b>${this.rj45}</b> · terpakai: ${this.rj45Used}`));
     const out = h('div', 'tester-out');
     if (st.end !== 'done') {
       const cur = st[st.end];
@@ -877,7 +880,8 @@ export class Noc {
       const rw = h('div', 'row left');
       rw.append(btn('Hapus terakhir', () => { cur.pop(); this.openCrimpBench(); }, 'btn', 'crimp-undo'));
       rw.append(btn('Ulang ujung ini', () => { cur.length = 0; this.openCrimpBench(); }, 'btn', 'crimp-clear'));
-      if (cur.length === 8) rw.append(btn(`Potong rata & crimp ujung ${st.end.toUpperCase()}`, () => { st.end = st.end === 'a' ? 'b' : 'done'; this.logAll(`Crimping: ujung ${st.end === 'b' ? 'A' : 'B'} di-crimp (${cur.join(', ')})`); this.openCrimpBench(st.end === 'b' ? 'Ujung A sudah di-crimp. Sekarang ujung B.' : 'Kedua ujung sudah di-crimp. Tes dulu sebelum dipakai.'); }, 'btn pri', 'crimp-do'));
+      if (cur.length === 8 && this.rj45 <= 0) rw.append(btn('Ambil 1 pak konektor RJ45 (isi 10)', () => { this.rj45 += 10; this.logAll('Bahan: 1 pak konektor RJ45 diambil'); this.openCrimpBench('Konektor diisi ulang. Pemakaian bahan tercatat.'); }, 'btn pri', 'rj45-refill'));
+      else if (cur.length === 8) rw.append(btn(`Potong rata & crimp ujung ${st.end.toUpperCase()}`, () => { this.rj45--; this.rj45Used++; st.end = st.end === 'a' ? 'b' : 'done'; this.logAll(`Crimping: ujung ${st.end === 'b' ? 'A' : 'B'} di-crimp (${cur.join(', ')})`); this.openCrimpBench(st.end === 'b' ? 'Ujung A sudah di-crimp. Sekarang ujung B.' : 'Kedua ujung sudah di-crimp. Tes dulu sebelum dipakai.'); }, 'btn pri', 'crimp-do'));
       box.append(rw);
     } else {
       const rw = h('div', 'row left');
