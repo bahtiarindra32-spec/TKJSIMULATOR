@@ -14,7 +14,8 @@ import { HotelNpcs, type TalkCtx } from './game/hotelNpc';
 const ambient = new Ambient();
 addEventListener('pointerdown', () => ambient.start()); addEventListener('keydown', () => ambient.start());
 import { buildSouth, SOUTH_PEDS } from './world/south';
-import { Menu, settings, type QChoice } from './ui/menu';
+import { Menu, settings, applyA11y, type QChoice } from './ui/menu';
+applyA11y();
 import { createPerson, randomSpec, walkPose, idlePose, typingPose, crouchPose, ridePose, WALK_STRIDE } from './assets/people';
 import { buildRoads } from './world/roads';
 import { buildGround, buildCity } from './world/buildings';
@@ -43,6 +44,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GfxTier } from './game/gfxTier';
+import { aiCfg } from './ai/nusa';
 import { buildHiDetail } from './world/hiDetail';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -344,6 +346,7 @@ window.addEventListener('keydown', e => {
   if (mode === 'walk' && e.code === 'KeyF' && !e.repeat) interact();
   if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked() && !e.repeat) { if (riding) { motors.resetToRoad(riding, rideDyn(riding)); } else noc.setAnalyzer(!noc.analyzerOn); }
   if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) noc.openBoard();
+  if (mode === 'walk' && e.code === 'KeyJ' && !e.repeat && !missions.isModalOpen()) { e.preventDefault(); keys.delete('KeyJ'); noc.openNusa(); }
   if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen() && !riding) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
   if (mode === 'walk' && e.code === 'KeyH' && riding && !e.repeat) ambient.horn(1);
   if (mode === 'walk' && e.code === 'KeyX' && !e.repeat && !riding && !uiBlocked()) setCrouch(!crouch.on);
@@ -602,7 +605,7 @@ const QDESC: Record<QName, string> = {
 };
 // one look for everyone (user decision Nov 1, 2026): always the full 'tinggi' assets; ?q= stays for QA only.
 // On slow devices the watchdog only lowers render resolution / drops AO, never the assets.
-let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : 'tinggi';
+let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : QS.has('low') && QA0 ? 'rendah' : 'tinggi';   // ?qa&low: headless QA speed only
 let quality = false;              // true = post-processing (AO) on
 let autoQ = !QS.has('q');         // the FPS watchdog may lower quality until the player picks one
 
@@ -1164,6 +1167,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
   menu: { open: () => menu.open, paused: () => menu.paused, started: () => started, show: () => showMenu(), pause: () => openPause(), resume: () => resumeGame(), mainMenu: () => { menu.pause(false); if (mode === 'walk') exitWalk(); showMenu(); } },
   bounds: () => ({ minX: 0, maxX: 400, minZ: 0, maxZ: 600 }),
   steerIn: () => riding?.steerIn ?? null,
+  aiCfg, ai: () => noc.aiInfo(), nusa: () => noc.openNusa(), ask: (q: string) => noc.askNusa(q), mentorCtx: () => noc.mentorCtx(),
   perf: () => ({ frames: frameCount, prScale, quality: qName, auto: autoQ, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
   setQ: (n: QName) => { autoQ = false; applyQuality(n, 'start'); },
   stats: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, colliders: colliders.length, vehicles: traffic.vehicles.length, peds: peds.peds.length }),

@@ -94,3 +94,30 @@ body:not(.entered) #noc-hud { display: none !important; }
   .noc-modal button { min-height: 38px; }
   .noc-modal input, .noc-modal select { font-size: 16px; }
 }
+
+/* ---- Pak Nusa (AI mentor) */
+.noc-box.nusa { width: min(640px, 94vw); }
+.nusa-mode { font-size: 12.5px; color: #a9bddb; margin: -4px 0 8px; } .nusa-mode .on { color: #5ff09a; } .nusa-mode .off { color: #8a96a8; }
+.nusa-log { height: min(46vh, 380px); overflow-y: auto; background: #0a1322; border: 1px solid #22395c; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.nusa-log > div { max-width: 86%; padding: 8px 11px; border-radius: 10px; line-height: 1.45; font-size: 14px; }
+.nusa-log .pn { background: #16294a; align-self: flex-start; border-top-left-radius: 3px; }
+.nusa-log .me { background: #1f5b3a; align-self: flex-end; border-top-right-radius: 3px; }
+.nusa-log .typing, .nusa-fb.typing { opacity: .7; font-style: italic; }
+.ai-tag, .off-tag { display: inline-block; font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: 1px; }
+.ai-tag { background: #6b3fd6; color: #fff; } .off-tag { background: #2e3644; color: #a9b4c4; }
+.nusa-quick { margin: 8px 0 6px; flex-wrap: wrap; gap: 6px; }
+.nusa-form { display: flex; gap: 8px; } .nusa-form input { flex: 1; min-width: 0; background: #0a1322; color: #e8f1ff; border: 1px solid #3a6198; border-radius: 6px; padding: 8px 10px; font: inherit; }
+/* closing-note box in the job report */
+.note-box { margin: 12px 0; padding: 10px 12px; background: #0a1322; border: 1px solid #22395c; border-radius: 10px; }
+.note-box textarea { width: 100%; box-sizing: border-box; background: #071020; color: #e8f1ff; border: 1px solid #3a6198; border-radius: 6px; padding: 8px; font: inherit; font-size: 14px; resize: vertical; }
+.note-fb { margin-top: 8px; font-size: 13.5px; } .note-fb .warn { color: #ffcf5a; }
+.note-fb .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; margin: 0 4px 6px 0; font-size: 12px; } .note-fb .chip.ok { background: #1f5b3a; } .note-fb .chip.no { background: #5b2a1f; }
+.nusa-fb { background: #16294a; border-radius: 8px; padding: 8px 10px; margin-top: 6px; line-height: 1.45; }
+
+/* ---- accessibility: text size + colour-blind safe status colours (Pengaturan) */
+body.txt-l .noc-box, body.txt-l #noc-hud { zoom: 1.15; } body.txt-xl .noc-box, body.txt-xl #noc-hud { zoom: 1.3; }
+body.cb .phys .led.on { background: #3d8bff; box-shadow: 0 0 8px #3d8bff; }
+body.cb .noc-box .pl.up { background: #1b5fb8; color: #e6f0ff; }
+body.cb #noc-hud .ok, body.cb .note-fb .chip.ok { color: #8ec5ff; } body.cb #noc-hud .bad { color: #ffb15c; }
+body.cb .note-fb .chip.ok { background: #1b4a8a; color: #fff; } body.cb .note-fb .chip.no { background: #7a4a12; }
+body.cb .nusa-log .me { background: #1b4a8a; }

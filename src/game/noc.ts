@@ -23,6 +23,7 @@ import { nasPanel } from '../pcos/office';
 import { EdgeShell, EDGE, activeRoute } from '../pcos/edge';
 const EDGE_F = ['isp1', 'nat', 'acl'];
 import './noc.css';
+import { aiReady, aiCfg, aiStats, chat, mentorPrompt, offlineMentor, plain, offlineComplaint, aiComplaints, offlineNoteFeedback, aiNoteFeedback, type ChatMsg, type MentorCtx, type NoteCtx } from '../ai/nusa';
 
 // ---------------------------------------------------------------- helpers
 const pick = <T,>(a: T[], r = Math.random) => a[Math.floor(r() * a.length)];
@@ -98,7 +99,7 @@ export interface Job {
   sla: number; age: number; status: 'open' | 'closed'; targets: Target[]; faults: FaultId[]; order: string[];
   envId: string; sw?: string; vlanName?: string; record?: { name: string; ip: string }; router?: { ip: string; prefix: number; start: string; end: string };
   tut?: Tut;
-  wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; swTouched?: boolean; apId?: string;
+  wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; aiVoice?: boolean; swTouched?: boolean; apId?: string;
   /** legacy alias for the HUD/waypoint code: the next place to go */
   pc: PcInfo;
 }
@@ -108,6 +109,10 @@ const apWorld = (ap: Ap) => ({ x: wx(HOTEL_ORIGIN[0] + ap.lx), z: wz(HOTEL_ORIGI
 
 interface Save { v: 1; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
 const KEY = 'kotaNusantara.noc.v1';
+const NOTES_KEY = 'kotaNusantara.notes.v1';
+function loadNotes(): { id: string; title: string; note: string; t: number }[] {
+  try { const o = JSON.parse(localStorage.getItem(NOTES_KEY) ?? '[]'); return Array.isArray(o) ? o.filter(n => n && typeof n.id === 'string' && typeof n.note === 'string').map(n => ({ id: n.id, title: String(n.title ?? ''), note: n.note.slice(0, 800), t: Number(n.t) || 0 })).slice(-30) : []; } catch { return []; }
+}
 const fresh = (): Save => ({ v: 1, xp: 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, seen: [], mastery: {} });
 
 /** read the progress save defensively: an old/corrupt save from an earlier build must never break the game */
@@ -179,7 +184,7 @@ export class Noc {
   maybeStartTutorial() { if (this.mode === 'idle' && !this.s.mastery.tutor && this.s.closed === 0) this.acceptContract('tutor', 1); }
   /** events from devices that are not PCs (IP phones) or modules (QA) */
   extEvent(e: PcEvent) { this.onPc(e); }
-  private save() { try { localStorage.setItem(KEY, JSON.stringify(this.s)); } catch { /* ignore */ } }
+  private save() { try { localStorage.setItem(KEY, JSON.stringify(this.s)); localStorage.setItem(NOTES_KEY, JSON.stringify(this.notes)); } catch { /* ignore */ } }
   get xp() { return this.s.xp; }
   get stats() { return { ...this.s }; }
   rankIndex() { let i = 0; RANKS.forEach((r, k) => { if (this.s.xp >= r.xp) i = k; }); return i; }
@@ -188,6 +193,12 @@ export class Noc {
   onModal(f: (open: boolean) => void) { this.listeners.add(f); }
   setHudVisible(v: boolean) { this.hud.style.display = v ? '' : 'none'; }
   private openJobs() { return this.jobs.filter(j => j.status !== 'closed'); }
+  whereNow: { pc: string | null; rack: string | null } = { pc: null, rack: null };
+  private nusaHist: ChatMsg[] = [];
+  private nusaView: { me: boolean; text: string; ai: boolean }[] = [];
+  private nusaBusy = false;
+  /** closing notes written in job reports (kept with the save, last 30) */
+  notes: { id: string; title: string; note: string; t: number }[] = loadNotes();
   tracked(): Job | null {
     const j = this.jobs.find(x => x.id === this.trackedId && x.status !== 'closed') ?? this.openJobs()[0] ?? null;
     if (j) j.pc = this.nextStop(j);
@@ -502,6 +513,7 @@ export class Noc {
       this.jobs.push(t);
     }
     this.patchStock = 6;
+    this.voiceComplaints();
     const snap = this.snapshot(); for (const j of this.jobs) j.snap = snap;
     this.trackedId = this.jobs[0]?.id ?? null;
     this.save();
@@ -721,6 +733,7 @@ export class Noc {
 
   // ---------------------------------------------------------------- physical work
   hintAt(nearPc: string | null, nearRack: string | null): string | null {
+    this.whereNow = { pc: nearPc, rack: nearRack };
     if (nearPc && !isWireless(nearPc)) return '[C] Cek fisik kabel & outlet';
     if (nearRack && nearRack !== 'MDF') return `[F] ${this.RACKS[nearRack]?.label ?? 'Rak IDF'} (patch panel · switch)`;
     return null;
@@ -1045,6 +1058,97 @@ export class Noc {
     this.save();
   }
 
+  // ---------------------------------------------------------------- Pak Nusa (AI mentor) + AI complaints + note feedback
+  /** rewrite each ticket's complaint line in the voice of the person reporting it (offline phrasing first, AI replaces it when it answers) */
+  private voiceComplaints() {
+    const list = this.jobs.filter(j => j.kind === 'ticket' && j.status === 'open');
+    const line = (j: Job) => j.order.findIndex(x => x.startsWith('Keluhan: '));
+    list.forEach((j, i) => { const k = line(j); if (k >= 0) { j.order[k] = `Keluhan: “${offlineComplaint({ id: j.id, who: j.who, place: j.targets[0].pc.label, symptom: j.title }, this.s.seq + i)}”`; } });
+    if (!aiReady() || !list.length) return;
+    aiComplaints(list.map(j => ({ id: j.id, who: j.who, place: j.targets[0].pc.label, symptom: j.title }))).then(map => {
+      for (const j of list) { const k = line(j); if (k >= 0 && map[j.id] && j.status === 'open') { j.order[k] = `Keluhan: “${map[j.id]}”`; j.aiVoice = true; } }
+    }).catch(() => { /* offline phrasing stays */ });
+  }
+  mentorCtx(): MentorCtx {
+    const j = this.tracked();
+    const pc = this.whereNow.pc;
+    let pcState: string | null = null;
+    if (pc) { try { const a = adapterOf(pc), l = live(a); pcState = `adapter ${a.enabled ? 'aktif' : 'disabled'}, kabel ${a.cable ? (a.broken ? 'rusak' : 'terpasang') : 'lepas'}, ${a.dhcp ? 'DHCP' : 'statis'}, IP ${l.ip || '-'}/${l.prefix || '-'}, gateway ${l.gw || '-'}, DNS ${l.dns.join(',') || '-'}${l.apipa ? ' (APIPA)' : ''}`; } catch { pcState = null; } }
+    return {
+      job: j ? { id: j.id, title: j.title, kind: j.kind, order: j.order, faults: j.faults.map(f => ({ id: f, cause: FAULTS[f].cause, fix: FAULTS[f].fix, hint: FAULTS[f].hint, cp: FAULTS[f].cp })), log: [...new Set(j.log)], next: this.nextHint(j) } : null,
+      pc: pc ? this.pcLabel(pc) : null, pcState, rack: this.whereNow.rack, rank: this.rank(), place: this.whereNow.pc ? 'di meja PC' : this.whereNow.rack ? 'di ruang rak' : 'di gedung/kota',
+    };
+  }
+  /** answer a question: AI when a key is set and online, otherwise the offline rule engine */
+  async askNusa(q: string): Promise<{ text: string; ai: boolean }> {
+    const ctx = this.mentorCtx();
+    const tj = this.tracked(); if (tj) tj.hint = true;   // asking for help counts like a hint (no no-hint XP bonus)
+    if (aiReady()) {
+      try { const a = plain(await chat(mentorPrompt(ctx, this.nusaHist, q))); this.nusaHist.push({ role: 'user', content: q }, { role: 'assistant', content: a }); return { text: a, ai: true }; }
+      catch { /* fall through */ }
+    }
+    return { text: offlineMentor(ctx, q), ai: false };
+  }
+  openNusa() {
+    const box = h('div', 'noc-box nusa');
+    const mode = aiReady() ? `AI aktif · ${esc(aiCfg.model)}` : 'Mode offline (tanpa AI) · isi API key OpenRouter di Pengaturan untuk mengaktifkan AI';
+    box.append(h('h2', '', 'Pak Nusa · Mentor Teknisi'));
+    box.append(h('p', 'nusa-mode', `<span class="${aiReady() ? 'on' : 'off'}">●</span> ${mode}`));
+    const log = h('div', 'nusa-log');
+    const paint = () => {
+      log.innerHTML = this.nusaView.length ? this.nusaView.map(m => `<div class="${m.me ? 'me' : 'pn'}">${m.me ? '' : `<b>Pak Nusa</b>${m.ai ? '<i class="ai-tag" title="Dibuat oleh AI, bisa keliru">AI</i>' : '<i class="off-tag">offline</i>'}<br>`}${esc(m.text).replace(/\n/g, '<br>')}</div>`).join('') + (this.nusaBusy ? '<div class="pn typing">Pak Nusa mengetik…</div>' : '')
+        : '<div class="pn"><b>Pak Nusa</b><br>Halo! Saya mentor teknisi di sini. Tanya apa saja soal pekerjaanmu. Saya kasih arah diagnosisnya, kamu yang membuktikan di perangkat.</div>';
+      log.scrollTop = log.scrollHeight;
+    };
+    const send = async (q: string) => {
+      q = q.trim(); if (!q || this.nusaBusy) return;
+      this.nusaView.push({ me: true, text: q, ai: false }); this.nusaBusy = true; paint();
+      const a = await this.askNusa(q);
+      this.nusaBusy = false; this.nusaView.push({ me: false, text: a.text, ai: a.ai }); if (this.nusaView.length > 30) this.nusaView.splice(0, this.nusaView.length - 30);
+      if (this.modal?.contains(log)) paint();
+    };
+    const quick = h('div', 'row left nusa-quick');
+    for (const [lb, q, id] of [['Aku harus ngapain?', 'Aku harus ngapain sekarang?', 'nusa-q1'], ['Kenapa ini terjadi?', 'Kenapa gangguan ini bisa terjadi? Kasih arah diagnosisnya.', 'nusa-q2'], ['Jelaskan konsepnya', 'Jelaskan konsep jaringan yang dipakai di pekerjaan ini dengan bahasa sederhana.', 'nusa-q3']] as [string, string, string][]) quick.append(btn(lb, () => send(q), 'btn', id));
+    const form = h('form', 'nusa-form') as HTMLFormElement;
+    const inp = h('input', '') as HTMLInputElement; inp.type = 'text'; inp.placeholder = 'Tulis pertanyaan… (misal: kenapa dapat IP 169.254?)'; inp.maxLength = 300; inp.id = 'nusa-input';
+    form.append(inp, btn('Kirim', () => {}, 'btn pri', 'nusa-send'));
+    form.addEventListener('submit', e => { e.preventDefault(); const v = inp.value; inp.value = ''; void send(v); });
+    (form.querySelector('button[name="nusa-send"]') as HTMLButtonElement).type = 'submit';
+    box.append(log, quick, form);
+    box.append(h('p', 'how', 'Jawaban berlabel <b>AI</b> dibuat model bahasa lewat OpenRouter dan bisa keliru: selalu buktikan di perangkat. Yang dikirim hanya data simulasi game dan pertanyaanmu, tanpa data pribadi. Bertanya ke Pak Nusa dihitung seperti memakai petunjuk.'));
+    const rw = h('div', 'row'); rw.append(btn('Tutup [Esc]', () => this.closeModal(), 'btn', 'nusa-close')); box.append(rw);
+    this.show(box, false); paint(); setTimeout(() => inp.focus(), 30);
+  }
+  private noteCtx(j: Job): NoteCtx {
+    const f = j.faults[0];
+    return { id: j.id, title: j.title, symptom: j.kind === 'ticket' && f ? FAULTS[f].symptom : j.order[0] ?? j.title, cause: j.kind === 'ticket' ? (j.detail ?? j.faults.map(x => FAULTS[x].cause).join(' + ')) : 'pekerjaan instalasi/konfigurasi sesuai surat kerja', fix: j.kind === 'ticket' ? j.faults.map(x => FAULTS[x].fix).join(' + ') : j.order.slice(0, 3).join(' | '), log: [...new Set(j.log)], tested: j.targets.every(t => t.tested) };
+  }
+  /** the closing-note box inside a job report */
+  private noteBox(j: Job) {
+    const wrap = h('div', 'note-box');
+    wrap.append(h('p', '', '<b>Catatan penutupan tiket</b> <small>(tulis seperti teknisi sungguhan: gejala, penyebab, tindakan, bukti uji)</small>'));
+    const ta = h('textarea', '') as HTMLTextAreaElement; ta.id = 'note-text'; ta.rows = 3; ta.maxLength = 800; ta.placeholder = 'Contoh: PC Kasir 2 tidak bisa buka situs. Ternyata DNS diarahkan ke server yang salah. DNS dikembalikan ke otomatis. Tes: nslookup cari.id berhasil, situs terbuka.';
+    const prev = this.notes.find(n => n.id === j.id); if (prev) ta.value = prev.note;
+    const fb = h('div', 'note-fb');
+    const run = async () => {
+      const note = ta.value.trim(); if (!note) { fb.innerHTML = '<span class="warn">Tulis catatannya dulu.</span>'; return; }
+      const i = this.notes.findIndex(n => n.id === j.id); const rec = { id: j.id, title: j.title, note, t: Date.now() };
+      if (i >= 0) this.notes[i] = rec; else this.notes.push(rec); if (this.notes.length > 30) this.notes.shift(); this.save();
+      const off = offlineNoteFeedback(this.noteCtx(j), note);
+      const chips = (Object.entries(off.parts) as [string, boolean][]).map(([k, v]) => `<span class="chip ${v ? 'ok' : 'no'}">${v ? '✔' : '✘'} ${k}</span>`).join(' ');
+      fb.innerHTML = `${chips}<div class="nusa-fb"><b>Pak Nusa</b> <i class="off-tag">offline</i><br>${esc(off.text)}</div>`;
+      if (aiReady()) {
+        fb.insertAdjacentHTML('beforeend', '<div class="nusa-fb typing">Pak Nusa (AI) membaca catatanmu…</div>');
+        try { const a = await aiNoteFeedback(this.noteCtx(j), note); fb.querySelector('.typing')?.remove(); fb.insertAdjacentHTML('beforeend', `<div class="nusa-fb"><b>Pak Nusa</b> <i class="ai-tag" title="Dibuat oleh AI, bisa keliru">AI</i><br>${esc(a).replace(/\n/g, '<br>')}</div>`); }
+        catch { const t = fb.querySelector('.typing'); if (t) t.textContent = 'AI tidak bisa dihubungi, pakai umpan balik offline di atas.'; }
+      }
+    };
+    const rw = h('div', 'row left'); rw.append(btn('Simpan & minta umpan balik', () => void run(), 'btn', 'note-send'));
+    wrap.append(ta, rw, fb);
+    return wrap;
+  }
+  aiInfo() { return { ready: aiReady(), model: aiCfg.model, ...aiStats, notes: this.notes.length }; }
+
   update(dt: number) {
     if (this.mode === 'idle') { this.hud.innerHTML = ''; this.hud.classList.remove('on'); if (this.stuck.lvl) { this.stuck.lvl = 0; this.tutEl.classList.remove('on'); } }
     this.hkT += dt; if (this.hkT > 60) { this.hkT = 0; dhcpHousekeeping(); }
@@ -1148,7 +1252,7 @@ export class Noc {
       <div class="ttl">${esc(j.kind === 'ticket' ? `“${j.title}”` : j.title)}</div>${rows}${g ? `<div class="gp">⬜ ${esc(g)}</div>` : ''}
       <div class="nx">➜ ${esc(this.nextHint(j))}</div>
       ${j.hint && j.kind === 'ticket' ? `<div class="hint">Petunjuk: ${FAULTS[j.faults[0]].hint}</div>` : ''}
-      ${bag ? `<small>Dibawa: ${bag}</small><br>` : ''}<small>[T] Papan kerja</small>`;
+      ${bag ? `<small>Dibawa: ${bag}</small><br>` : ''}<small>[T] Papan kerja · [J] Tanya Pak Nusa</small>`;
   }
 
   // ---------------------------------------------------------------- UI
@@ -1213,7 +1317,7 @@ export class Noc {
   openOrder(j: Job) {
     const box = h('div', 'noc-box');
     box.append(h('h2', '', `${j.kind === 'contract' ? 'Surat Perintah Kerja' : 'Tiket'} ${j.id} · ${esc(j.title)}`));
-    box.append(h('div', 'order', j.order.map(x => `<div>• ${esc(x)}</div>`).join('')));
+    box.append(h('div', 'order', j.order.map(x => `<div>• ${esc(x)}${j.aiVoice && x.startsWith('Keluhan: ') ? ' <i class="ai-tag" title="Kalimat keluhan ditulis AI dari gejala aslinya">AI</i>' : ''}</div>`).join('')));
     box.append(h('p', 'how', `SLA ${mmss(j.sla)} · ${j.kind === 'contract' ? TEMPLATES[j.tpl as TplId].cp : j.kind === 'ticket' ? FAULTS[j.faults[0]].cp : 'Konsekuensi pekerjaan sebelumnya'}`));
     const rw = h('div', 'row');
     if (j.kind === 'contract') rw.append(btn('Briefing', () => this.openBrief(j)));
@@ -1246,6 +1350,7 @@ export class Noc {
       `${j.wrong || (j.swTouched && SWITCHES.some(s => s.dirty)) ? '✘' : '✔'} ${j.wrong ? `${j.wrong} material/langkah terbuang` : j.swTouched && SWITCHES.some(s => s.dirty) ? 'Konfigurasi switch belum disimpan (write memory)' : 'Rapi: tanpa material terbuang, konfigurasi tersimpan'}`,
     ];
     box.append(h('div', 'crit', crit.map(x => `<div>${x}</div>`).join('')));
+    box.append(this.noteBox(j));
     const before = this.rankIndex();
     if (!j.reported) { this.s.xp += j.xp!; j.reported = true; this.save(); }
     const up = this.rankIndex() > before;

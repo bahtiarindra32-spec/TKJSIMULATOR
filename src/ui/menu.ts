@@ -1,11 +1,14 @@
 // Title screen, pause menu, settings / controls / about panels, fade + loading. DOM only, system fonts,
 // inline SVG art (no external resources). main.ts owns the game state; this module only renders and calls back.
 import './menu.css';
+import { aiCfg, saveAiCfg, DEFAULT_MODEL } from '../ai/nusa';
 
 export type QChoice = 'otomatis' | 'tinggi' | 'sedang' | 'rendah' | 'hemat';
-export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean }
+export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean; textSize: 'm' | 'l' | 'xl'; colorBlind: boolean }
 const KEY = 'kotaNusantara.settings.v1';
-export const settings: Settings = { quality: 'otomatis', sens: 1, volume: 70, invertY: false, third: false, autoTime: true };
+export const settings: Settings = { quality: 'otomatis', sens: 1, volume: 70, invertY: false, third: false, autoTime: true, textSize: 'm', colorBlind: false };
+/** accessibility classes on <body> (text size of work panels/HUD, colour-blind safe status colours) */
+export function applyA11y() { const b = document.body; b.classList.toggle('txt-l', settings.textSize === 'l'); b.classList.toggle('txt-xl', settings.textSize === 'xl'); b.classList.toggle('cb', !!settings.colorBlind); }
 try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY) ?? '{}')); } catch { /* ignore */ }
 export function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* ignore */ } }
 
@@ -23,12 +26,12 @@ const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient 
 const ROWS_KB: [string, string][] = [
   ['W A S D', 'Jalan / gas, rem, belok (motor)'], ['Mouse', 'Menoleh (klik layar untuk mengunci kursor)'], ['Shift', 'Lari'], ['Spasi', 'Lompat · rem belakang (motor)'],
   ['X', 'Jongkok'], ['V', 'Kamera orang pertama / ketiga'], ['F', 'Interaksi: pintu, PC, rak, naik/turun motor'], ['E / Q', 'Naik / turun tangga · lift'],
-  ['T', 'Papan kerja NOC'], ['C', 'Cek fisik perangkat'], ['R', 'Wi-Fi analyzer · kembalikan motor ke jalan'], ['M', 'Peta'], ['N', 'Ganti waktu: pagi → siang → sore → malam'],
+  ['T', 'Papan kerja NOC'], ['J', 'Tanya Pak Nusa (mentor AI)'], ['C', 'Cek fisik perangkat'], ['R', 'Wi-Fi analyzer · kembalikan motor ke jalan'], ['M', 'Peta'], ['N', 'Ganti waktu: pagi → siang → sore → malam'],
   ['Esc', 'Jeda / menu'],
 ];
 const ROWS_TOUCH: [string, string][] = [
   ['Joystick kiri', 'Jalan · di motor: dorong = gas, tarik = rem, kiri/kanan = belok (halus)'], ['Geser layar kanan', 'Menoleh'], ['F / Aksi', 'Interaksi · naik/turun motor'],
-  ['Lompat · Lari · Jongkok', 'Tombol kanan bawah'], ['Bar atas', 'Kerja, Cek, Wi-Fi, Kamera, Peta, Waktu, Layar penuh'], ['Keluar', 'Jeda / menu'],
+  ['Lompat · Lari · Jongkok', 'Tombol kanan bawah'], ['Bar atas', 'Kerja, Cek, Wi-Fi, Kamera, Peta, Waktu, Pak Nusa, Layar penuh'], ['Keluar', 'Jeda / menu'],
 ];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
@@ -125,12 +128,24 @@ export class Menu {
       row('Balik sumbu Y', seg([['0', 'Normal'], ['1', 'Terbalik']], () => (S.invertY ? '1' : '0'), v => { S.invertY = v === '1'; h.applySettings(); }, 'inv'));
       row('Kamera awal', seg([['0', 'Orang pertama'], ['1', 'Orang ketiga']], () => (S.third ? '1' : '0'), v => { S.third = v === '1'; h.applySettings(); }, 'cam'), 'V mengganti kamera kapan saja');
       row('Siklus siang-malam', seg([['1', 'Otomatis'], ['0', 'Berhenti']], () => (S.autoTime ? '1' : '0'), v => { S.autoTime = v === '1'; h.applySettings(); }, 'auto'), '1 hari = 24 menit · N untuk lompat waktu');
+      body.appendChild(el('h4', '', 'Aksesibilitas'));
+      row('Ukuran teks panel kerja', seg([['m', 'Normal'], ['l', 'Besar'], ['xl', 'Sangat besar']], () => S.textSize, v => { S.textSize = v as Settings['textSize']; applyA11y(); }, 'txt'), 'Papan kerja, surat kerja, laporan, HUD tiket');
+      row('Mode buta warna', seg([['0', 'Mati'], ['1', 'Aktif']], () => (S.colorBlind ? '1' : '0'), v => { S.colorBlind = v === '1'; applyA11y(); }, 'cb'), 'Lampu link & status hijau/merah jadi biru/oranye')
+      body.appendChild(el('h4', '', 'Pak Nusa (mentor AI)'));
+      row('Aktifkan AI', seg([['1', 'Aktif'], ['0', 'Mati (offline)']], () => (aiCfg.enabled ? '1' : '0'), v => { aiCfg.enabled = v === '1'; saveAiCfg(); }, 'ai'), 'Tanpa AI, Pak Nusa menjawab dari petunjuk offline');
+      const txt = (val: () => string, set: (v: string) => void, name: string, ph: string, secret = false) => { const i = el('input', 'pn-text') as HTMLInputElement; i.type = secret ? 'password' : 'text'; i.name = name; i.id = name; i.placeholder = ph; i.value = val(); i.autocomplete = 'off'; i.spellcheck = false; i.addEventListener('change', () => { set(i.value.trim()); saveAiCfg(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
+      row('API key OpenRouter', txt(() => aiCfg.key, v => (aiCfg.key = v), 'aiKey', 'sk-or-v1-…', true), 'Disimpan hanya di browser ini, tidak ikut ke server mana pun selain OpenRouter');
+      row('Model', txt(() => aiCfg.model, v => (aiCfg.model = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'Model gratis berakhiran :free');
     } else if (kind === 'controls') {
       const sec = (title: string, rows: [string, string][]) => { body.appendChild(el('h4', '', title)); const t = el('div', 'pn-keys'); for (const [k, d] of rows) t.appendChild(el('div', 'pn-key', `<kbd>${k}</kbd><span>${d}</span>`)); body.appendChild(t); };
       if (h.touch) { sec('Layar sentuh', ROWS_TOUCH); sec('Keyboard', ROWS_KB); } else { sec('Keyboard & mouse', ROWS_KB); sec('Layar sentuh', ROWS_TOUCH); }
     } else {
       body.appendChild(el('div', 'pn-about', `<p><b>Kota Nusantara</b> adalah game simulasi untuk siswa SMK jurusan <b>Teknik Komputer &amp; Jaringan (TKJ)</b>. Kamu bekerja sebagai teknisi di Nusantara Tech Hotel &amp; Office: memasang dan menguji kabel, mengonfigurasi switch, router, Wi-Fi, DHCP/DNS, dan melayani tiket dari papan kerja NOC.</p>
         <p>Kotanya fiktif bergaya Jakarta: simpang Sudirman–Thamrin, perkantoran, ruko, masjid, taman, lapangan, SMK Nusantara, dan kampung bergang yang bisa dijelajahi jalan kaki atau naik motor matic.</p>
+        <h4>Privasi &amp; transparansi AI</h4>
+        <p>Game ini tidak memakai akun, iklan, cookie pelacak, maupun analitik. Progres, pengaturan, dan catatan tiket hanya disimpan di <i>localStorage</i> browser kamu.</p>
+        <p>Fitur AI (Pak Nusa, kalimat keluhan pelanggan, umpan balik catatan tiket) hanya aktif kalau kamu mengisi API key OpenRouter sendiri. Yang dikirim ke OpenRouter: data simulasi game (tiket, konfigurasi IP simulasi, log langkahmu) dan teks yang kamu ketik. Setiap jawaban AI diberi label <b>AI</b> dan bisa keliru, jadi selalu buktikan di perangkat. Tanpa key atau internet, semuanya tetap jalan dengan petunjuk offline.</p>
+        <p>Hemat sumber daya: satu file HTML, bisa jalan offline, tanpa aset luar; kalau FPS turun, game hanya menurunkan resolusi render.</p>
         <p class="pn-dim">Dibangun dengan Three.js · seluruh grafis prosedural, tanpa aset luar · Versi ${h.build}</p>`));
     }
     host.classList.add('on'); (host === this.panel ? this.root : this.pauseEl).classList.add('sub');

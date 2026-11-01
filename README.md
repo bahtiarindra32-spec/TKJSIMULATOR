@@ -41,6 +41,7 @@ https://huda.smkn1pogalan.sch.id/wp-content/uploads/2024/08/Fase-F-SMK-TKJ.pdf
 npm install
 npm run dev                                # http://localhost:5173
 npm run build                              # tsc + build ke dist/
+npm test                                   # unit test (vitest)
 npx vite build -c vite.single.config.ts    # build classic/IIFE ke dist-classic/
 python3 tools/make_single.py               # gabung jadi satu index.html offline
 ```
@@ -191,6 +192,23 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Lobi L1: 2 resepsionis di balik meja, satpam dekat pintu, tamu check-in, orang lalu-lalang. Kantor L1-L3: karyawan duduk mengetik di sekitar separuh PC (NPC menghilang saat pemain memakai PC itu). Pantry L2/L3 orang ngobrol, koridor L2-L8 tamu berjalan. NPC lantai pemain ±1 ditampilkan, lobi tetap terlihat dari luar; NPC tidak pernah menghilang mendadak: karyawan berdiri dan geser ke samping meja saat PC-nya mau dipakai.
 - NPC padat: pemain tidak bisa menembus NPC, dan NPC yang berjalan berhenti kalau jalannya dihalangi pemain.
 - Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
+
+### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
+- Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.
+- **Keluhan pelanggan dari AI**: tiap shift, kalimat keluhan tiket ditulis ulang dengan gaya pelapor (manajer, kasir, tamu hotel) hanya dari gejalanya, jadi pemain tetap harus mendiagnosis sendiri.
+- **Catatan penutupan tiket**: di laporan kerja, pemain menulis catatan seperti teknisi sungguhan. Cek offline menandai 4 bagian (gejala, penyebab, tindakan, verifikasi), lalu AI memberi ulasan dibanding fakta tiket. Catatan tersimpan di browser.
+- Pakai **OpenRouter** (model bisa diganti, bawaan model gratis). API key diisi di Pengaturan → Pak Nusa dan hanya disimpan di browser. Tanpa key, offline, atau saat AI error, semua fitur tetap jalan dengan mesin petunjuk offline.
+- Setiap teks AI berlabel **AI**. Bertanya ke Pak Nusa dihitung seperti memakai petunjuk (tanpa bonus XP tanpa-petunjuk).
+
+### Aksesibilitas, privasi, Green IT (1 Nov 2026)
+- Pengaturan → Aksesibilitas: ukuran teks panel kerja (Normal, Besar, Sangat besar) dan mode buta warna (status hijau/merah jadi biru/oranye).
+- Menu Tentang memuat penjelasan privasi dan transparansi AI: tanpa akun, analitik, iklan, atau pelacak; data hanya di `localStorage`.
+- Satu level grafik dengan detail penuh; kalau FPS turun, hanya AO dan resolusi render yang diturunkan.
+
+### Rekayasa perangkat lunak (1 Nov 2026)
+- `ARCHITECTURE.md`: diagram modul, alur tiket, desain AI, privasi.
+- `tests/`: 19 unit test (vitest) untuk simulasi jaringan dan Pak Nusa. `npm test`.
+- `.github/workflows/ci.yml`: cek tipe, unit test, dan build di setiap push.
 
 ## 6. Perubahan dari PDF (hasil audit)
 1. Trotoar arteri 3 m menjadi 5 m (pedoman kawasan bisnis), lebar Sudirman/Thamrin menjadi 26 m.

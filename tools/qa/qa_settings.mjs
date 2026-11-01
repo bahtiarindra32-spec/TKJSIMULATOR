@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--no-sandbox'] });
+const p = await b.newPage({ viewport: { width: 1100, height: 900 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('http://127.0.0.1:8787/?qa&low'); await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 });
+await p.evaluate(() => { const r = document.getElementById('menu'); r.classList.add('on'); r.hidden = false; r.style.display = 'block'; r.style.visibility = 'visible'; r.style.opacity = '1'; document.getElementById('mnSettings').click(); }); await p.waitForTimeout(400);
+await p.evaluate(() => { document.getElementById('cb-1').click(); document.getElementById('txt-l').click(); });
+const st = await p.evaluate(() => ({ cb: document.body.classList.contains('cb'), txt: document.body.classList.contains('txt-l'), key: !!document.getElementById('aiKey'), keyType: document.getElementById('aiKey').type }));
+await p.screenshot({ path: '/workspace/work/shots/settings.png', fullPage: false });
+await p.evaluate(() => document.querySelector('.pn-body').scrollTop = 9999); await p.waitForTimeout(100);
+await p.screenshot({ path: '/workspace/work/shots/settings2.png' });
+console.log('RESULT', JSON.stringify(st), errs); await b.close();
