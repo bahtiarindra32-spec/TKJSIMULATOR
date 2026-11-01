@@ -139,7 +139,7 @@ const drawLabBoard = (lines: string[]) => { const g = labBoard.c.getContext('2d'
 const praktik = new Praktik(noc, pcos, labB.pcs.map(c => ({ name: c.name, label: c.label })), drawLabBoard);
 drawLabBoard(['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode']);
 DEVICES.push(
-  { id: 'LAB_GURU', x: labB.spots.guru.x, z: labB.spots.guru.z, level: 1, r: 1.4, hint: () => praktik.run ? '[F] Meja guru · jobsheet berjalan' : '[F] Meja guru · Lab Praktik', use: () => praktik.openDesk() },
+  { id: 'LAB_GURU', x: labB.spots.guru.x, z: labB.spots.guru.z, level: 1, r: 1.4, hint: () => praktik.run ? (praktik.run.ready ? '[F] Meja guru · minta paraf' : '[F] Meja guru · jobsheet berjalan') : '[F] Meja guru · Lab Praktik', use: () => praktik.openDesk() },
   { id: 'LAB_TOOLS', x: labB.spots.tools.x, z: labB.spots.tools.z, level: 1, r: 1.3, hint: () => '[F] Lemari alat lab', use: () => noc.openCabinet(true) },
   { id: 'LAB_CRIMP', x: labB.spots.crimp.x, z: labB.spots.crimp.z, level: 1, r: 1.2, hint: () => '[F] Meja crimping', use: () => noc.openCrimpBench() },
   { id: 'LAB_RACK', x: labB.spots.rack.x, z: labB.spots.rack.z, level: 1, r: 1.3, hint: () => '[F] Rak lab: patch panel & SW-LAB', use: () => noc.openRack('LAB') },

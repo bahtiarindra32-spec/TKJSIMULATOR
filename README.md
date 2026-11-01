@@ -154,6 +154,7 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - Isi: 8 meja PC siswa (outlet LAB-01..08), meja guru + papan tulis, lemari alat, meja crimping, rak dengan patch panel dan switch SW-LAB. Jaringannya segmen sendiri: VLAN 70, 192.168.70.0/24, router-praktik 192.168.70.1 (WebKonfig), srv-jobsheet 192.168.70.10.
 - Meja guru: guru mencentang langkah (crimping T568B, pengkabelan terstruktur, IP statis, DHCP router, VLAN, DNS lokal, troubleshooting 2 gangguan), batas waktu, dan opsi soal & meja beda tiap siswa, lalu mendapat kode 6 karakter atau tautan `?lab=KODE`. Kode menyimpan seluruh jobsheet, tanpa server. Kalimat guru bisa diubah jadi centang lewat kata kunci, atau AI kalau diaktifkan; AI tidak menilai.
 - Siswa memasukkan kode + nama di meja guru, mendapat satu meja, dan mengerjakan jobsheet berurutan. Panel jobsheet berisi tujuan, alat & bahan, K3, langkah kerja, dan checkpoint yang tercentang langsung dari simulator (urutan kabel, port switch, VLAN, label outlet, IP, DHCP, DNS, hasil ping/browser dari PC).
+- Paraf guru: langkah yang checkpoint-nya terpenuhi harus diparaf di meja guru (dicek ulang langsung dari simulator) sebelum lanjut.
 - Lembar hasil: checkpoint terpenuhi ÷ seluruh checkpoint × 100, waktu per langkah, checkpoint yang gagal. Batasan: tanpa server, lembar hasil bisa dipalsukan, jadi guru sebaiknya melihat langsung.
 
 ### Server Linux srv-nusa (Rak 2, ruang server L1)

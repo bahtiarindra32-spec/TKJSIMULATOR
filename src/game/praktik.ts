@@ -22,7 +22,7 @@ type Fault = 'kabel' | 'port' | 'ip' | 'gw' | 'dns';
 interface Params { desk: number; host: number; swPort: number; poolStart: number; dnsName: string; faults: Fault[] }
 interface Check { label: string; ok: boolean }
 interface StepRes { step: LabStepId; got: number; of: number; ms: number; done: boolean; checks: Check[] }
-interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[] }
+interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[]; ready?: boolean }
 
 const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langkah: (P: Params, R: Run) => string[] }> = {
   crimp: { tujuan: 'Membuat kabel UTP straight-through standar T568B dan menyambungkan PC ke jaringan.', alat: 'Kabel UTP Cat6, 2 konektor RJ45, tang crimping, LAN tester (lemari alat & meja crimping).', k3: 'Potong dan kupas kabel menjauh dari badan. Sisa potongan kabel dibuang ke tempat sampah, bukan di lantai.',
@@ -64,7 +64,7 @@ export class Praktik {
     box.append(h('h2', '', 'Meja Guru · Lab Praktik TKJ'));
     if (this.run) {
       box.append(h('p', '', `Praktik berjalan: <b>${esc(this.run.name)}</b> di ${esc(this.run.label)}, langkah ${this.run.i + 1}/${this.run.spec.steps.length}.`));
-      const rw = h('div', 'row'); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn pri', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
+      const rw = h('div', 'row'); if (this.run.ready) rw.append(btn('Minta paraf guru', () => { const m = this.paraf(); if (this.run) { this.openDesk(); this.noc.toast(m, 4200); } }, 'btn pri', 'lab-paraf')); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
     } else {
       box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk. Penilaian dari rubrik simulator, bukan AI.'));
       const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); box.append(rw);
@@ -207,14 +207,23 @@ export class Praktik {
     const cs = this.checks();
     // a checkpoint counts once it was met at the same time as the others of the step (the final state is graded)
     R.best = cs;
-    if (cs.every(c => c.ok)) {
-      R.res.push({ step: R.spec.steps[R.i], got: cs.length, of: cs.length, ms: performance.now() - R.st0, done: true, checks: cs });
-      R.i++;
-      if (R.i >= R.spec.steps.length) { this.finish(false); return; }
-      this.noc.toast(`Langkah ${R.i} selesai. Berikutnya: ${LAB_STEPS.find(x => x.id === R.spec.steps[R.i])!.name}.`, 4200);
-      this.setup(); this.board();
-    }
+    const ok = cs.every(c => c.ok);
+    // like a school jobsheet: a finished step waits for the teacher's initials (paraf) at the teacher desk
+    if (ok && !R.ready) this.noc.toast('Semua checkpoint langkah ini terpenuhi. Minta paraf guru di meja guru.', 4200);
+    R.ready = ok;
     this.render();
+  }
+  /** Teacher initials the current step at the desk: re-checks live state, then moves on. */
+  paraf(): string {
+    const R = this.run; if (!R) return 'Tidak ada praktik berjalan.';
+    const cs = this.checks();
+    if (!cs.every(c => c.ok)) { R.ready = false; this.render(); return `Belum bisa diparaf: ${cs.filter(c => !c.ok).map(c => c.label).join('; ')}.`; }
+    R.res.push({ step: R.spec.steps[R.i], got: cs.length, of: cs.length, ms: performance.now() - R.st0, done: true, checks: cs });
+    R.i++; R.ready = false;
+    if (R.i >= R.spec.steps.length) { this.finish(false); return 'Semua langkah sudah diparaf.'; }
+    this.noc.toast(`Langkah ${R.i} diparaf guru. Berikutnya: ${LAB_STEPS.find(x => x.id === R.spec.steps[R.i])!.name}.`, 4200);
+    this.setup(); this.board(); this.render();
+    return `Langkah ${R.i} diparaf.`;
   }
   finish(early: boolean) {
     const R = this.run; if (!R) return;
@@ -245,7 +254,7 @@ export class Praktik {
     this.panel.style.display = '';
     this.panel.classList.toggle('min', this.collapsed);
     this.panel.innerHTML = `<div class="js-h"><b>JOBSHEET</b><span class="mono">${esc(R.code)} · ${esc(R.label)} · ${mm}${R.spec.minutes ? ` / ${R.spec.minutes}:00` : ''}</span><button class="js-t" name="js-toggle">${this.collapsed ? 'Buka' : 'Kecilkan'}</button></div>
-      <div class="js-b"><div class="js-step">Langkah ${R.i + 1}/${R.spec.steps.length} · <b>${LAB_STEPS.find(x => x.id === id)!.name}</b></div>
+      <div class="js-b"><div class="js-step">Langkah ${R.i + 1}/${R.spec.steps.length} · <b>${LAB_STEPS.find(x => x.id === id)!.name}</b>${R.ready ? '<br><b>Tuntas · minta paraf guru di meja guru [F]</b>' : ''}</div>
       <ul class="js-c">${cs.map(c => `<li class="${c.ok ? 'ok' : ''}"><i></i>${esc(c.label)}</li>`).join('')}</ul>
       <dl><dt>Tujuan</dt><dd>${S.tujuan}</dd><dt>Alat &amp; bahan</dt><dd>${S.alat}</dd><dt>K3</dt><dd>${S.k3}</dd></dl>
       <div class="js-lt">Langkah kerja</div><ol class="js-l">${S.langkah(R.P, R).map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`;
@@ -256,5 +265,5 @@ export class Praktik {
     this.onBoard(R ? [`JOBSHEET ${R.code}`, `${R.name} · Meja ${R.P.desk}`, ...R.spec.steps.map((s, i) => `${i < R.i ? '✓' : i === R.i ? '▶' : '·'} ${i + 1}. ${LAB_STEPS.find(x => x.id === s)!.name}`)] : ['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode', this.last ? `Hasil terakhir: nilai ${this.last.score}` : '']);
   }
   /** for QA and the HUD */
-  state() { const R = this.run; return R && { step: R.spec.steps[R.i], i: R.i, pc: R.pc, desk: R.P.desk, P: R.P, checks: this.checks() }; }
+  state() { const R = this.run; return R && { step: R.spec.steps[R.i], i: R.i, pc: R.pc, desk: R.P.desk, P: R.P, checks: this.checks(), ready: !!R.ready }; }
 }
