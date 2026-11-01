@@ -116,6 +116,14 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 | Nama untuk Server Intranet | Tambah record DNS di router (WebKonfig), perbaiki PC yang memakai DNS publik, buka nama itu di browser | Teknisi Junior |
 | Pasang Router Baru & DHCP | Router setelan pabrik 192.168.88.1: IP statis sementara di PC, ganti alamat LAN (koneksi putus!), pindah subnet, atur DHCP & DNS, kembalikan PC ke DHCP, renew, uji | Teknisi Junior |
 | Pindahkan Meja ke VLAN Kasir | `vlan 30` / `name KASIR` / `switchport access vlan 30` di switch lantai, renew, buka server POS 192.168.30.10 | Teknisi |
+| Buat Patch Cord Sendiri (Crimping) | Susun 8 kabel tiap ujung RJ45 (T568B, pin 1 di kiri), crimp, tes LAN tester (wiremap 1–8), pasang di meja, ping gateway. Crossover A–B tetap nyala (Auto MDI-X) tapi ditolak; urutan non-standar yang sama di kedua ujung lolos tester murah tapi split pair, link gagal | Magang |
+| Pasang Printer Jaringan Baru | Printer setelan pabrik 192.168.1.50: set IP statis di panel depan, tambah port TCP/IP di 2 PC, cetak halaman uji | Teknisi Junior |
+| Pasang Telepon IP di Meja | `power inline auto` + `switchport voice vlan 100` di port meja, telepon terdaftar ke ippbx, panggil 9000 | Teknisi Junior |
+| Buat Folder Bersama di NAS | Aktifkan SMB, buat shared folder dengan hak Baca/Tulis, `net use P:` dari 2 PC | Teknisi Junior |
+| Aktifkan DHCP Server di Linux | `dhcpd.conf` masih contoh bawaan Debian (layanan gagal start): tulis blok subnet, `dhcpd -t`, `systemctl restart isc-dhcp-server`, renew di PC, buka intranet | Teknisi |
+| Aktifkan Jalur Cadangan ISP2 | IP SLA + track ke gateway ISP1, route default ber-track, floating static AD 10 ke ISP2, NAT overload keluar Gi0/1; diuji dengan memutus ISP1 | Teknisi |
+
+**Hari kerja (siklus utama).** Pagi: satu surat kerja (dipilih dari jenis yang paling jarang/paling sering gagal kamu kerjakan). Siang: shift helpdesk. Sore: insiden, satu akar masalah dengan banyak pengguna terdampak (terbuka di Teknisi Junior). Lalu evaluasi harian Kak Rani dengan bonus XP untuk SLA penuh, bintang tinggi, dan rangkaian hari baik. Tiap hari SLA 3% lebih ketat (minimal 70%) dan shift makin banyak tiket. Mulai Teknisi Junior, sebagian tiket punya 2 akar masalah; mulai Teknisi bisa sampai 3.
 
 **Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
 
@@ -128,7 +136,7 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
 - Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
 - Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
-- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang → Teknisi Junior → Teknisi → Network Engineer tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
+- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang (0) → Teknisi Junior (800 XP) → Teknisi (2.500) → Network Engineer (5.000) → Senior Network Engineer (9.000) tersimpan di `localStorage` (`kotaNusantara.noc.v1`).
 
 ### Pengkabelan terstruktur (TIA-568)
 - Meja → patch cord → outlet dinding → kabel horizontal → patch panel di rak lantai → patch cord → port switch. Nomor outlet = nomor port patch panel (contoh `L2-07`); nomor port switch berbeda, seperti di gedung nyata. Tiap 4 outlet ada 1 outlet cadangan.

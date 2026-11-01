@@ -16,7 +16,8 @@ import { APS, AUTH, CLIENTS, servingAp, quality, heardAt, channelClean, overlap,
 import { HOTEL_ORIGIN, LEVELS, wx, wz } from '../data/city';
 import type { PcOS, PcEvent } from '../pcos/os';
 import { SwitchCli } from '../pcos/switchcli';
-import { EXT, DEVICES } from '../pcos/ext';
+import { EXT, EXT_C, DEVICES } from '../pcos/ext';
+import { judge, wiremap, WIRES, WIRE_CSS, type Cable, type Wire } from './crimp';
 import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
 import { Term } from '../pcos/term';
 import { nasPanel } from '../pcos/office';
@@ -63,7 +64,7 @@ export const FAULTS: Record<string, FaultDef> = {
 };
 
 // ---------------------------------------------------------------- contract templates
-export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap' | 'tutor';
+export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap' | 'tutor' | 'crimp' | `x_${string}`;
 interface TplDef { name: string; rank: number; xp: number; sla: number; cp: string; brief: string[] }
 export const TEMPLATES = {
   static: { name: 'Pasang IP Statis', rank: 0, xp: 120, sla: 420, cp: 'Fase E · Pengalamatan IPv4', brief: ['Beberapa PC butuh alamat tetap (mis. dipakai aplikasi absensi). Alamatnya sudah ditentukan di surat kerja.', 'Di PC: Network Connections › Properties › IPv4 › "Use the following IP address". Isi IP, subnet mask, gateway, DNS persis seperti surat kerja.', 'Uji dari PC itu: ping gateway lalu ping/buka situs. Alamat yang sudah dipakai perangkat lain akan bentrok.'] },
@@ -76,10 +77,12 @@ export const TEMPLATES = {
 TEMPLATES.ap = { name: 'Ganti AP Koridor yang Rusak', rank: 2, xp: 300, sla: 1200, cp: 'Fase F · Jaringan nirkabel', brief: ['Satu AP koridor di lantai hotel rusak dan sudah diturunkan. Tamu di kamar sekitarnya mengeluh sinyal lemah.', 'Ambil AP pengganti, patch cord, kabel console + laptop, dan Wi-Fi analyzer di Lemari Alat. Pasang AP di bracket plafon koridor [F].', 'Di rak IDF lantai itu: patch outlet AP ke port switch di surat kerja, lalu console: interface gi1/0/N › switchport access vlan 40 › power inline auto › no shutdown › write memory.', 'Di PC Kantor IT, buka NusaWLC (http://192.168.10.20): adopsi AP. Lalu survei: berdiri di bawah AP, nyalakan analyzer [R], pilih kanal 1/6/11 yang tidak dipakai AP yang terdengar kuat di situ.', 'Selesai kalau laptop kamar di surat kerja bisa internet dengan sinyal bagus.'] };
 
 TEMPLATES.tutor = { name: 'Hari Pertama: Sambungkan PC Workshop', rank: 0, xp: 150, sla: 900, cp: 'Fase E · Media transmisi & pengalamatan IP', brief: ['Selamat datang di tim IT Nusantara Tech! Tugas pertamamu: satu PC di Workshop TKJ belum tersambung ke jaringan.', 'Ambil alat di Lemari Alat (Workshop TKJ): LAN tester dan satu patch cord.', 'Di meja PC itu, cek fisik [C / tombol Cek]: pasang patch cord dari outlet dinding ke PC, lalu tes kabelnya dengan LAN tester.', 'Nyalakan PC [F / tombol Aksi], buka Command Prompt, ketik ipconfig: catat IPv4 Address dan Default Gateway.', 'Ping alamat Default Gateway. Kalau ada Reply, PC sudah tersambung dan pekerjaan selesai.'] };
+TEMPLATES.crimp = { name: 'Buat Patch Cord Sendiri (Crimping)', rank: 0, xp: 200, sla: 900, cp: 'Fase E · Media transmisi: pembuatan kabel UTP', brief: ['Stok patch cord pabrikan habis. Buat sendiri dari gulungan kabel UTP Cat6 dan konektor RJ45 di Lemari Alat (Workshop TKJ): tombol "Crimping".', 'Standar gedung ini T568B di kedua ujung (straight-through): putih-oranye, oranye, putih-hijau, biru, putih-biru, hijau, putih-coklat, coklat. Pin 1 di kiri saat klip konektor menghadap ke bawah.', 'Kupas jaket kira-kira 2 cm, luruskan dan urutkan kabel, potong rata kira-kira 1,3 cm, masukkan sampai ujung tembaga terlihat di ujung konektor, lalu crimp.', 'Tes dengan LAN tester sebelum dipasang: lampu 1 sampai 8 di unit utama dan remote harus menyala berurutan. Tester murah tidak bisa mendeteksi split pair, jadi urutan warna tetap harus standar.', 'Pasang kabelnya dari outlet ke PC [C], nyalakan PC dan uji ping ke gateway.'] };
 /** steps of the first-day tutorial job, tracked from what the player really does */
 interface Tut { tested: boolean; ipconfig: boolean; gw: string }
 
-export const RANKS = [{ xp: 0, name: 'Magang' }, { xp: 500, name: 'Teknisi Junior' }, { xp: 1500, name: 'Teknisi' }, { xp: 3000, name: 'Network Engineer' }];
+export const DAY_PHASES = [{ name: 'Pagi', what: 'satu surat kerja instalasi' }, { name: 'Siang', what: 'shift helpdesk, beberapa tiket' }, { name: 'Sore', what: 'insiden: satu akar masalah, banyak pengguna' }];
+export const RANKS = [{ xp: 0, name: 'Magang' }, { xp: 800, name: 'Teknisi Junior' }, { xp: 2500, name: 'Teknisi' }, { xp: 5000, name: 'Network Engineer' }, { xp: 9000, name: 'Senior Network Engineer' }];
 const PRIO = { Tinggi: 240, Sedang: 420, Rendah: 600 } as const;
 type Prio = keyof typeof PRIO;
 const WHO: Record<string, { who: string[]; prio: Prio[] }> = {
@@ -107,13 +110,14 @@ type Item = 'tester' | 'console' | 'laptop' | 'patch' | 'toner' | 'analyzer' | '
 const ITEM_NAME: Record<Item, string> = { toner: 'Toner generator + probe', tester: 'LAN tester', console: 'Kabel console USB–RJ45', laptop: 'Laptop teknisi', patch: 'Patch cord Cat6 (1 m)', analyzer: 'HP teknisi (Wi-Fi analyzer)', ap: 'AP pengganti NusaAP AX1800 (PoE)' };
 const apWorld = (ap: Ap) => ({ x: wx(HOTEL_ORIGIN[0] + ap.lx), z: wz(HOTEL_ORIGIN[1] + ap.lz), y: LEVELS[ap.level - 1].elev + LEVELS[ap.level - 1].h - 0.23 });
 
-interface Save { v: 1; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
+interface DayRun { n: number; phase: number; xp: number; stars: number; jobs: number; sla: number }
+interface Save { v: 1; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; days: number; streak: number; best: number; day: DayRun | null; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
 const KEY = 'kotaNusantara.noc.v1';
 const NOTES_KEY = 'kotaNusantara.notes.v1';
 function loadNotes(): { id: string; title: string; note: string; t: number }[] {
   try { const o = JSON.parse(localStorage.getItem(NOTES_KEY) ?? '[]'); return Array.isArray(o) ? o.filter(n => n && typeof n.id === 'string' && typeof n.note === 'string').map(n => ({ id: n.id, title: String(n.title ?? ''), note: n.note.slice(0, 800), t: Number(n.t) || 0 })).slice(-30) : []; } catch { return []; }
 }
-const fresh = (): Save => ({ v: 1, xp: 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, seen: [], mastery: {} });
+const fresh = (): Save => ({ v: 1, xp: 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, days: 0, streak: 0, best: 0, day: null, seen: [], mastery: {} });
 
 /** read the progress save defensively: an old/corrupt save from an earlier build must never break the game */
 function loadSave(): Save {
@@ -124,7 +128,9 @@ function loadSave(): Save {
     const o = JSON.parse(raw); const f = fresh();
     if (!o || typeof o !== 'object') throw new Error('bad');
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
-    for (const k of ['xp', 'shifts', 'closed', 'slaMet', 'seq', 'contracts', 'stars'] as const) f[k] = num(o[k]);
+    for (const k of ['xp', 'shifts', 'closed', 'slaMet', 'seq', 'contracts', 'stars', 'days', 'streak', 'best'] as const) f[k] = num(o[k]);
+    // a day in progress is not resumed after a reload (the network state it was built on is gone); it simply ends
+    f.day = null;
     const known = new Set<string>([...Object.keys(FAULTS), ...Object.keys(TEMPLATES)]);
     f.seen = Array.isArray(o.seen) ? o.seen.filter((x: unknown) => typeof x === 'string' && known.has(x)) : [];
     if (o.mastery && typeof o.mastery === 'object') for (const [k, v] of Object.entries(o.mastery)) { const m = v as { ok?: unknown; miss?: unknown }; if (known.has(k) && m && typeof m === 'object') f.mastery[k] = { ok: num(m.ok), miss: num(m.miss) }; }
@@ -152,6 +158,9 @@ export class Noc {
   private audio: AudioContext | null = null;
   private patchStock = 6;
   private noCord = new Set<string>();
+  /** cables the player crimped and carries (used before stock cords), and which crimped cable sits at which desk */
+  private cables: Cable[] = []; private cordOf = new Map<string, Cable>();
+  private useCord(pc: string) { const c = this.cables.shift(); if (c) { this.cordOf.set(pc, c); const a = adapterOf(pc); a.broken = !judge(c).works; } else this.cordOf.delete(pc); }
   private modal: HTMLElement | null = null;
   private cli: SwitchCli | null = null;
   private pendingReport: Job[] = [];
@@ -164,6 +173,8 @@ export class Noc {
   get active() { return this.mode !== 'idle'; }
 
   constructor(private pcos: PcOS, private pcs: PcInfo[], readonly rack: { x: number; z: number }, cabinet: { x: number; z: number } = rack, idfs: { id: string; level: number; x: number; y: number; z: number }[] = []) {
+    for (const [id, x] of Object.entries(EXT)) FAULTS[id] = { ...x.def, wired: false, ext: true };
+    for (const [id, c] of Object.entries(EXT_C)) (TEMPLATES as Record<string, TplDef>)[`x_${id}`] = { name: c.name, rank: c.rank, xp: c.xp, sla: c.sla, cp: c.cp, brief: c.brief };
     this.s = loadSave();
     this.CABINET = { name: 'CABINET', label: 'Lemari Alat · Workshop TKJ', x: cabinet.x, y: 1.0, z: cabinet.z, level: 1 };
     this.RACKP = { name: 'RACK', label: 'Rak MDF · Ruang Server L1', x: rack.x, y: 1.4, z: rack.z, level: 1 };
@@ -173,7 +184,6 @@ export class Noc {
     const prev = pcos.onEvent;
     pcos.onEvent = e => { prev?.(e); this.onPc(e); };
     for (const p of pcs) adapterOf(p.name);
-    for (const [id, x] of Object.entries(EXT)) FAULTS[id] = { ...x.def, wired: false, ext: true };
     this.tutEl = h('div'); this.tutEl.id = 'tut-hint'; document.body.append(this.tutEl);
   }
   private tutEl: HTMLElement;
@@ -214,6 +224,7 @@ export class Noc {
     const need: Item[] = [];
     const isC = j.kind === 'contract';
     if (j.faults.some(f => EDGE_F.includes(f))) { for (const it of ['console', 'laptop'] as Item[]) if (!this.inv[it as 'console']) need.push(it); return need; }
+    if (j.tpl === 'crimp') { if (!this.inv.tester) need.push('tester'); return need; }
     if (j.tut) { const pc = j.targets[0].pc.name; if (!this.inv.tester && !j.tut.tested) need.push('tester'); if (this.noCord.has(pc) && this.inv.patch < 1) need.push('patch'); return need; }
     if (isC && j.tpl === 'ap') {
       const ap = this.jobAp(j)!;
@@ -284,6 +295,9 @@ export class Noc {
     if (j.faults.some(f => EDGE_F.includes(f)) && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.faults.some(f => EDGE_F.includes(f)) && !j.faults.every(f => !EXT[f] || EXT[f].ok(j.targets[0].pc.name))) return 'Router edge R-EDGE di rak 1 ruang server L1 [F]: console';
     if (j.tut) { const st = this.tutStage(j); const pc = j.targets[0].pc.label; return st === 'tools' ? `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}` : st === 'cord' ? `${pc}: cek fisik [C], pasang patch cord outlet → PC` : st === 'test' ? `${pc}: cek fisik [C], tes kabel dengan LAN tester` : st === 'sit' ? `Nyalakan ${pc} [F]` : st === 'ipconfig' ? 'Command Prompt: ketik ipconfig' : st === 'ping' ? 'Command Prompt: ping alamat Default Gateway' : 'Selesai'; }
+    if (j.tpl === 'crimp' && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
+    if (j.tpl === 'crimp' && j.targets.some(t => this.noCord.has(t.pc.name)) && this.inv.patch < 1) return 'Lemari Alat › Crimping: buat patch cord T568B dan tes';
+    if (j.tpl === 'crimp' && j.targets.some(t => this.noCord.has(t.pc.name))) { const t = j.targets.find(x => this.noCord.has(x.pc.name))!; return `${t.pc.label}: pasang kabel buatanmu dari outlet ke PC [C]`; }
     if (j.kind === 'contract' && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.kind === 'contract' && j.tpl === 'ap') {
       const ap = this.jobAp(j)!, p = apPort(ap);
@@ -305,7 +319,7 @@ export class Noc {
     const t = j.targets.find(x => !x.ok);
     if (t) return `${t.pc.label}: ${t.note || 'belum sesuai surat kerja'}`;
     const u = j.targets.find(x => !x.tested);
-    const xh = j.faults.map(f => EXT[f]?.testHint).find(Boolean);
+    const xh = String(j.tpl).startsWith('x_') ? EXT_C[String(j.tpl).slice(2)]?.testHint : j.faults.map(f => EXT[f]?.testHint).find(Boolean);
     if (u) return `Uji dari ${u.pc.label}: ${u.mode === 'browse' ? `buka ${u.browse}` : xh ?? 'ping / buka situs'}`;
     return 'Selesai';
   }
@@ -324,7 +338,7 @@ export class Noc {
     const r = mulberry(seed);
     const env = this.pickEnv(tpl, r);
     const t = TEMPLATES[tpl];
-    const lines: Record<TplId, string> = {
+    const lines: Record<string, string> = {
       static: `${env.label}: beberapa PC butuh alamat IP tetap.`,
       desk: `${env.label}: meja baru belum tersambung ke jaringan.`,
       dns: `${env.label}: server aplikasi baru perlu nama domain lokal.`,
@@ -332,13 +346,18 @@ export class Noc {
       vlan: 'Kantor: beberapa meja dipindah ke jaringan kasir (VLAN 30).',
       ap: 'Hotel: satu AP koridor rusak, tamu di kamar sekitarnya mengeluh sinyal lemah.',
       tutor: 'Workshop TKJ: satu PC praktik belum tersambung. Pekerjaan pertama untuk teknisi baru.',
+      crimp: 'Workshop TKJ: stok patch cord habis, PC praktik harus disambung dengan kabel buatan sendiri.',
+      x_printer: 'Kantor: printer jaringan baru datang, masih setelan pabrik.', x_voice: 'Kantor: telepon IP baru di meja belum menyala.', x_share: 'Kantor: divisi minta folder bersama baru di NAS.',
+      x_dhcpsrv: 'Lab TKJ: server Linux diinstal ulang, DHCP-nya belum jalan.', x_failover: 'Gedung: jalur ISP2 baru dipasang, belum jadi cadangan otomatis.',
     };
-    return { tpl, seed, title: t.name, lines: [lines[tpl]], envLabel: env.label };
+    return { tpl, seed, title: t.name, lines: [lines[tpl] ?? t.brief[0]], envLabel: env.label };
   }
   private pickEnv(tpl: TplId, r: () => number): Env {
     if (tpl === 'vlan') return ENVS.office;
     if (tpl === 'ap') return ENVS.guest;
     if (tpl === 'tutor') return ENVS.lab;
+    if (tpl === 'crimp') return ENVS.lab;
+    if (tpl.startsWith('x_')) return tpl === 'x_dhcpsrv' ? ENVS.lab : tpl === 'x_failover' ? (r() < 0.5 ? ENVS.lab : ENVS.office) : ENVS.office;
     if (tpl === 'renum') return ENVS.office;   // lab DHCP/DNS now live on the Linux server srv-nusa
     if (tpl === 'desk') return r() < 0.5 ? ENVS.lab : ENVS.office;
     return r() < 0.5 ? ENVS.lab : ENVS.office;
@@ -380,6 +399,22 @@ export class Noc {
         const a = adapterOf(pc.name); a.cable = false; this.noCord.add(pc.name); bounce(a);
         j.targets.push(this.target(pc, 'dhcp')); j.tut = { tested: false, ipconfig: false, gw: env.gateway }; j.who = 'Kak Rani (pembimbing)';
         j.order = [`${pc.label} (outlet ${outletOf(pc.name)}) belum tersambung: kabel dari outlet dinding ke PC belum dipasang.`, 'Ambil LAN tester dan 1 patch cord di Lemari Alat (Workshop TKJ).', 'Pasang patch cord dan tes kabelnya [C], nyalakan PC [F], lalu Command Prompt: ipconfig dan ping Default Gateway.'];
+      }
+    } else if (tpl === 'crimp') {
+      const cab = this.CABINET;
+      const cand = this.wired().filter(p => p.level === 1 && envOf(p.name) === ENVS.lab && adapterOf(p.name).dhcp && healthy(adapterOf(p.name))).sort((a, b) => Math.hypot(a.x - cab.x, a.z - cab.z) - Math.hypot(b.x - cab.x, b.z - cab.z));
+      const n = rk === 0 ? 1 : 2;
+      for (const pc of cand.slice(0, n)) { const a = adapterOf(pc.name); a.cable = false; this.noCord.add(pc.name); this.cordOf.delete(pc.name); bounce(a); j.targets.push(this.target(pc, 'dhcp')); }
+      j.order = [`${j.targets.map(t => `${t.pc.label} (outlet ${outletOf(t.pc.name)})`).join(' dan ')}: belum ada patch cord.`, `Buat ${j.targets.length} patch cord Cat6 straight-through T568B di Lemari Alat › Crimping, lalu tes dengan LAN tester.`, 'Pasang dari outlet ke PC [C], nyalakan PC, ipconfig, ping gateway.'];
+    } else if (tpl.startsWith('x_')) {
+      const C = EXT_C[tpl.slice(2)];
+      const cand = shuffle(this.pcs.filter(p => healthy(adapterOf(p.name)) && envOf(p.name).id !== 'none'), r).map(p => p.name);
+      const pcs = C ? C.pick(cand) : [];
+      if (pcs.length) {
+        const lbl = (n: string) => this.pcLabel(n);
+        j.order = C.setup(pcs).map(x => x.replace('{PCS}', pcs.map(lbl).join(', ')).replace('{PC}', lbl(pcs[0])));
+        for (const n of pcs) j.targets.push(this.target(this.pcs.find(p => p.name === n)!, 'any'));
+        j.envId = envOf(pcs[0]).id;
       }
     } else if (tpl === 'static') {
       const n = rk === 0 ? 2 : 3;
@@ -465,7 +500,8 @@ export class Noc {
       j.order = [`Pindahkan ke VLAN 30 "KASIR" di ${j.sw}: ${j.targets.map(t => `${t.pc.label} (${portName(portOf(t.pc.name)!.port.n)})`).join(', ')}`, 'PC harus dapat 192.168.30.x dari router kasir dan bisa membuka server POS 192.168.30.10.', 'Simpan konfigurasi switch setelah selesai.'];
     }
     if (!j.targets.length) { this.toast('Tidak ada PC yang cocok untuk pekerjaan ini sekarang.'); return null; }
-    this.patchStock = 6;
+    this.patchStock = tpl === 'crimp' ? 0 : 6;
+    this.jobs = [j]; this.dayPressure();
     j.snap = this.snapshot();
     this.jobs = [j]; this.mode = 'contract'; this.trackedId = j.id;
     this.offers = [];
@@ -480,7 +516,7 @@ export class Noc {
     if (this.mode === 'shift') { this.openBoard(); return; }
     if (this.mode !== 'idle') { this.toast('Selesaikan surat kerja yang sedang berjalan dulu.'); return; }
     const rk = this.rankIndex();
-    const n = force?.length ?? Math.min(5, 3 + rk);
+    const n = force?.length ?? Math.min(6, 3 + Math.min(rk, 2) + Math.floor((this.s.day?.n ?? 1) / 4));
     this.shift = ++this.s.shifts; this.mode = 'shift'; this.jobs = [];
     const used = new Set<string>(), busySw = new Set<string>();
     for (let i = 0; i < n; i++) {
@@ -497,7 +533,9 @@ export class Noc {
       const f = force ? force[i] : this.pickFault(pc.name, rk, rand, undefined, busySw.has(swn));
       if (swn) busySw.add(swn);
       const faults: FaultId[] = [f];
-      if (!force && rk >= 2 && rand() < 0.35) { const g = this.pickFault(pc.name, rk, rand, f); if (g !== f && g !== 'disabled' && f !== 'disabled' && FAULTS[g].wired === FAULTS[f].wired) faults.push(g); }
+      const dn = this.s.day?.n ?? 0;
+      const extra = force ? 0 : rk === 0 ? 0 : rk === 1 ? (rand() < 0.2 + Math.min(0.15, dn * 0.02) ? 1 : 0) : (rand() < 0.4 + Math.min(0.2, dn * 0.02) ? (rand() < 0.35 ? 2 : 1) : 0);
+      for (let k = 0; k < extra; k++) { const g = this.pickFault(pc.name, rk, rand, f); if (!faults.includes(g) && g !== 'disabled' && f !== 'disabled' && !EXT[g] && !EXT[f] && FAULTS[g].wired === FAULTS[f].wired && !(faults.includes('cable') && g === 'cablebad') && !(faults.includes('cablebad') && g === 'cable')) faults.push(g); }
       const wi = Math.floor(rand() * WHO[env.id].who.length);
       const prio = WHO[env.id].prio[wi];
       const t = this.newJob('ticket', f, FAULTS[f].symptom, WHO[env.id].who[wi], prio, PRIO[prio], env.id);
@@ -513,6 +551,7 @@ export class Noc {
       this.jobs.push(t);
     }
     this.patchStock = 6;
+    this.dayPressure();
     this.voiceComplaints();
     const snap = this.snapshot(); for (const j of this.jobs) j.snap = snap;
     this.trackedId = this.jobs[0]?.id ?? null;
@@ -641,6 +680,22 @@ export class Noc {
       if (!ok) t.note = !hOk ? 'belum normal' : 'akar masalah belum beres';
       return ok;
     }
+    if (String(j.tpl).startsWith('x_')) {
+      const C = EXT_C[String(j.tpl).slice(2)]; if (!C) return false;
+      const hOk = C.health === false ? true : good, ok = hOk && C.ok(t.pc.name);
+      if (!ok) t.note = !hOk ? 'belum terhubung normal' : (C.why?.(t.pc.name) || 'konfigurasi belum sesuai surat');
+      return ok;
+    }
+    if (j.tpl === 'crimp') {
+      const c = this.cordOf.get(t.pc.name);
+      if (this.noCord.has(t.pc.name)) { t.note = 'patch cord belum dipasang'; return false; }
+      if (!c) { t.note = 'yang terpasang bukan kabel buatanmu'; return false; }
+      const v = judge(c);
+      if (!v.standard) { t.note = v.works ? 'kabel menyala tapi bukan T568B di kedua ujung: buat ulang' : 'kabel buatanmu tidak bisa dipakai: buat ulang'; return false; }
+      if (!c.tested) { t.note = 'kabel belum dites dengan LAN tester'; return false; }
+      if (!good) { t.note = 'belum terhubung (ipconfig /renew)'; return false; }
+      return true;
+    }
     if (j.tut) {
       if (this.noCord.has(t.pc.name)) { t.note = 'patch cord belum dipasang'; return false; }
       if (!j.tut.tested) { t.note = 'kabel belum dites dengan LAN tester'; return false; }
@@ -723,7 +778,8 @@ export class Noc {
     for (const j of this.openJobs()) for (const t of j.targets) {
       if (t.pc.name !== e.pc) continue;
       const xs = j.faults.filter(f => EXT[f]?.tested).map(f => EXT[f]);
-      if (xs.length ? !xs.every(x => x.tested!(e, t.pc.name)) : !base) continue;
+      const xc = String(j.tpl).startsWith('x_') ? EXT_C[String(j.tpl).slice(2)] : null;
+      if (xc?.tested ? !xc.tested(e, t.pc.name) : xs.length ? !xs.every(x => x.tested!(e, t.pc.name)) : !base) continue;
       if (j.tut && !(e.type === 'ping' && e.detail?.ok && e.detail?.target === live(adapterOf(e.pc)).gw)) continue;
       if (t.mode === 'browse') { const host = (() => { try { return new URL(e.detail?.url ?? '').hostname; } catch { return ''; } })(); const short = t.browse!.split('.')[0]; if (e.type !== 'browse' || (host !== t.browse && host !== short)) continue; }
       if (this.targetOk(j, t)) { t.ok = true; t.tested = true; }
@@ -782,12 +838,57 @@ export class Noc {
     if (this.jobs.some(j => j.status !== 'closed' && j.tpl === 'ap') || this.inv.ap) row('ap', this.inv.ap, () => { if (this.inv.ap < 1) this.inv.ap++; }, () => {}, `· dibawa ${this.inv.ap}`);
     row('patch', this.inv.patch, () => { if (this.patchStock > 0) { this.patchStock--; this.inv.patch++; } else this.toast('Stok patch cord habis.'); }, () => {}, `· dibawa ${this.inv.patch} · stok ${this.patchStock}`);
     box.append(list);
+    const cr = h('div', 'inv-row', `<span><b>Meja crimping</b> · kabel UTP Cat6, konektor RJ45, tang crimping${this.cables.length ? ` · ${this.cables.length} kabel buatanmu di tas` : ''}</span>`);
+    cr.append(btn('Crimping', () => this.openCrimpBench(), this.jobs.some(x => x.status !== 'closed' && x.tpl === 'crimp') ? 'btn pri' : 'btn', 'crimp-open')); list.append(cr);
     const j = this.tracked();
     if (j) { const n = this.needs(j); box.append(h('p', n.length ? 'msg warn' : 'msg', n.length ? `Untuk ${j.id} masih perlu: ${n.map(i => ITEM_NAME[i]).join(', ')}` : `Alat untuk ${j.id} sudah lengkap.`)); }
     const rw = h('div', 'row'); rw.append(btn('Tutup [Esc]', () => this.closeModal())); box.append(rw);
     this.show(box);
   }
 
+  /** crimping bench: lay the eight wires of each plug, crimp, test with the LAN tester, keep or bin the cable */
+  private crimpSt: { a: Wire[]; b: Wire[]; end: 'a' | 'b' | 'done'; tested: boolean; pool: Wire[] } | null = null;
+  openCrimpBench(msg = '') {
+    const st = this.crimpSt ??= { a: [], b: [], end: 'a', tested: false, pool: shuffle([...WIRES]) };
+    const box = h('div', 'noc-box crimp');
+    box.append(h('h2', '', 'Meja Crimping · Patch Cord Cat6'));
+    const sw = (w: Wire) => `<i class="wire" style="background:${WIRE_CSS[w]}" title="${w}"></i>`;
+    const plug = (ws: Wire[], label: string, cur: boolean) => `<div class="plug ${cur ? 'cur' : ''}"><small>${label}</small><div class="pins">${[0, 1, 2, 3, 4, 5, 6, 7].map(i => `<div class="pin">${ws[i] ? sw(ws[i]) : '<i class="wire empty"></i>'}<b>${i + 1}</b></div>`).join('')}</div></div>`;
+    box.append(h('p', 'how', 'Konektor dilihat dari depan, klip menghadap ke bawah: pin 1 di kiri. Klik warna kabel berurutan dari pin 1 sampai 8.'));
+    box.append(h('div', 'plugs', plug(st.a, 'Ujung A', st.end === 'a') + plug(st.b, 'Ujung B', st.end === 'b')));
+    if (msg) box.append(h('p', 'msg', msg));
+    const out = h('div', 'tester-out');
+    if (st.end !== 'done') {
+      const cur = st[st.end];
+      const pal = h('div', 'row left wires');
+      for (const w of st.pool) { const b = btn('', () => { if (cur.length < 8 && !cur.includes(w)) cur.push(w); this.openCrimpBench(); }, 'btn wire-btn', `wire-${w}`); b.innerHTML = `${sw(w)}<span>${w}</span>`; b.disabled = cur.includes(w); pal.append(b); }
+      box.append(pal);
+      const rw = h('div', 'row left');
+      rw.append(btn('Hapus terakhir', () => { cur.pop(); this.openCrimpBench(); }, 'btn', 'crimp-undo'));
+      rw.append(btn('Ulang ujung ini', () => { cur.length = 0; this.openCrimpBench(); }, 'btn', 'crimp-clear'));
+      if (cur.length === 8) rw.append(btn(`Potong rata & crimp ujung ${st.end.toUpperCase()}`, () => { st.end = st.end === 'a' ? 'b' : 'done'; this.logAll(`Crimping: ujung ${st.end === 'b' ? 'A' : 'B'} di-crimp (${cur.join(', ')})`); this.openCrimpBench(st.end === 'b' ? 'Ujung A sudah di-crimp. Sekarang ujung B.' : 'Kedua ujung sudah di-crimp. Tes dulu sebelum dipakai.'); }, 'btn pri', 'crimp-do'));
+      box.append(rw);
+    } else {
+      const rw = h('div', 'row left');
+      rw.append(btn('Tes dengan LAN tester', () => {
+        if (!this.inv.tester) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa LAN tester. Ambil dulu di lemari ini.</p>'; return; }
+        st.tested = true;
+        const map = wiremap({ a: st.a, b: st.b, tested: true });
+        out.innerHTML = `<div class="tester"><div><small>Unit utama</small>${[1, 2, 3, 4, 5, 6, 7, 8].map(n => `<i class="tl on" style="animation-delay:${n * 0.18}s">${n}</i>`).join('')}</div><div><small>Unit remote</small>${map.map((q, i) => `<i class="tl ${q ? 'on' : ''}" style="animation-delay:${(i + 1) * 0.18}s">${q || '-'}</i>`).join('')}</div></div><p>${map.every((q, i) => q === i + 1) ? 'Lampu remote menyala 1 sampai 8 berurutan, sama dengan unit utama.' : `Urutan lampu remote tidak sama: ${map.map((q, i) => (q === i + 1 ? '' : `pin ${i + 1} → ${q || 'putus'}`)).filter(Boolean).join(', ')}.`}</p>`;
+        this.logAll(`Crimping: tes LAN tester → ${map.join('-')}`);
+      }, 'btn', 'crimp-test'));
+      rw.append(btn('Simpan kabel ke tas', () => {
+        this.cables.push({ a: [...st.a], b: [...st.b], tested: st.tested }); this.inv.patch++;
+        this.crimpSt = null; this.logAll('Crimping: patch cord buatan sendiri disimpan');
+        this.openCrimpBench('Kabel masuk tas. Pasang di meja PC lewat cek fisik [C].');
+      }, 'btn pri', 'crimp-keep'));
+      rw.append(btn('Buang & buat ulang', () => { const jj = this.jobs.find(x => x.status !== 'closed' && x.tpl === 'crimp'); if (jj) jj.wrong++; this.crimpSt = null; this.openCrimpBench('Kabel dibuang (konektor RJ45 terbuang).'); }, 'btn', 'crimp-bin'));
+      box.append(rw);
+    }
+    box.append(out);
+    const rw2 = h('div', 'row'); rw2.append(btn('Kembali ke lemari', () => this.openCabinet())); rw2.append(btn('Tutup [Esc]', () => this.closeModal())); box.append(rw2);
+    this.show(box);
+  }
   openPhysical(pc: string) {
     const a = adapterOf(pc), p = portOf(pc);
     const box = h('div', 'noc-box');
@@ -809,7 +910,7 @@ export class Noc {
     const job = this.openJobs().find(j => j.targets.some(t => t.pc.name === pc));
     if (!cord) acts.append(btn('Pasang patch cord', () => {
       if (this.inv.patch < 1) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa patch cord. Ambil di Lemari Alat (Workshop TKJ).</p>'; return; }
-      this.inv.patch--; this.noCord.delete(pc); a.cable = true; a.broken = false; bounce(a);
+      this.inv.patch--; this.noCord.delete(pc); a.cable = true; a.broken = false; this.useCord(pc); bounce(a);
       this.logAll(`${this.pcLabel(pc)}: patch cord dipasang outlet ${outletOf(pc)} → PC`, pc); this.openPhysical(pc);
     }, 'btn pri', 'phys-install'));
     if (cord) acts.append(btn('Cabut & colok ulang konektor', () => {
@@ -819,7 +920,9 @@ export class Noc {
     }, 'btn', 'phys-reseat'));
     if (cord) acts.append(btn('Tes kabel (LAN tester)', () => {
       if (!this.inv.tester) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa LAN tester. Ambil di Lemari Alat (Workshop TKJ).</p>'; return; }
-      const bad = a.broken ? [3, 6] : [];
+      const cc = this.cordOf.get(pc); const cmap = cc ? wiremap(cc) : null;
+      const bad = cmap ? cmap.map((q, i) => (q === i + 1 ? 0 : i + 1)).filter(Boolean) : a.broken ? [3, 6] : [];
+      if (cc) cc.tested = true;
       const leds = (side: string) => [1, 2, 3, 4, 5, 6, 7, 8].map(n => `<i class="tl ${bad.includes(n) ? '' : 'on'}" style="animation-delay:${n * 0.18}s">${n}</i>`).join('');
       out.innerHTML = `<div class="tester"><div><small>Unit utama</small>${leds('m')}</div><div><small>Unit remote</small>${leds('r')}</div></div><p>${a.broken ? 'Lampu 3 dan 6 tidak menyala: pasangan hijau putus. Patch cord rusak, ganti yang baru.' : 'Lampu 1–8 menyala berurutan di kedua unit: kabel baik (straight T568B).'}</p>`;
       this.logAll(`${this.pcLabel(pc)}: tes LAN tester → ${a.broken ? 'pin 3 & 6 putus' : 'kabel baik'}`, pc);
@@ -828,7 +931,7 @@ export class Noc {
     if (cord) acts.append(btn('Ganti patch cord', () => {
       if (this.inv.patch < 1) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa patch cord cadangan. Ambil di Lemari Alat.</p>'; return; }
       const wasted = !a.broken;
-      this.inv.patch--; a.broken = false; a.cable = true; bounce(a);
+      this.inv.patch--; a.broken = false; a.cable = true; this.useCord(pc); bounce(a);
       if (wasted && job) job.wrong++;
       this.logAll(`${this.pcLabel(pc)}: patch cord diganti${wasted ? ' (kabel lama sebenarnya baik)' : ''}`, pc);
       this.openPhysical(pc); this.toast(wasted ? 'Patch cord diganti, padahal yang lama baik. Lain kali tes dulu.' : 'Patch cord baru terpasang. LED link menyala.', 3500);
@@ -1052,6 +1155,7 @@ export class Noc {
       this.jobs.push(f);
     }
     for (const f of j.faults) EXT[f]?.restore?.();
+    if (String(j.tpl).startsWith('x_')) EXT_C[String(j.tpl).slice(2)]?.restore?.();
     this.pendingReport.push(j);
     if (this.trackedId === j.id) this.trackedId = this.openJobs()[0]?.id ?? null;
     this.toast(`${j.id} terverifikasi. Laporan kerja dibuat otomatis.`, 3200);
@@ -1294,12 +1398,18 @@ export class Noc {
       box.append(h('p', 'how', 'Ikuti penanda ke lokasi berikutnya. Perbaiki di PC (Jendela 11: CMD, Network Connections, browser ke router), di kabel [C], atau di rak switch [F]. Pekerjaan selesai saat jaringannya benar-benar normal <b>dan</b> kamu mengujinya dari PC itu.'));
       if (this.mode === 'contract') { const rw = h('div', 'row left'); rw.append(btn('Batalkan surat kerja', () => this.abandon(), 'btn', 'abandon')); box.append(rw); }
     } else {
+      const d = this.s.day, nn = d ? d.n : this.s.days + 1;
+      const dp = h('div', 'daybox');
+      dp.append(h('div', 'day-h', `<b>Hari Kerja ${nn}</b><small>${this.s.days} hari selesai · rangkaian ${this.s.streak} · SLA ${Math.round(Math.max(0.7, 1 - (nn - 1) * 0.03) * 100)}%</small>`));
+      dp.append(h('ol', 'day-steps', DAY_PHASES.map((p, i) => `<li class="${d && i < d.phase ? 'done' : d && i === d.phase ? 'cur' : ''} ${i === 2 && rk < 1 ? 'lock' : ''}"><b>${p.name}</b><small>${i === 2 && rk < 1 ? 'terbuka di Teknisi Junior' : p.what}</small></li>`).join('')));
+      const dr = h('div', 'row left'); dr.append(d ? btn(`Lanjut: ${DAY_PHASES[d.phase].name}`, () => this.nextPhase(), 'btn pri', 'day-continue') : btn(`Mulai Hari ${nn}`, () => this.startDay(), 'btn pri', 'start-day'));
+      dp.append(dr); box.append(dp);
       this.ensureOffers();
-      box.append(h('h3', '', 'Surat kerja tersedia'));
+      box.append(h('h3', '', d ? 'Kerja bebas (setelah hari ini selesai)' : 'Kerja bebas · surat kerja tersedia'));
       const grid = h('div', 'offers');
       this.offers.forEach((o, i) => {
         const c = h('div', 'offer', `<b>${TEMPLATES[o.tpl].name}</b><small>${TEMPLATES[o.tpl].cp} · SLA ${Math.round(TEMPLATES[o.tpl].sla / 60)} menit · ${TEMPLATES[o.tpl].xp} XP</small><p>${esc(o.lines[0])}</p>`);
-        c.append(btn('Ambil', () => { this.closeModal(); this.acceptContract(o.tpl, o.seed); }, 'btn pri', `offer-${i}`));
+        const ob = btn('Ambil', () => { this.closeModal(); this.acceptContract(o.tpl, o.seed); }, 'btn', `offer-${i}`); ob.disabled = !!this.s.day; c.append(ob);
         grid.append(c);
       });
       box.append(grid);
@@ -1309,7 +1419,7 @@ export class Noc {
       box.append(h('p', 'how', `Satu shift = ${Math.min(5, 3 + rk)} tiket gangguan acak di PC gedung, masing-masing dengan SLA. Gangguan yang sering lambat kamu tangani akan lebih sering muncul.`));
     }
     const row = h('div', 'row');
-    if (this.mode === 'idle') row.append(btn('Mulai Shift', () => this.startShift(), 'btn', 'start-shift'));
+    if (this.mode === 'idle' && !this.s.day) row.append(btn('Mulai Shift', () => this.startShift(), 'btn', 'start-shift'));
     row.append(btn('Tutup [Esc]', () => this.closeModal()));
     box.append(row);
     box.classList.add('mon'); box.prepend(h('div', 'mon-bar', `<span>NOC-MON-01 · ${this.mode === 'idle' ? 'SURAT KERJA' : this.mode === 'shift' ? `SHIFT ${this.shift}` : 'KONTRAK'}</span><span>${this.openJobs().length} terbuka</span>`));
@@ -1350,6 +1460,7 @@ export class Noc {
   }
   private abandon() {
     for (const j of this.openJobs()) j.status = 'closed';
+    if (this.s.day) { this.s.day = null; this.s.streak = 0; this.save(); }
     this.mode = 'idle'; this.trackedId = null; this.jobs = [];
     this.openBoard('Surat kerja dibatalkan. Perubahan yang sudah kamu buat di jaringan tetap ada.');
   }
@@ -1404,7 +1515,7 @@ export class Noc {
     box.append(h('p', '', `<b>+${j.xp} XP</b> · total ${this.s.xp} XP`));
     if (up) box.append(h('p', 'msg', `Naik pangkat: <b>${this.rank()}</b>! Surat kerja dan jenis gangguan baru terbuka.`));
     const row = h('div', 'row');
-    const allDone = this.jobs.every(x => x.status === 'closed');
+    const allDone = this.jobs.every(x => x.status === 'closed') && !this.pendingReport.length;   // later reports still queued: show them first
     row.append(btn(allDone ? (this.mode === 'shift' ? 'Lihat rekap shift' : 'Kembali ke papan kerja') : 'Lanjut', () => (allDone ? this.endWork() : this.closeModal()), 'btn pri', 'report-ok'));
     box.append(row);
     this.show(box);
@@ -1412,8 +1523,64 @@ export class Noc {
   private endWork() {
     const xp = this.jobs.reduce((a, t) => a + (t.xp ?? 0), 0), st = this.jobs.reduce((a, t) => a + (t.stars ?? 0), 0);
     const msg = this.mode === 'shift' ? `Shift ${this.shift} selesai: ${this.jobs.length} tiket, ${this.jobs.filter(t => t.slaMet).length} tepat SLA, ${st} bintang, +${xp} XP.` : `Surat kerja selesai: ${st} bintang, +${xp} XP. Ambil surat kerja berikutnya atau mulai shift.`;
+    const d = this.s.day, nj = this.jobs.length;
+    if (d) { d.xp += xp; d.stars += st; d.jobs += this.jobs.length; d.sla += this.jobs.filter(t => t.slaMet).length; d.phase++; }
     this.mode = 'idle'; this.trackedId = null; this.jobs = [];
-    this.openBoard(msg);
+    if (d && (d.phase >= 3 || (d.phase === 2 && this.rankIndex() < 1))) { this.endDay(); return; }
+    this.save();
+    this.openBoard(d ? `${DAY_PHASES[d.phase - 1].name} selesai: ${nj} pekerjaan, ${st} bintang, +${xp} XP. Lanjut ke ${DAY_PHASES[d.phase].name.toLowerCase()}.` : msg);
+  }
+  // ---------------------------------------------------------------- work days: morning order, afternoon shift, late incident, evaluation
+  get day() { return this.s.day; }
+  startDay() {
+    if (this.mode !== 'idle') { this.toast('Selesaikan pekerjaan yang sedang berjalan dulu.'); return; }
+    this.s.day = { n: this.s.days + 1, phase: 0, xp: 0, stars: 0, jobs: 0, sla: 0 }; this.save();
+    this.nextPhase();
+  }
+  nextPhase() {
+    const d = this.s.day; if (!d || this.mode !== 'idle') return;
+    const rk = this.rankIndex();
+    if (d.phase === 0) {
+      // the morning order: the open template this technician has done least (and worst), never the tutorial
+      const ids = (Object.keys(TEMPLATES) as TplId[]).filter(t => TEMPLATES[t].rank <= rk && t !== 'tutor');
+      const score = (t: string) => { const m = this.s.mastery[t] ?? { ok: 0, miss: 0 }; return m.ok - m.miss * 2 + Math.random() * 1.5; };
+      const order = ids.sort((a, b) => score(a) - score(b));
+      for (const t of order) { if (this.acceptContract(t)) return; }
+      d.phase = 1;
+    }
+    if (d.phase === 1) { this.startShift(); return; }
+    if (d.phase === 2) {
+      // a building-wide incident: one root cause, many users. Opens at Teknisi Junior.
+      const pool: FaultId[] = rk >= 2 ? ['uplink', 'loop', 'isp1', 'nat', 'dhcpscope', 'srvdown'] : ['srvdown', 'patch', 'zone'];
+      const list = shuffle(pool.filter(f => FAULTS[f]));
+      for (const f of list) { this.startShift(Math.random, [f]); if (this.jobs.length) { for (const j of this.jobs) { j.title = `INSIDEN · ${j.title}`; j.prio = 'Tinggi'; } this.save(); this.openBoard(`Insiden sore hari ${d.n}: banyak pengguna terdampak satu akar masalah. Prioritas tinggi.`); return; } this.mode = 'idle'; }
+      this.endDay();
+    }
+  }
+  private dayPressure() {
+    const d = this.s.day; if (!d) return;
+    const k = Math.max(0.7, 1 - (d.n - 1) * 0.03);
+    for (const j of this.jobs) if (!j.reported) j.sla = Math.round(j.sla * k);
+  }
+  private endDay() {
+    const d = this.s.day; if (!d) return;
+    const allSla = d.jobs > 0 && d.sla === d.jobs;
+    const avg = d.jobs ? d.stars / d.jobs : 0;
+    this.s.streak = avg >= 2 ? this.s.streak + 1 : 0;
+    const bonus = Math.round((allSla ? 60 + d.n * 10 : 0) + (avg >= 2.5 ? 40 : 0) + Math.min(5, this.s.streak) * 15);
+    const before = this.rankIndex();
+    this.s.xp += bonus; this.s.days = d.n; this.s.best = Math.max(this.s.best, Math.round(avg * 10));
+    this.s.day = null; this.save();
+    const box = h('div', 'noc-box paper');
+    box.append(h('div', 'pp-head', `<div><b>NUSANTARA TECH</b><small>Evaluasi harian supervisor</small></div><div class="pp-no"><small>HARI KERJA</small><b>${d.n}</b></div>`));
+    box.append(h('h2', '', `Evaluasi Hari ${d.n}`));
+    box.append(h('table', 'pp-fields', `<tr><th>Pekerjaan selesai</th><td class="mono">${d.jobs}</td><th>Tepat SLA</th><td class="mono">${d.sla}/${d.jobs}</td></tr><tr><th>Rata-rata bintang</th><td class="mono">${avg.toFixed(1)}</td><th>XP hari ini</th><td class="mono">${d.xp}</td></tr><tr><th>Bonus harian</th><td class="mono">+${bonus}</td><th>Rangkaian hari baik</th><td class="mono">${this.s.streak}</td></tr>`));
+    const note = avg >= 2.5 && allSla ? 'Kerja rapi dan cepat. Besok beban dan SLA lebih ketat.' : avg >= 2 ? 'Cukup baik. Perhatikan SLA dan jangan sampai ada perangkat lain ikut putus.' : 'Hari yang berat. Baca laporan kerja tadi: apa yang memperlambat diagnosis?';
+    box.append(h('div', 'pp-sec', `<small>CATATAN KAK RANI</small><blockquote>${note}</blockquote>`));
+    if (this.rankIndex() > before) box.append(h('p', 'msg', `Naik pangkat: <b>${this.rank()}</b>!`));
+    box.append(h('div', 'pp-sign', `<div><small>Supervisor</small><b>Kak Rani</b><span>Supervisor NOC</span></div><div><small>Teknisi</small><b>${esc(this.rank())}</b><span>${this.s.xp} XP</span></div><i class="stamp done">HARI ${d.n}</i>`));
+    const rw = h('div', 'row'); rw.append(btn('Mulai hari berikutnya', () => { this.closeModal(); this.startDay(); }, 'btn pri', 'day-next')); rw.append(btn('Ke papan kerja', () => this.openBoard())); box.append(rw);
+    this.show(box);
   }
 }
 

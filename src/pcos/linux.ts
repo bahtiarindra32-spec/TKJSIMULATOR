@@ -4,7 +4,7 @@
 // serves http://intranet.lab.smk.local, and sshd lets a PC log in. Config is edited as text files.
 import { ENVS, HOOKS, ADAPTERS, envOf, adapterOf, bounce, live, ping, routerAnswer, PUBLIC_DNS, INTERNET, parseIp, ipStr, networkOf, parseMask, type Adapter } from './net';
 import { prefixToMask } from '../game/missionLogic';
-import { EXT } from './ext';
+import { EXT, EXT_C } from './ext';
 import type { Shell, TermIO } from './term';
 
 export const SRV = { ip: '192.168.10.5', name: 'srv-nusa', zone: 'lab.smk.local', user: 'teknisi', pass: 'smkbisa', power: true, cable: true };
@@ -320,5 +320,52 @@ EXT.dhcpscope = {
     return v === 'range' ? 'range di dhcpd.conf ditulis 192.168.11.100–199 (di luar subnet) sehingga isc-dhcp-server gagal start → range dikembalikan ke 192.168.10.x, layanan di-restart, klien renew' : 'option routers di dhcpd.conf 192.168.10.254 (bukan router) → dikembalikan ke 192.168.10.1, layanan di-restart, klien ipconfig /renew';
   },
   ok: () => { const d = ENVS.lab.dhcp; return !!d && SVC['isc-dhcp-server'].active && d.gw === ENVS.lab.gateway; },
+};
+// Debian/Ubuntu ships /etc/dhcp/dhcpd.conf with every subnet example commented out: the daemon refuses to start
+// ("No subnet declaration for ens18") until the admin writes a subnet block. That is the starting state here.
+const DHCPD_FRESH = `# dhcpd.conf
+#
+# Sample configuration file for ISC dhcpd
+#
+
+# option definitions common to all supported networks...
+option domain-name "example.org";
+option domain-name-servers ns1.example.org, ns2.example.org;
+
+default-lease-time 600;
+max-lease-time 7200;
+
+# If this DHCP server is the official DHCP server for the local
+# network, the authoritative directive should be uncommented.
+#authoritative;
+
+# A slightly different configuration for an internal subnet.
+#subnet 10.5.5.0 netmask 255.255.255.224 {
+#  range 10.5.5.26 10.5.5.30;
+#  option domain-name-servers ns1.internal.example.org;
+#  option domain-name "internal.example.org";
+#  option routers 10.5.5.1;
+#  option broadcast-address 10.5.5.31;
+#  default-lease-time 600;
+#  max-lease-time 7200;
+#}
+`;
+EXT_C.dhcpsrv = {
+  name: 'Aktifkan DHCP Server di Linux', rank: 2, xp: 320, sla: 1080, cp: 'Fase F · Administrasi server Linux: DHCP',
+  brief: ['Server srv-nusa baru diinstal ulang. Paket isc-dhcp-server sudah terpasang, tapi /etc/dhcp/dhcpd.conf masih contoh bawaan (semua subnet dikomentari), jadi layanannya gagal start dan PC lab dapat 169.254.x.x.',
+    'Masuk ke srv-nusa (console di ruang server rak 2, atau ssh teknisi@192.168.10.5 dari PC lab yang sudah punya IP). Edit dengan sudo nano /etc/dhcp/dhcpd.conf.',
+    'Tulis blok subnet 192.168.10.0 netmask 255.255.255.0 { range ...; option routers ...; } plus option domain-name-servers dan domain-name sesuai surat. Setiap pernyataan diakhiri titik koma.',
+    'Uji sintaks: sudo dhcpd -t. Lalu sudo systemctl restart isc-dhcp-server dan systemctl status isc-dhcp-server. Di PC: ipconfig /renew, lalu buka http://intranet.lab.smk.local.'],
+  pick: pcs => pcs.filter(pc => envOf(pc).id === 'lab' && !/_L[4-8]_/.test(pc) && adapterOf(pc).dhcp).slice(0, 2),
+  setup(pcs) {
+    FILES.set('/etc/dhcp/dhcpd.conf', DHCPD_FRESH); stop('isc-dhcp-server'); SVC['isc-dhcp-server'].failed = true;
+    log('isc-dhcp-server', 'No subnet declaration for ens18 (192.168.10.5).'); log('isc-dhcp-server', 'Not configured to listen on any interfaces!');
+    for (const pc of pcs) { const a = adapterOf(pc); a.dnsAuto = true; for (const [m] of ENVS.lab.leases) if (m === a.mac) ENVS.lab.leases.delete(m); bounce(a); }
+    return ['srv-nusa (192.168.10.5): isc-dhcp-server gagal start, dhcpd.conf masih contoh bawaan.', 'Scope: subnet 192.168.10.0/24 · range 192.168.10.100 – 192.168.10.199 · routers 192.168.10.1 · DNS 192.168.10.5 · domain lab.smk.local', 'Klien uji: {PCS} harus dapat IP dari pool itu dan bisa membuka http://intranet.lab.smk.local'];
+  },
+  ok: pc => { const d = ENVS.lab.dhcp; const l = live(adapterOf(pc)); return !!d && SVC['isc-dhcp-server'].active && d.gw === ENVS.lab.gateway && l.dns.includes(SRV.ip) && /^192\.168\.10\.(1\d\d)$/.test(l.ip); },
+  why: pc => { const d = ENVS.lab.dhcp; const l = live(adapterOf(pc)); return !SVC['isc-dhcp-server'].active ? 'isc-dhcp-server belum jalan (cek dhcpd -t)' : !d || d.gw !== ENVS.lab.gateway ? 'option routers belum 192.168.10.1' : !l.dns.includes(SRV.ip) ? 'DNS klien belum 192.168.10.5' : !/^192\.168\.10\.1\d\d$/.test(l.ip) ? 'PC belum dapat IP dari pool (ipconfig /renew)' : ''; },
+  tested: (e) => e.type === 'browse' && /intranet/.test(String(e.detail?.url ?? '')) && e.detail?.web === 'linux',
+  testHint: 'buka http://intranet.lab.smk.local',
 };
 export const linuxQa = { start, stop, answer: (n: string) => answer(n, null), files: FILES, svc: SVC, srv: SRV, sync: syncHost };

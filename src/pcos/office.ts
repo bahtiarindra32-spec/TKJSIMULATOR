@@ -3,7 +3,7 @@
 // its front panel, a phone registers only when its switch port gives it PoE and the voice VLAN, and the NAS
 // shares folders over SMB that a PC maps with "net use". Every fault closes only after a real test.
 import { ENVS, SWITCHES, envOf, adapterOf, ping, resolve, portOf, uplinkCarries, parseIp, type Host } from './net';
-import { EXT, DEVICES } from './ext';
+import { EXT, EXT_C, DEVICES } from './ext';
 import { SITES, CMD_EXT, DESK_EXT, type PcOS } from './os';
 
 const h = (tag: string, cls = '', html = '') => { const e = document.createElement(tag); if (cls) e.className = cls; if (html) e.innerHTML = html; return e; };
@@ -76,10 +76,12 @@ export function phoneState(ph: Phone): 'dark' | 'novlan' | 'ok' {
   if (p.port.voice !== VOICE_VLAN || !p.sw.vlans.has(VOICE_VLAN) || !uplinkCarries(p.sw, VOICE_VLAN) || !PBX.up) return 'novlan';
   return 'ok';
 }
+/** PROP_L2_PC_15 → PC 15 · L2 (same wording as the NOC board) */
+const deskLabel = (pc: string) => { const m = /_L(\d)_PC_(\d+)/.exec(pc); return m ? `PC ${m[2]} · L${m[1]}` : pc.replace(/^PROP_/, ''); };
 function phonePanel(ph: Phone, dialed = '', msg = '') {
   const st = phoneState(ph);
   const box = h('div', 'noc-box');
-  box.append(h('h2', '', `Telepon IP · ext ${ph.ext} · meja ${ph.pc.replace(/^PROP_/, '')}`));
+  box.append(h('h2', '', `Telepon IP · ext ${ph.ext} · meja ${deskLabel(ph.pc)}`));
   const scr = st === 'dark' ? '<i>(layar mati · tidak ada daya PoE)</i>' : st === 'novlan' ? `Mendaftar ke ippbx…<br><small>CDP: voice VLAN tidak diterima · tanpa layanan</small>` : `<b>${ph.ext}</b> · Terdaftar<br><small>VLAN suara ${VOICE_VLAN} · ippbx 192.168.100.10</small>`;
   box.append(h('div', 'phone-scr', `${scr}${msg ? `<br><b>${msg}</b>` : ''}<div class="dial">${dialed || '&nbsp;'}</div>`));
   const pad = h('div', 'phone-pad');
@@ -237,5 +239,55 @@ EXT.nas = {
   ok: () => NAS.smb && NAS.cable && NAS.shares.some(s => s.name === 'dokumen' && s.perm === 'rw'),
   tested: (e, pc) => e.type === 'netuse' && e.pc === pc && !!e.detail?.ok && e.detail?.share === 'dokumen',
   testHint: 'net use Z: \\\\nas-kantor\\dokumen',
+};
+// ---------------------------------------------------------------- installation work orders
+EXT_C.printer = {
+  name: 'Pasang Printer Jaringan Baru', rank: 1, xp: 230, sla: 780, cp: 'Fase F · Layanan jaringan: printer',
+  brief: ['Printer jaringan baru datang dengan setelan pabrik: IP 192.168.1.50/24. Alamat itu bukan subnet kantor (192.168.20.0/24), jadi PC kantor tidak bisa menjangkaunya.',
+    'Atur IP statis printer lewat panel depannya [F]: IP sesuai surat, mask 255.255.255.0, gateway router kantor. Printer jaringan wajib IP tetap supaya port TCP/IP di PC tidak berubah tujuan.',
+    'Di tiap PC: Printers & scanners › Tambah printer (TCP/IP) dengan IP printer itu, lalu Cetak halaman uji. Kalau gagal, ping IP printer dari CMD dulu.'],
+  pick: pcs => { const ok = pcs.filter(pc => isOfficePc(pc)); for (const p of PRINTERS) { const same = ok.filter(pc => (+(/_L(\d)_/.exec(pc)?.[1] ?? 0)) === p.level); if (same.length >= 2 && !p.host.down) return same.slice(0, 2); } return []; },
+  setup(pcs) {
+    const lv = +(/_L(\d)_/.exec(pcs[0])?.[1] ?? 2); const p = PRINTERS.find(x => x.level === lv)!;
+    p.ip = '192.168.1.50'; p.gw = '192.168.1.1'; p.mask = '255.255.255.0'; p.cable = true; syncPrinter(p);
+    for (const pc of pcs) { const set = ADDED.get(pc) ?? new Set<string>(); set.delete(p.want); ADDED.set(pc, set); }
+    (EXT_C.printer as any).cur = p;
+    return [`Printer baru ${p.id} terpasang di lantai ${p.level}, masih setelan pabrik (192.168.1.50/24).`, `IP printer: ${p.want} · mask 255.255.255.0 · gateway ${office().gateway}`, `Tambahkan printer itu dan cetak halaman uji dari: {PCS}`];
+  },
+  ok: pc => { const p: Printer | undefined = (EXT_C.printer as any).cur; return !!p && p.ip === p.want && !p.host.down && !!ADDED.get(pc)?.has(p.want); },
+  why: pc => { const p: Printer | undefined = (EXT_C.printer as any).cur; return !p ? '' : p.ip !== p.want ? 'IP printer belum sesuai surat' : p.host.down ? 'printer belum terjangkau (mask/gateway/kabel)' : !ADDED.get(pc)?.has(p.want) ? 'printer belum ditambahkan di PC ini' : ''; },
+  tested: (e, pc) => e.type === 'print' && e.pc === pc && !!e.detail?.ok,
+  testHint: 'cetak halaman uji dari PC ini',
+};
+EXT_C.voice = {
+  name: 'Pasang Telepon IP di Meja', rank: 1, xp: 210, sla: 720, cp: 'Fase F · VLAN suara & PoE',
+  brief: ['Telepon IP baru sudah ditaruh di meja dan disambung ke port yang sama dengan PC (PC dicolok ke port PC di belakang telepon).',
+    'Telepon tidak punya adaptor listrik: dayanya dari switch lewat PoE (IEEE 802.3af). Port switch harus "power inline auto".',
+    'Suara dipisah ke voice VLAN 100 supaya kualitasnya terjaga, data PC tetap di access VLAN-nya. Di console: interface GiX/0/Y › power inline auto › switchport voice vlan 100 › write memory.',
+    'Uji dengan menelepon 9000 (layanan uji ippbx) dari telepon itu [F].'],
+  pick: pcs => pcs.filter(pc => isOfficePc(pc) && !!phoneOf(pc) && phoneState(phoneOf(pc)!) === 'ok').slice(0, 1),
+  setup(pcs) { const p = portOf(pcs[0])!; p.port.voice = undefined; p.port.poe = false; const ph = phoneOf(pcs[0])!; return [`Telepon IP ext ${ph.ext} di meja {PC}`, `Port: ${p.sw.name} Gi1/0/${p.port.n} · PoE belum aktif · voice VLAN belum diset`, 'Target: telepon terdaftar ke ippbx dan bisa memanggil 9000; PC di meja itu tetap normal.']; },
+  ok: pc => !!phoneOf(pc) && phoneState(phoneOf(pc)!) === 'ok',
+  why: pc => { const ph = phoneOf(pc); const st = ph ? phoneState(ph) : 'dark'; return st === 'dark' ? 'telepon belum menyala (PoE)' : st === 'novlan' ? 'telepon belum dapat voice VLAN 100' : ''; },
+  tested: (e, pc) => e.type === 'dial' && e.pc === pc && !!e.detail?.ok,
+  testHint: 'panggil 9000 dari telepon meja ini',
+};
+const SHARE_NAMES = ['proyek', 'keuangan', 'marketing', 'hrd', 'arsip', 'desain'];
+EXT_C.share = {
+  name: 'Buat Folder Bersama di NAS', rank: 1, xp: 220, sla: 780, cp: 'Fase F · Layanan berbagi berkas (SMB)',
+  brief: ['Divisi minta folder bersama baru di NAS nas-kantor (192.168.20.10). Folder bersama Windows memakai protokol SMB.',
+    'Dari PC kantor buka web NAS http://nas-kantor: pastikan layanan SMB aktif, buat shared folder sesuai surat, beri grup staf hak Baca/Tulis.',
+    'Di tiap PC: CMD › net use <drive>: \\\\nas-kantor\\<folder>. "System error 53" = nama/jaringan tidak ketemu, "System error 5" = hak akses kurang.'],
+  pick: pcs => pcs.filter(isOfficePc).slice(0, 2),
+  setup(pcs) {
+    const name = SHARE_NAMES.find(n => !NAS.shares.some(s => s.name === n)) ?? `tim${Math.floor(Math.random() * 90 + 10)}`;
+    NAS.smb = Math.random() < 0.5 ? false : NAS.smb; (EXT_C.share as any).cur = name;
+    for (const pc of pcs) MAPS.get(pc)?.delete('P:');
+    return [`Folder bersama baru: \\\\nas-kantor\\${name} · grup staf Baca/Tulis`, `Petakan sebagai drive P: di {PCS}`, 'Tes: net use P: \\\\nas-kantor\\' + name + ' berhasil dari tiap PC.'];
+  },
+  ok: () => { const n = (EXT_C.share as any).cur; return NAS.smb && NAS.cable && NAS.shares.some(s => s.name === n && s.perm === 'rw'); },
+  why: () => { const n = (EXT_C.share as any).cur; const s = NAS.shares.find(x => x.name === n); return !NAS.smb ? 'layanan SMB NAS belum aktif' : !s ? `folder ${n} belum dibuat` : s.perm !== 'rw' ? 'hak akses staf belum Baca/Tulis' : ''; },
+  tested: (e, pc) => e.type === 'netuse' && e.pc === pc && !!e.detail?.ok && e.detail?.share === (EXT_C.share as any).cur,
+  testHint: 'net use P: ke folder baru',
 };
 export const officeQa = { PRINTERS, PHONES, NAS, phoneState, ADDED, MAPS, printerPanel, phonePanel, nasPanel };

@@ -229,3 +229,32 @@ body.touch.riding #clock { top: calc(96px + env(safe-area-inset-top)); }
 #noc-hud { transition: opacity .2s; }
 #hints { transition: opacity .6s; }
 body.hints-off #hints { opacity: 0; }
+
+/* ------------------------------------------------------------------ crimping bench */
+.noc-box.crimp .plugs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 14px; }
+.noc-box.crimp .plug { border: 1px solid var(--k-line2); border-radius: 3px; padding: 10px; background: var(--k-p3); }
+.noc-box.crimp .plug.cur { border-color: var(--k-acc); }
+.noc-box.crimp .plug small { display: block; font: 600 10.5px/1 var(--k-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--k-mute); margin-bottom: 8px; }
+.noc-box.crimp .pins { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.noc-box.crimp .pin { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.noc-box.crimp .pin b { font: 600 10px/1 var(--k-mono); color: var(--k-mute); }
+.noc-box.crimp .wire { display: block; width: 14px; height: 46px; border-radius: 2px; border: 1px solid rgba(0,0,0,.35); }
+.noc-box.crimp .wire.empty { background: transparent; border: 1px dashed var(--k-line2); }
+.noc-box.crimp .wires { gap: 6px; flex-wrap: wrap; }
+.noc-box.crimp .wire-btn { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; }
+.noc-box.crimp .wire-btn .wire { width: 10px; height: 26px; }
+.noc-box.crimp .wire-btn:disabled { opacity: .3; }
+@media (max-width: 560px) { .noc-box.crimp .plugs { grid-template-columns: 1fr; } .noc-box.crimp .wire-btn span { display: none; } }
+
+/* ------------------------------------------------------------------ work day panel on the board */
+.noc-box .daybox { border: 1px solid var(--k-line2); border-left: 3px solid var(--k-acc); border-radius: 3px; padding: 12px 14px; margin: 0 0 16px; background: var(--k-p3); }
+.noc-box .daybox .day-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.noc-box .daybox .day-h b { font: 700 16px/1.2 var(--k-cond); letter-spacing: .03em; }
+.noc-box .daybox .day-h small { font: 500 11px/1.2 var(--k-mono); color: var(--k-mute); }
+.noc-box .daybox .day-steps { list-style: none; counter-reset: dstep; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; padding: 0; }
+.noc-box .daybox .day-steps li { counter-increment: dstep; border-top: 2px solid var(--k-line2); padding-top: 6px; }
+.noc-box .daybox .day-steps li b { display: block; font-size: 13px; } .noc-box .daybox .day-steps li b::before { content: counter(dstep) ". "; font-family: var(--k-mono); color: var(--k-mute); }
+.noc-box .daybox .day-steps li small { color: var(--k-mute); font-size: 11.5px; line-height: 1.35; display: block; }
+.noc-box .daybox .day-steps li.cur { border-top-color: var(--k-acc); } .noc-box .daybox .day-steps li.done { border-top-color: var(--k-ok); }
+.noc-box .daybox .day-steps li.done b { color: var(--k-ok); } .noc-box .daybox .day-steps li.lock { opacity: .5; }
+@media (max-width: 560px) { .noc-box .daybox .day-steps { grid-template-columns: 1fr; } }

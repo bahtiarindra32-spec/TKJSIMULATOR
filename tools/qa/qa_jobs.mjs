@@ -2,7 +2,7 @@
 // usage: node qa_jobs.mjs static,desk,dns,renum,vlan,shift
 import { boot } from './qa_lib.mjs';
 const phases = (process.argv[2] ?? 'static,desk,dns,renum,vlan,shift').split(',');
-const xpFor = { chaos: 0, static: 0, desk: 0, dns: 600, renum: 600, vlan: 1600, shift: 1600 };
+const xpFor = { chaos: 0, static: 0, desk: 0, dns: 600, renum: 600, vlan: 2600, shift: 2600 };
 const Q = await boot({ v: 1, xp: xpFor[phases[0]] ?? 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, seen: [], mastery: {} });
 const { p, K, shot, step, goPc, goAnchor, press, openPc, openCmd, cmd, cmdText, closePc, ipv4, browser, routerLogin, routerNav, fillName, clickName, modalText, mclick, job, consoleLines, report, errs } = Q;
 const results = {};
@@ -154,7 +154,7 @@ for (const ph of phases) {
     }
     if (ph === 'shift') {
       await K(() => window.__kota.noc.closeModal());
-      await K(() => { window.__kota.noc.startShift(Math.random, ['cable', 'cablebad', 'port', 'vlan']); window.__kota.noc.closeModal(); });
+      await K(() => { window.__kota.noc.startShift(Math.random, ['cable', 'cablebad', 'port', 'vlan']); }); await press('Escape');
       const T = await K(() => window.__kota.noc.jobs.map(j => ({ id: j.id, f: j.faults, pc: j.targets[0].pc.name, label: j.targets[0].pc.label, order: j.order })));
       console.log('  tickets', JSON.stringify(T));
       if (!(await K(() => window.__kota.noc.inv.tester && window.__kota.noc.inv.console && window.__kota.noc.inv.laptop && window.__kota.noc.inv.patch > 0))) await getTools();

@@ -24,3 +24,21 @@ export const EXT: Record<string, ExtFault> = {};
 /** devices outside PCs that the player uses with F (printers, phones, server racks) */
 export interface WorldDevice { id: string; x: number; z: number; level: number; r?: number; hint: () => string; use: () => void }
 export const DEVICES: WorldDevice[] = [];
+/** Installation work orders owned by the infrastructure modules. The device starts in its real "fresh out of the box /
+ *  not configured yet" state; the order closes when the configuration is right, the clients are healthy and the player
+ *  tested from each client. */
+export interface ExtContract {
+  name: string; rank: number; xp: number; sla: number; cp: string; brief: string[];
+  /** choose the client PCs from the candidates (already shuffled); empty = not possible now */
+  pick(pcs: string[]): string[];
+  /** put the simulation in the pre-installation state; returns the work order lines */
+  setup(pcs: string[]): string[];
+  ok(pc: string): boolean;
+  /** what is still missing for this client (HUD) */
+  why?(pc: string): string;
+  health?: boolean;
+  tested?(e: ExtEvent, pc: string): boolean;
+  testHint?: string;
+  restore?(): void;
+}
+export const EXT_C: Record<string, ExtContract> = {};

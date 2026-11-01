@@ -4,7 +4,7 @@
 // failover), NAT/PAT overload on the exit interface, and the ACL on the inside interface. So a missing
 // "ip nat inside", a wrong ACL line or an untracked primary route really breaks every PC's internet.
 import { HOOKS, ENVS, envOf, live, adapterOf, parseIp, networkOf, parseMask, type Env } from './net';
-import { EXT } from './ext';
+import { EXT, EXT_C } from './ext';
 import type { Shell, TermIO } from './term';
 
 interface Ace { seq: number; act: 'permit' | 'deny'; proto: 'ip' | 'icmp' | 'udp' | 'tcp'; src: string; sw: string; dst: string; dw: string; eq?: number; text: string }
@@ -223,6 +223,27 @@ EXT.acl = {
     return typeof v !== 'string' && v.proto === 'udp' ? 'Baris "5 deny udp any any eq 53" (maksudnya memblok DNS luar untuk tamu) memblok semua DNS ke internet → no 5' : `Baris "5 deny ip ${net} 0.0.0.255 any" (salah subnet, maksudnya segmen tamu) memblok ${net}/24 → no 5`;
   },
   ok: pcOk,
+};
+// ISP2 line was just installed: the router only knows ISP1. The order is the standard Cisco IOS dual-ISP failover:
+// IP SLA probe to the ISP1 gateway, a track object on it, the primary default route tracked, a floating static
+// route (higher AD) to ISP2, and PAT out of the ISP2 interface. Verified by failing ISP1 for a moment.
+const failoverWorks = (pc: string) => { const was = EDGE.isp[1].up; EDGE.isp[1].up = false; const ok = activeRoute()?.nh === '198.51.100.1' && pcOk(pc); EDGE.isp[1].up = was; return ok; };
+EXT_C.failover = {
+  name: 'Aktifkan Jalur Cadangan ISP2', rank: 2, xp: 360, sla: 1200, cp: 'Fase F · Routing statis, NAT & redundansi',
+  brief: ['Jalur ISP2 (CepatLink, 198.51.100.0/30 di Gi0/1) baru dipasang teknisi ISP. R-EDGE belum memakai jalur itu: kalau ISP1 putus, seluruh gedung mati internet.',
+    'Konfigurasi failover standar Cisco: ip sla 1 › icmp-echo 203.0.113.1 source-interface Gi0/0, lalu ip sla schedule 1 life forever start-time now, lalu track 1 ip sla 1 reachability.',
+    'Route utama memakai track: ip route 0.0.0.0 0.0.0.0 203.0.113.1 track 1. Route cadangan dengan AD lebih besar (floating static): ip route 0.0.0.0 0.0.0.0 198.51.100.1 10.',
+    'Setelah pindah ke ISP2, alamat dalam harus di-NAT keluar Gi0/1: ip nat inside source list 1 interface Gi0/1 overload. Cek dengan show ip route, show track, show ip nat translations, lalu write memory.'],
+  pick: pcs => pcs.filter(anyWired).slice(0, 2),
+  setup() {
+    EDGE.sla.clear(); EDGE.track.clear();
+    EDGE.routes = EDGE.routes.filter(r => r.nh !== '198.51.100.1'); EDGE.routes.forEach(r => { if (r.nh === '203.0.113.1') r.track = null; });
+    EDGE.nat = EDGE.nat.filter(n => n.iface !== 'GigabitEthernet0/1');
+    return ['R-EDGE (ruang server rak 1): ISP2 di Gi0/1 sudah up, belum dipakai sebagai cadangan.', 'Pasang IP SLA + track ke 203.0.113.1, route utama ber-track, floating static ke 198.51.100.1 AD 10, NAT overload keluar Gi0/1. Simpan konfigurasi.', 'Penguji: saat ISP1 diputus, {PCS} tetap bisa internet lewat ISP2.'];
+  },
+  ok: pc => pcOk(pc) && failoverWorks(pc),
+  why: pc => { if (!pcOk(pc)) return 'PC belum bisa internet'; const t = EDGE.routes.find(r => r.nh === '203.0.113.1')?.track; return ![...EDGE.sla.values()].some(s => s.scheduled) ? 'IP SLA belum dibuat / belum dijadwalkan' : !t || !EDGE.track.has(t) ? 'route utama belum memakai track' : !EDGE.routes.some(r => r.nh === '198.51.100.1' && r.ad > 1) ? 'route cadangan ke ISP2 belum ada' : !EDGE.nat.some(n => n.iface === 'GigabitEthernet0/1') ? 'NAT keluar Gi0/1 belum ada' : 'failover belum jalan'; },
+  testHint: 'buka situs internet dari PC ini',
 };
 export const edgeQa = { EDGE, edgeCheck, activeRoute };
 void ENVS;

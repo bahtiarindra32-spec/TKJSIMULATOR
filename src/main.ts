@@ -1156,6 +1156,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
     const o1 = d.open; toggleDoor(d); for (let i = 0; i < 90; i++) updateDoors(1 / 60, 1e6, 1e6, 0, null);
     return `opened=${o1.toFixed(2)} closed=${d.open.toFixed(2)} total=${(window as any).__doorCount ?? '?'}`;
   },
+  rawPort: (n: string) => portOf(n)?.port ?? null,
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
