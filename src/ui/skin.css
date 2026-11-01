@@ -258,3 +258,27 @@ body.hints-off #hints { opacity: 0; }
 .noc-box .daybox .day-steps li.cur { border-top-color: var(--k-acc); } .noc-box .daybox .day-steps li.done { border-top-color: var(--k-ok); }
 .noc-box .daybox .day-steps li.done b { color: var(--k-ok); } .noc-box .daybox .day-steps li.lock { opacity: .5; }
 @media (max-width: 560px) { .noc-box .daybox .day-steps { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------------ Lab Praktik */
+.noc-box .labrow { align-items: center; gap: 8px; border: 1px solid var(--k-line); border-radius: 3px; padding: 8px 12px; margin: 0 0 16px; }
+.noc-box .labrow .lab-t { flex: 1; min-width: 180px; } .noc-box .labrow .lab-t b { display: block; } .noc-box .labrow .lab-t small { color: var(--k-mute); font-size: 11.5px; }
+.noc-box .lab-ins { width: 100%; box-sizing: border-box; background: var(--k-p3); color: var(--k-tx); border: 1px solid var(--k-line2); border-radius: 3px; padding: 8px; font: inherit; resize: vertical; }
+.noc-box .lab-steps { display: grid; gap: 0; margin: 12px 0; border-top: 1px solid var(--k-line); }
+.noc-box .lab-step { display: flex; gap: 10px; align-items: flex-start; padding: 8px 2px; border-bottom: 1px solid var(--k-line); cursor: pointer; }
+.noc-box .lab-step input, .noc-box .lab-chk input { accent-color: var(--k-acc); width: 16px; height: 16px; margin-top: 2px; }
+.noc-box .lab-step small { display: block; color: var(--k-mute); font: 500 11px/1.3 var(--k-mono); }
+.noc-box .lab-chk { display: inline-flex; gap: 6px; align-items: center; margin-left: 12px; }
+.noc-box select[name=lab-min] { background: var(--k-p3); color: var(--k-tx); border: 1px solid var(--k-line2); border-radius: 3px; padding: 5px 8px; }
+.noc-box .lab-code { margin: 14px 0; padding: 12px 14px; border: 1px solid var(--k-line2); border-left: 3px solid var(--k-acc); border-radius: 3px; display: grid; gap: 6px; }
+.noc-box .lab-code small { font: 600 10.5px/1 var(--k-mono); letter-spacing: .1em; color: var(--k-mute); }
+.noc-box .lab-code b { font: 700 34px/1.1 var(--k-mono); letter-spacing: .18em; color: var(--k-acc); }
+.noc-box .lab-code span { font-size: 12px; color: var(--k-tx2); word-break: break-all; }
+.noc-box .lab-code .btn { justify-self: start; }
+.noc-box .lab-form { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; margin: 10px 0; }
+.noc-box .lab-form input { background: var(--k-p3); color: var(--k-tx); border: 1px solid var(--k-line2); border-radius: 3px; padding: 8px 10px; font-size: 15px; }
+.noc-box .lab-form input[name=lab-code] { font-family: var(--k-mono); letter-spacing: .2em; text-transform: uppercase; max-width: 180px; }
+.noc-box .lab-prev ol { margin: 6px 0; padding-left: 20px; } .noc-box .lab-prev small { color: var(--k-mute); }
+.noc-box.labres .lab-tab { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.noc-box.labres .lab-tab th, .noc-box.labres .lab-tab td { text-align: left; padding: 6px 6px; border-bottom: 1px solid rgba(0,0,0,.15); }
+.noc-box.labres .lab-tab th { font: 600 10.5px/1 var(--k-mono); letter-spacing: .06em; text-transform: uppercase; }
+@media (max-width: 560px) { .noc-box .lab-form { grid-template-columns: 1fr; } }

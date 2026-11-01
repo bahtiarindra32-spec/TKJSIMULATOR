@@ -18,6 +18,7 @@ import type { PcOS, PcEvent } from '../pcos/os';
 import { SwitchCli } from '../pcos/switchcli';
 import { EXT, EXT_C, DEVICES } from '../pcos/ext';
 import { judge, wiremap, WIRES, WIRE_CSS, type Cable, type Wire } from './crimp';
+import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstruction, type LabSpec, type LabStepId, type LabResult } from './lab';
 import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
 import { Term } from '../pcos/term';
 import { nasPanel } from '../pcos/office';
@@ -158,6 +159,8 @@ export class Noc {
   private audio: AudioContext | null = null;
   private patchStock = 6;
   private noCord = new Set<string>();
+  /** a Lab Praktik run: career progress is frozen (saved copy restored at the end) */
+  labRun: { spec: LabSpec; code: string; name: string; seed: number; i: number; res: LabResult[]; t0: number; st0: number; saved: string } | null = null;
   /** cables the player crimped and carries (used before stock cords), and which crimped cable sits at which desk */
   private cables: Cable[] = []; private cordOf = new Map<string, Cable>();
   private useCord(pc: string) { const c = this.cables.shift(); if (c) { this.cordOf.set(pc, c); const a = adapterOf(pc); a.broken = !judge(c).works; } else this.cordOf.delete(pc); }
@@ -194,7 +197,7 @@ export class Noc {
   maybeStartTutorial() { if (this.mode === 'idle' && !this.s.mastery.tutor && this.s.closed === 0) this.acceptContract('tutor', 1); }
   /** events from devices that are not PCs (IP phones) or modules (QA) */
   extEvent(e: PcEvent) { this.onPc(e); }
-  private save() { try { localStorage.setItem(KEY, JSON.stringify(this.s)); localStorage.setItem(NOTES_KEY, JSON.stringify(this.notes)); } catch { /* ignore */ } }
+  private save() { if (this.labRun) return; try { localStorage.setItem(KEY, JSON.stringify(this.s)); localStorage.setItem(NOTES_KEY, JSON.stringify(this.notes)); } catch { /* ignore */ } }
   get xp() { return this.s.xp; }
   get stats() { return { ...this.s }; }
   rankIndex() { let i = 0; RANKS.forEach((r, k) => { if (this.s.xp >= r.xp) i = k; }); return i; }
@@ -846,6 +849,126 @@ export class Noc {
     this.show(box);
   }
 
+  // ---------------------------------------------------------------- Lab Praktik
+  openLabTeacher(pre: Partial<LabSpec> = {}, msg = '', said = '') {
+    const spec: LabSpec = { steps: pre.steps ?? ['crimp', 'desk', 'static'], minutes: pre.minutes ?? 60, perStudent: pre.perStudent ?? true, seed: pre.seed ?? Math.floor(Math.random() * 65536) };
+    const box = h('div', 'noc-box labt');
+    box.append(h('h2', '', 'Lab Praktik · Lembar Kerja Guru'));
+    box.append(h('p', 'how', 'Pilih langkah praktik. Siswa mengerjakannya berurutan di gedung ini, dengan alat dan aturan jaringan yang sama. Penilaian otomatis dari simulator: pekerjaan baru selesai kalau jaringan benar dan siswa sudah menguji dari perangkatnya.'));
+    const ins = h('textarea', 'lab-ins') as HTMLTextAreaElement; ins.name = 'lab-ins'; ins.rows = 2; ins.value = said; ins.placeholder = 'Contoh: siswa crimping kabel sampai PC tersambung, lalu IP statis dan DHCP, waktu 90 menit, soal beda tiap siswa';
+    ins.addEventListener('keydown', e => e.stopPropagation());
+    const ir = h('div', 'row left');
+    ir.append(btn('Isi form dari kalimat', () => this.openLabTeacher({ ...spec, ...parseInstruction(ins.value) }, 'Form diisi dari kata kunci. Periksa centangnya sebelum membuat kode.', ins.value), 'btn', 'lab-parse'));
+    if (aiReady()) ir.append(btn('Isi dengan AI', async () => {
+      try {
+        const raw = await chat([{ role: 'system', content: LAB_AI_PROMPT }, { role: 'user', content: ins.value }], { maxTokens: 120, temperature: 0, json: true });
+        const o = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+        const steps = (Array.isArray(o.steps) ? o.steps : []).filter((x: unknown) => LAB_STEPS.some(st => st.id === x)) as LabStepId[];
+        this.openLabTeacher({ ...spec, steps: LAB_STEPS.filter(st => steps.includes(st.id)).map(st => st.id), minutes: Math.max(0, Math.min(150, +o.minutes || 0)), perStudent: !!o.perStudent }, '[AI] Form diisi AI dari kalimatmu. AI tidak menilai siswa; periksa centangnya.', ins.value);
+      } catch { this.openLabTeacher({ ...spec, ...parseInstruction(ins.value) }, 'AI gagal dihubungi, form diisi dari kata kunci.', ins.value); }
+    }, 'btn', 'lab-ai'));
+    box.append(ins, ir);
+    if (msg) box.append(h('p', 'msg', esc(msg)));
+    const list = h('div', 'lab-steps');
+    LAB_STEPS.forEach((st, i) => {
+      const row = h('label', 'lab-step'); const cb = h('input') as HTMLInputElement; cb.type = 'checkbox'; cb.name = `lab-${st.id}`; cb.checked = spec.steps.includes(st.id);
+      cb.addEventListener('change', () => { spec.steps = LAB_STEPS.filter(x => (x.id === st.id ? cb.checked : spec.steps.includes(x.id))).map(x => x.id); upd(); });
+      row.append(cb, h('span', '', `<b>${i + 1}. ${st.name}</b><small>${st.cp}</small>`)); list.append(row);
+    });
+    box.append(list);
+    const opt = h('div', 'row left');
+    const tm = h('select', '') as HTMLSelectElement; tm.name = 'lab-min';
+    for (const m of [0, 30, 60, 90, 120, 150]) { const o = h('option', '', m ? `${m} menit` : 'tanpa batas waktu') as HTMLOptionElement; o.value = String(m); o.selected = Math.round(spec.minutes / 10) * 10 === m; tm.append(o); }
+    if (![0, 30, 60, 90, 120, 150].includes(spec.minutes)) { const o = h('option', '', `${Math.round(spec.minutes / 10) * 10} menit`) as HTMLOptionElement; o.value = String(Math.round(spec.minutes / 10) * 10); o.selected = true; tm.append(o); }
+    tm.addEventListener('change', () => { spec.minutes = +tm.value; upd(); });
+    const ps = h('label', 'lab-chk'); const pc = h('input') as HTMLInputElement; pc.type = 'checkbox'; pc.name = 'lab-per'; pc.checked = spec.perStudent; pc.addEventListener('change', () => { spec.perStudent = pc.checked; upd(); });
+    ps.append(pc, h('span', '', 'Soal beda tiap siswa (dari nama)'));
+    opt.append(h('span', '', 'Waktu'), tm, ps); box.append(opt);
+    const res = h('div', 'lab-code'); box.append(res);
+    const upd = () => {
+      if (!spec.steps.length) { res.innerHTML = '<p class="msg warn">Centang minimal satu langkah.</p>'; return; }
+      const code = encodeLab(spec), url = `${location.origin}${location.pathname}?lab=${code}`;
+      res.innerHTML = `<small>KODE LAB</small><b class="mono" data-code="${code}">${code}</b><span>Siswa: Papan Kerja › Lab Praktik › Siswa: masukkan kode, atau buka <span class="mono">${esc(url)}</span>. Kode menyimpan seluruh skenario; tidak ada server.</span>`;
+      const cp = btn('Salin kode & tautan', () => { void navigator.clipboard?.writeText(`Kode Lab Praktik Kota Nusantara: ${code}
+${url}`).catch(() => {}); this.toast('Kode & tautan disalin.'); }, 'btn', 'lab-copy'); res.append(cp);
+    };
+    upd();
+    const rw = h('div', 'row'); rw.append(btn('Coba sebagai siswa', () => this.openLabStudent(encodeLab(spec)), 'btn', 'lab-try')); rw.append(btn('Kembali', () => this.openBoard())); box.append(rw);
+    this.show(box);
+  }
+  openLabStudent(code = '', msg = '') {
+    const box = h('div', 'noc-box labs');
+    box.append(h('h2', '', 'Lab Praktik · Masuk'));
+    const ci = h('input', 'mono') as HTMLInputElement; ci.name = 'lab-code'; ci.maxLength = 7; ci.placeholder = 'KODE6'; ci.value = code;
+    const ni = h('input') as HTMLInputElement; ni.name = 'lab-name'; ni.maxLength = 40; ni.placeholder = 'Nama lengkap · kelas';
+    for (const x of [ci, ni]) x.addEventListener('keydown', e => e.stopPropagation());
+    const f = h('div', 'lab-form'); f.append(h('label', '', 'Kode dari guru'), ci, h('label', '', 'Nama'), ni); box.append(f);
+    if (msg) box.append(h('p', 'msg warn', esc(msg)));
+    const pv = h('div', 'lab-prev'); box.append(pv);
+    const prev = () => { const sp = decodeLab(ci.value); pv.innerHTML = sp ? `<ol>${sp.steps.map(id => `<li>${LAB_STEPS.find(x => x.id === id)!.name}</li>`).join('')}</ol><small>${sp.minutes ? `Batas waktu ${sp.minutes} menit` : 'Tanpa batas waktu'}${sp.perStudent ? ' · soal tiap siswa berbeda' : ''}</small>` : ci.value.trim().length >= 6 ? '<p class="msg warn">Kode tidak dikenali. Cek lagi huruf dan angkanya.</p>' : ''; };
+    ci.addEventListener('input', prev); prev();
+    const rw = h('div', 'row');
+    rw.append(btn('Mulai praktik', () => {
+      const sp = decodeLab(ci.value);
+      if (!sp) { this.openLabStudent(ci.value, 'Kode tidak dikenali.'); return; }
+      if (ni.value.trim().length < 3) { this.openLabStudent(ci.value, 'Tulis nama lengkapmu (dipakai di lembar hasil).'); return; }
+      this.startLab(sp, ci.value.trim().toUpperCase(), ni.value.trim());
+    }, 'btn pri', 'lab-start'));
+    rw.append(btn('Kembali', () => this.openBoard())); box.append(rw);
+    this.show(box);
+  }
+  startLab(spec: LabSpec, code: string, name: string) {
+    if (this.mode !== 'idle' || this.labRun) { this.toast('Selesaikan atau batalkan pekerjaan yang sedang berjalan dulu.'); return; }
+    const saved = JSON.stringify(this.s);
+    this.labRun = { spec, code, name, seed: studentSeed(spec, name), i: 0, res: [], t0: performance.now(), st0: performance.now(), saved };
+    this.closeModal(); this.runLabStep();
+  }
+  private runLabStep() {
+    const L = this.labRun!; const st = LAB_STEPS.find(x => x.id === L.spec.steps[L.i])!;
+    const sd = (L.seed * 31 + L.i * 7919) >>> 0; L.st0 = performance.now();
+    let ok = false;
+    if (st.id === 'trouble') {
+      const r = mulberry(sd); const pool = shuffle(['cable', 'cablebad', 'port', 'wrongip', 'gateway', 'dns'] as FaultId[], r).filter(f => FAULTS[f]);
+      this.startShift(r, pool.slice(0, 2)); ok = this.jobs.length > 0; if (!ok) this.mode = 'idle';
+    } else ok = !!this.acceptContract(st.tpl as TplId, sd);
+    if (!ok) { L.res.push({ step: st.id, stars: 0, ms: 0, wrong: 0, sla: false, done: false }); this.advanceLab(); return; }
+    for (const j of this.jobs) j.title = `LAB ${L.i + 1}/${L.spec.steps.length} · ${j.title}`;
+  }
+  private labStepDone(done: boolean) {
+    const L = this.labRun!; const id = L.spec.steps[L.i];
+    const js = this.jobs, n = Math.max(1, js.length);
+    L.res.push({ step: id, done: done && js.every(j => j.status === 'closed' && j.stars != null), stars: Math.round(js.reduce((a, j) => a + (j.stars ?? 0), 0) / n * 10) / 10, ms: performance.now() - L.st0, wrong: js.reduce((a, j) => a + j.wrong, 0), sla: js.every(j => j.slaMet) });
+    this.mode = 'idle'; this.trackedId = null; this.jobs = [];
+    if (!done) { for (let k = L.i + 1; k < L.spec.steps.length; k++) L.res.push({ step: L.spec.steps[k], stars: 0, ms: 0, wrong: 0, sla: false, done: false }); L.i = L.spec.steps.length; this.finishLab(); return; }
+    this.advanceLab();
+  }
+  private advanceLab() {
+    const L = this.labRun!; L.i++;
+    if (L.i >= L.spec.steps.length) { this.finishLab(); return; }
+    this.openBoard(`Langkah ${L.i}/${L.spec.steps.length} selesai. Berikutnya: ${LAB_STEPS.find(x => x.id === L.spec.steps[L.i])!.name}.`);
+    this.runLabStep();
+  }
+  private finishLab() {
+    const L = this.labRun!; this.labRun = null;
+    this.s = JSON.parse(L.saved); this.save();
+    const total = performance.now() - L.t0, over = L.spec.minutes > 0 && total > L.spec.minutes * 60000;
+    const score = Math.round(L.res.reduce((a, r) => a + (r.done ? r.stars : 0), 0) / (3 * L.res.length) * 100);
+    const mm = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+    const when = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+    const box = h('div', 'noc-box paper labres');
+    box.append(h('div', 'pp-head', `<div><b>LAB PRAKTIK TKJ</b><small>Lembar hasil · Kota Nusantara</small></div><div class="pp-no"><small>KODE</small><b>${esc(L.code)}</b></div>`));
+    box.append(h('table', 'pp-fields', `<tr><th>Nama</th><td>${esc(L.name)}</td><th>Waktu</th><td class="mono">${esc(when)}</td></tr><tr><th>Durasi</th><td class="mono">${mm(total)}${L.spec.minutes ? ` / ${L.spec.minutes}:00` : ''}${over ? ' · LEWAT' : ''}</td><th>Nilai</th><td class="mono">${score}</td></tr>`));
+    box.append(h('table', 'lab-tab', `<tr><th>Langkah</th><th>Status</th><th>Bintang</th><th>Waktu</th><th>Kesalahan</th></tr>${L.res.map(r => `<tr><td>${LAB_STEPS.find(x => x.id === r.step)!.name}</td><td>${r.done ? 'Selesai' : 'Tidak selesai'}</td><td class="mono">${r.done ? r.stars.toFixed(1) : '-'}</td><td class="mono">${r.ms ? mm(r.ms) : '-'}</td><td class="mono">${r.done ? r.wrong : '-'}</td></tr>`).join('')}`));
+    box.append(h('p', 'how', 'Nilai = rata-rata bintang langkah yang selesai (maksimal 3) × 100. Bintang dari simulator: tepat SLA, tidak ada perangkat lain ikut putus, tidak ada material terbuang dan konfigurasi tersimpan. Tidak dinilai AI. Tanpa server, lembar ini bisa dipalsukan: guru sebaiknya melihat langsung atau meminta tangkapan layar.'));
+    const txt = `Lab Praktik ${L.code} · ${L.name} · ${when}
+Nilai ${score} · durasi ${mm(total)}${over ? ' (lewat batas)' : ''}
+${L.res.map(r => `- ${LAB_STEPS.find(x => x.id === r.step)!.name}: ${r.done ? `selesai, ${r.stars.toFixed(1)} bintang, ${mm(r.ms)}, ${r.wrong} kesalahan` : 'tidak selesai'}`).join('\n')}`;
+    const rw = h('div', 'row'); rw.append(btn('Salin hasil', () => { void navigator.clipboard?.writeText(txt).catch(() => {}); this.toast('Hasil disalin.'); }, 'btn', 'lab-copyres')); rw.append(btn('Ke papan kerja', () => this.openBoard(), 'btn pri', 'lab-done'));
+    box.append(rw);
+    this.lastLab = { score, txt };
+    this.show(box);
+  }
+  lastLab: { score: number; txt: string } | null = null;
   /** crimping bench: lay the eight wires of each plug, crimp, test with the LAN tester, keep or bin the cable */
   private crimpSt: { a: Wire[]; b: Wire[]; end: 'a' | 'b' | 'done'; tested: boolean; pool: Wire[] } | null = null;
   openCrimpBench(msg = '') {
@@ -1404,6 +1527,10 @@ export class Noc {
       dp.append(h('ol', 'day-steps', DAY_PHASES.map((p, i) => `<li class="${d && i < d.phase ? 'done' : d && i === d.phase ? 'cur' : ''} ${i === 2 && rk < 1 ? 'lock' : ''}"><b>${p.name}</b><small>${i === 2 && rk < 1 ? 'terbuka di Teknisi Junior' : p.what}</small></li>`).join('')));
       const dr = h('div', 'row left'); dr.append(d ? btn(`Lanjut: ${DAY_PHASES[d.phase].name}`, () => this.nextPhase(), 'btn pri', 'day-continue') : btn(`Mulai Hari ${nn}`, () => this.startDay(), 'btn pri', 'start-day'));
       dp.append(dr); box.append(dp);
+      const lb = h('div', 'row left labrow');
+      lb.append(h('span', 'lab-t', '<b>Lab Praktik</b><small>lembar kerja dari guru · tidak memengaruhi karier</small>'));
+      lb.append(btn('Guru: buat lembar', () => this.openLabTeacher(), 'btn', 'lab-teacher')); lb.append(btn('Siswa: masukkan kode', () => this.openLabStudent(), 'btn', 'lab-student'));
+      box.append(lb);
       this.ensureOffers();
       box.append(h('h3', '', d ? 'Kerja bebas (setelah hari ini selesai)' : 'Kerja bebas · surat kerja tersedia'));
       const grid = h('div', 'offers');
@@ -1459,6 +1586,7 @@ export class Noc {
     });
   }
   private abandon() {
+    if (this.labRun) { for (const j of this.openJobs()) j.status = 'closed'; this.labStepDone(false); return; }
     for (const j of this.openJobs()) j.status = 'closed';
     if (this.s.day) { this.s.day = null; this.s.streak = 0; this.save(); }
     this.mode = 'idle'; this.trackedId = null; this.jobs = [];
@@ -1521,6 +1649,7 @@ export class Noc {
     this.show(box);
   }
   private endWork() {
+    if (this.labRun) { this.labStepDone(true); return; }
     const xp = this.jobs.reduce((a, t) => a + (t.xp ?? 0), 0), st = this.jobs.reduce((a, t) => a + (t.stars ?? 0), 0);
     const msg = this.mode === 'shift' ? `Shift ${this.shift} selesai: ${this.jobs.length} tiket, ${this.jobs.filter(t => t.slaMet).length} tepat SLA, ${st} bintang, +${xp} XP.` : `Surat kerja selesai: ${st} bintang, +${xp} XP. Ambil surat kerja berikutnya atau mulai shift.`;
     const d = this.s.day, nj = this.jobs.length;

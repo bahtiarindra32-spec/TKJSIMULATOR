@@ -290,7 +290,9 @@ function enterWalk(fresh = !started) {
   touchUi?.onEnter();
   missionUI.setHudVisible(true); noc.setHudVisible(true);
   missions.start();
-  if (fresh && !started && (!QS.has('qa') || QS.has('tutor'))) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
+  const labCode = QS.get('lab');
+  if (labCode && !started) setTimeout(() => { if (mode === 'walk') noc.openLabStudent(labCode.slice(0, 7)); }, 900);
+  else if (fresh && !started && (!QS.has('qa') || QS.has('tutor'))) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
   started = true; menu.started = true;
 }
 function exitWalk() {
