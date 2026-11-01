@@ -1001,7 +1001,7 @@ export class Noc {
       const card = h('div', 'swcard');
       const storm = stormOn(sw);
       const upSt = !sw.uplink ? '' : sw.upPort.shutdown ? 'off' : !sw.uplink.cable ? 'nolink' : 'up';
-      card.append(h('div', 'swhead', `<b>${sw.name}</b> <small>${sw.level === 0 ? 'C2960-24TT · Lab Praktik SMK' : `${sw.level >= 4 ? 'C2960X-48FPD (PoE+)' : 'C2960X-48'} · Lantai ${sw.level}`} · ${sw.ip}${sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`));
+      card.append(h('div', 'swhead', `<b>${sw.name}</b> <small>${sw.level === 0 ? 'C2960-24TT · Lab Praktik SMK' : `${sw.level >= 4 ? 'C2960X-48FPD (PoE+)' : 'C2960X-48'} · Lantai ${sw.level}`} · ${sw.ip}${sw.level === 0 ? ' · gateway: router-praktik 192.168.70.1' : sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`));
       card.append(h('div', 'pp-title', `Patch panel ${sw.level === 0 ? 'PP-LAB · Cat6 24' : `PP-L${sw.level} · Cat6 48`} port`));
       const pp = h('div', 'ports pp');
       for (const q of sw.panel) {
