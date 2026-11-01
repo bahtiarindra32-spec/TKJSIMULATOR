@@ -37,6 +37,19 @@ for (const ph of phases) {
       }
       out.crimp = (await fin('crimp')) && /3/.test(t1 ?? '') && /1 sampai 8/.test(t2 ?? '') ? 'OK' : 'FAIL';
     }
+    if (ph === 'exam') {
+      const r0 = await K(() => { const n = window.__kota.noc; n.s.xp = 900; n.s.cert = 0; n.s.day = null; n.mode = 'idle'; n.jobs = []; return { rank: n.rank(), ex: n.examFor() }; });
+      await K(() => window.__kota.noc.openBoard()); await step(2);
+      const sec = await K(() => [...document.querySelectorAll('.noc-modal h3')].map(x => x.textContent).join(' | '));
+      await mclick('exam-start'); await step(2);
+      const j = await K(() => { const j = window.__kota.noc.jobs[0]; return j && { title: j.title, exam: j.exam, sla: j.sla, tpl: j.tpl }; });
+      // fail first (help asked), then pass
+      const res = await K(() => { const n = window.__kota.noc, j = n.jobs[0]; const out = [];
+        j.hint = true; j.age = 0; j.wrong = 0; n.close(j); n.openReport(n.pendingReport.shift()); out.push(n.rank() + ' / ' + document.querySelector('.noc-modal .msg')?.textContent); n.closeModal();
+        n.mode = 'idle'; n.jobs = []; const k = n.startExam(); k.hint = false; k.age = 0; k.wrong = 0; n.close(k); n.openReport(n.pendingReport.shift()); out.push(n.rank() + ' / ' + document.querySelector('.noc-modal .msg')?.textContent); return out; });
+      console.log('  r0', JSON.stringify(r0), '\n  board', sec, '\n  job', JSON.stringify(j), '\n  res', res.join(' || '));
+      out.exam = r0.rank === 'Magang' && r0.ex === 1 && /Uji kompetensi/.test(sec) && j?.exam === 1 && /Magang/.test(res[0]) && /Teknisi Junior/.test(res[1]) ? 'OK' : 'FAIL';
+    }
     if (ph === 'printer') {
       const j = await accept('x_printer'); const lv = +/_L(\d)_/.exec(j.targets[0])[1];
       // printer front panel (same flow qa_office proves with real typing)
@@ -82,7 +95,7 @@ for (const ph of phases) {
       out.failover = (await fin('failover')) && /SLA|track|cadangan|NAT/.test(s0.notes.join()) ? 'OK' : 'FAIL';
     }
     if (ph === 'day') {
-      await K(() => { const n = window.__kota.noc; n.mode = 'idle'; n.jobs = []; n.s.xp = 900; n.openBoard(); });
+      await K(() => { const n = window.__kota.noc; n.mode = 'idle'; n.jobs = []; n.s.xp = 900; n.s.cert = 1; n.openBoard(); });
       await mclick('start-day'); const d0 = await K(() => ({ day: window.__kota.noc.day, mode: window.__kota.noc.mode, tpl: window.__kota.noc.jobs[0]?.tpl, sla: window.__kota.noc.jobs[0]?.sla })); console.log('  morning', JSON.stringify(d0)); await press('Escape');
       const closeAll = async () => { await K(() => { const n = window.__kota.noc; for (const j of n.jobs) if (j.status !== 'closed') { j.targets.forEach(t => { t.ok = t.tested = true; }); n.close(j); } }); for (let i = 0; i < 40; i++) { await step(2); await p.waitForTimeout(60); await mclick('report-ok'); const s = await K(() => ({ idle: window.__kota.noc.mode === 'idle' && !window.__kota.noc.pendingReport.length, ev: /Evaluasi/.test(document.querySelector('.noc-modal h2')?.textContent ?? '') })); if (s.idle || s.ev) break; } };
       await closeAll(); const d1 = await K(() => ({ day: window.__kota.noc.day, mode: window.__kota.noc.mode })); console.log('  after morning', JSON.stringify(d1)); await shot('c_day_board');

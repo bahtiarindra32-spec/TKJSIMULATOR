@@ -109,6 +109,8 @@ export interface Job {
   wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; aiVoice?: boolean; swTouched?: boolean; apId?: string;
   /** work stages: survei (been at the device) → kerja → uji → dokumentasi (berita acara signed) */
   surveyed?: boolean; docReady?: boolean; berita?: string;
+  /** competency test for this rank index: pass = at least two stars and no help asked */
+  exam?: number;
   /** legacy alias for the HUD/waypoint code: the next place to go */
   pc: PcInfo;
 }
@@ -117,7 +119,7 @@ const ITEM_NAME: Record<Item, string> = { toner: 'Toner generator + probe', test
 const apWorld = (ap: Ap) => ({ x: wx(HOTEL_ORIGIN[0] + ap.lx), z: wz(HOTEL_ORIGIN[1] + ap.lz), y: LEVELS[ap.level - 1].elev + LEVELS[ap.level - 1].h - 0.23 });
 
 interface DayRun { n: number; phase: number; xp: number; stars: number; jobs: number; sla: number }
-interface Save { v: 1; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; days: number; streak: number; best: number; day: DayRun | null; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
+interface Save { v: 1; cert?: number; rj45?: number; rj45Used?: number; xp: number; shifts: number; closed: number; slaMet: number; seq: number; contracts: number; stars: number; days: number; streak: number; best: number; day: DayRun | null; seen: string[]; mastery: Partial<Record<string, { ok: number; miss: number }>> }
 const KEY = 'kotaNusantara.noc.v1';
 const NOTES_KEY = 'kotaNusantara.notes.v1';
 function loadNotes(): { id: string; title: string; note: string; t: number }[] {
@@ -183,6 +185,9 @@ export class Noc {
     for (const [id, x] of Object.entries(EXT)) FAULTS[id] = { ...x.def, wired: false, ext: true };
     for (const [id, c] of Object.entries(EXT_C)) (TEMPLATES as Record<string, TplDef>)[`x_${id}`] = { name: c.name, rank: c.rank, xp: c.xp, sla: c.sla, cp: c.cp, brief: c.brief };
     this.s = loadSave();
+    // rank-up needs a passed competency test; older saves keep the rank they already earned
+    if (typeof this.s.cert !== 'number') this.s.cert = this.xpRankIndex();
+    if (typeof this.s.rj45 === 'number') { this.rj45 = this.s.rj45; this.rj45Used = this.s.rj45Used ?? 0; }
     this.CABINET = { name: 'CABINET', label: 'Lemari Alat · Workshop TKJ', x: cabinet.x, y: 1.0, z: cabinet.z, level: 1 };
     this.RACKP = { name: 'RACK', label: 'Rak MDF · Ruang Server L1', x: rack.x, y: 1.4, z: rack.z, level: 1 };
     this.RACKS.MDF = this.RACKP;
@@ -203,10 +208,22 @@ export class Noc {
   maybeStartTutorial() { if (this.mode === 'idle' && !this.s.mastery.tutor && this.s.closed === 0) this.acceptContract('tutor', 1); }
   /** events from devices that are not PCs (IP phones) or modules (QA) */
   extEvent(e: PcEvent) { this.onPc(e); }
-  private save() { try { localStorage.setItem(KEY, JSON.stringify(this.s)); localStorage.setItem(NOTES_KEY, JSON.stringify(this.notes)); } catch { /* ignore */ } }
+  private save() { this.s.rj45 = this.rj45; this.s.rj45Used = this.rj45Used; try { localStorage.setItem(KEY, JSON.stringify(this.s)); localStorage.setItem(NOTES_KEY, JSON.stringify(this.notes)); } catch { /* ignore */ } }
   get xp() { return this.s.xp; }
   get stats() { return { ...this.s }; }
-  rankIndex() { let i = 0; RANKS.forEach((r, k) => { if (this.s.xp >= r.xp) i = k; }); return i; }
+  xpRankIndex() { let i = 0; RANKS.forEach((r, k) => { if (this.s.xp >= r.xp) i = k; }); return i; }
+  rankIndex() { return Math.min(this.xpRankIndex(), this.s.cert ?? 0); }
+  /** the rank whose competency test is open now (XP enough, not yet certified), or -1 */
+  examFor() { const c = this.s.cert ?? 0; return this.xpRankIndex() > c ? c + 1 : -1; }
+  startExam(): Job | null {
+    const to = this.examFor(); if (to < 0 || this.s.day) return null;
+    const pool = (Object.keys(TEMPLATES) as TplId[]).filter(t => TEMPLATES[t].rank <= to - 1 && t !== 'crimp' && t !== 'tutor');
+    const tpl = pool.sort((a, b) => TEMPLATES[b].rank - TEMPLATES[a].rank || TEMPLATES[b].xp - TEMPLATES[a].xp).slice(0, 3)[Math.floor(Math.random() * Math.min(3, pool.length))];
+    const j = this.acceptContract(tpl); if (!j) return null;
+    j.exam = to; j.sla = Math.round(j.sla * 0.8); j.title = `UJI KOMPETENSI ${RANKS[to].name}: ${j.title}`;
+    this.openOrder(j);
+    return j;
+  }
   rank() { return RANKS[this.rankIndex()].name; }
   isModalOpen() { return !!this.modal; }
   onModal(f: (open: boolean) => void) { this.listeners.add(f); }
@@ -1210,7 +1227,7 @@ export class Noc {
   /** answer a question: AI when a key is set and online, otherwise the offline rule engine */
   async askNusa(q: string): Promise<{ text: string; ai: boolean }> {
     const ctx = this.mentorCtx();
-    const tj = this.tracked(); if (tj) tj.hint = true;   // asking for help counts like a hint (no no-hint XP bonus)
+    const tj = this.tracked(); if (tj) { tj.hint = true; if (tj.exam !== undefined) this.toast('Catatan: minta bantuan saat uji kompetensi membuat uji tidak lulus.', 4200); }   // asking for help counts like a hint (no no-hint XP bonus)
     if (aiReady()) {
       try { const a = plain(await chat(mentorPrompt(ctx, this.nusaHist, q))); this.nusaHist.push({ role: 'user', content: q }, { role: 'assistant', content: a }); return { text: a, ai: true }; }
       catch { /* fall through */ }
@@ -1455,6 +1472,12 @@ export class Noc {
       const dr = h('div', 'row left'); dr.append(d ? btn(`Lanjut: ${DAY_PHASES[d.phase].name}`, () => this.nextPhase(), 'btn pri', 'day-continue') : btn(`Mulai Hari ${nn}`, () => this.startDay(), 'btn pri', 'start-day'));
       dp.append(dr); box.append(dp);
       this.ensureOffers();
+      const ex = this.examFor();
+      if (ex > 0) {
+        box.append(h('h3', '', `Uji kompetensi · ${RANKS[ex].name}`));
+        box.append(h('p', 'how', `XP kamu sudah cukup untuk ${RANKS[ex].name}. Pangkat baru naik setelah lulus uji: satu surat kerja tingkat ${RANKS[ex - 1].name}, SLA 80%, tanpa minta bantuan Pak Nusa, minimal ★★.`));
+        const er = h('div', 'row left'); const eb = btn('Ikut uji kompetensi', () => { this.closeModal(); this.startExam(); }, 'btn pri', 'exam-start'); eb.disabled = !!d; er.append(eb); box.append(er);
+      }
       box.append(h('h3', '', d ? 'Kerja bebas (setelah hari ini selesai)' : 'Kerja bebas · surat kerja tersedia'));
       const grid = h('div', 'offers');
       this.offers.forEach((o, i) => {
@@ -1570,8 +1593,18 @@ export class Noc {
     box.append(h('div', 'crit', crit.map(x => `<div>${x}</div>`).join('')));
     box.append(this.noteBox(j));
     const before = this.rankIndex();
-    if (!j.reported) { this.s.xp += j.xp!; j.reported = true; this.save(); }
+    let examMsg = '';
+    if (!j.reported) {
+      this.s.xp += j.xp!; j.reported = true;
+      if (j.exam !== undefined) {
+        const pass = j.stars! >= 2 && !j.hint;
+        if (pass) this.s.cert = Math.max(this.s.cert ?? 0, j.exam);
+        examMsg = pass ? `Lulus uji kompetensi ${RANKS[j.exam].name}.` : `Belum lulus uji kompetensi (${j.hint ? 'minta bantuan saat uji' : 'nilai di bawah ★★'}). Ulangi dari papan kerja kapan saja.`;
+      }
+      this.save();
+    }
     const up = this.rankIndex() > before;
+    if (examMsg) box.append(h('p', 'msg', examMsg));
     box.append(h('p', '', `<b>+${j.xp} XP</b> · total ${this.s.xp} XP`));
     if (up) box.append(h('p', 'msg', `Naik pangkat: <b>${this.rank()}</b>! Surat kerja dan jenis gangguan baru terbuka.`));
     const row = h('div', 'row');

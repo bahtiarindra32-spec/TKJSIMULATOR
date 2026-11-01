@@ -6,7 +6,7 @@ const xpFor = { chaos: 0, static: 0, desk: 0, dns: 600, renum: 600, vlan: 2600, 
 const Q = await boot({ v: 1, xp: xpFor[phases[0]] ?? 0, shifts: 0, closed: 0, slaMet: 0, seq: 0, contracts: 0, stars: 0, seen: [], mastery: {} });
 const { p, K, shot, step, goPc, goAnchor, press, openPc, openCmd, cmd, cmdText, closePc, ipv4, browser, routerLogin, routerNav, fillName, clickName, modalText, mclick, job, consoleLines, report, errs } = Q;
 const results = {};
-const setXp = xp => K(x => { const s = JSON.parse(localStorage.getItem('kotaNusantara.noc.v1')); s.xp = Math.max(s.xp, x); localStorage.setItem('kotaNusantara.noc.v1', JSON.stringify(s)); window.__kota.noc['s'].xp = Math.max(window.__kota.noc['s'].xp, x); }, xp);
+const setXp = xp => K(x => { const s = JSON.parse(localStorage.getItem('kotaNusantara.noc.v1')); s.xp = Math.max(s.xp, x); localStorage.setItem('kotaNusantara.noc.v1', JSON.stringify(s)); window.__kota.noc['s'].xp = Math.max(window.__kota.noc['s'].xp, x); window.__kota.noc['s'].cert = 9; }, xp);
 const accept = async (tpl, seed) => {
   await K(([t, s]) => window.__kota.noc.acceptContract(t, s), [tpl, seed]);
   let t = await modalText(); console.log(`  [${tpl}] modal:`, t?.slice(0, 240));
