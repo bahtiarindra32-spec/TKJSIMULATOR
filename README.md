@@ -66,7 +66,6 @@ Cara cepat tanpa install: buka `single/index.html` langsung di browser (Chrome/E
 | C | Cek fisik di meja: konektor, LED link, LAN tester, patch cord, pasang toner di outlet, tempel label outlet |
 | M | Peta besar (minimap selalu tampil) |
 | Z | Tampilkan 12 zona kota |
-| G / tombol Grafik | Ganti kualitas: Tinggi, Sedang, Rendah, Hemat. `?low` atau perangkat sentuh mulai dari Rendah, `?q=hemat` memaksa level |
 | Esc | Keluar dari mode jalan / tutup jendela (kalau sedang naik motor, motor diparkir di tempat) |
 
 **Saat naik Motor Matic:** W / ↑ gas · S / ↓ rem, kalau sudah berhenti tahan untuk mundur pelan · A / D (← / →) belok · Spasi rem belakang · mouse atau tarik layar untuk melihat sekeliling (kembali ke tengah sendiri saat melaju) · V kamera kejar / mata pengendara · F turun · R kembalikan motor ke jalan terdekat.
@@ -170,12 +169,12 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
 - ✅ Kolisi otomatis untuk semua mesh padat ≥ 25 cm (audit: 76 gedung kota dan 30 properti jalan tertutup kolider).
 - ✅ Anti-flicker (shadow frustum di-snap, near/far kamera dinamis, polygonOffset lantai/marka), GTAO.
-- ✅ 4 level grafik: Tinggi (AO + bayangan), Sedang (bayangan), Rendah (tanpa bayangan, jarak pandang 420 m), Hemat (render 0,7× resolusi, jarak pandang 260 m). Pengawas FPS menurunkan satu level otomatis kalau rata-rata < 24 FPS. Di dalam hotel hanya lantai pemain ±1 yang digambar. Kepadatan kendaraan dan pejalan kaki ikut level grafik.
+- ✅ Satu level grafik untuk semua perangkat: AO, bayangan 4096, lampu malam, pohon dan detail penuh (fasad, AC outdoor, atap, gorong-gorong, isi toko ruko, meja kantor). Kalau rata-rata < 24 FPS, game hanya mematikan AO lalu menurunkan resolusi render; aset tidak berubah. Di dalam hotel hanya lantai pemain ±1 yang digambar.
 - ✅ Kontrol sentuh: tombol E/Q hanya muncul di depan tangga/lift, panel lift di tengah layar, tombol F berlabel aksi yang tersedia.
 - ✅ Loading screen dengan penjaga error WebGL. Tidak ada resource jaringan eksternal (aman offline).
 
 ### Update 30 Okt 2026 (v9)
-- Menu utama ala game: flyover kota 3D, Mulai/Lanjutkan, Mulai dari Awal, Jelajah Kota, Pengaturan (grafik, sensitivitas mouse, volume, invert Y, kamera, siklus hari), Kontrol, Tentang; layar loading; menu pause (Esc) dengan gaya sama. Responsif desktop/HP.
+- Menu utama ala game: flyover kota 3D, Mulai/Lanjutkan, Mulai dari Awal, Jelajah Kota, Pengaturan (sensitivitas mouse, volume, invert Y, kamera, siklus hari), Kontrol, Tentang; layar loading; menu pause (Esc) dengan gaya sama. Responsif desktop/HP.
 - Siklus siang-malam: 1 hari game = 24 menit nyata; tombol **N** / tombol sentuh **Waktu** untuk Pagi/Siang/Sore/Malam; jam di HUD; lampu jalan, jendela, dan lampu kendaraan menyala saat malam.
 - Belokan motor lebih halus (setang, kemiringan, kamera mengikuti pelan).
 - Kota Selatan: kota diperluas 400x300 m menjadi 400x600 m: Jl. Anggrek, Jl. Dahlia, Jl. Flamboyan, Kampung C dan D dengan gang, ruko + minimarket, perkantoran/apartemen, Lapangan Anggrek, Masjid Al-Ikhlas, Taman Dahlia, SMK Nusantara, perumahan.
@@ -190,7 +189,6 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 
 ### Update 31 Okt 2026: NPC hotel
 - Lobi L1: 2 resepsionis di balik meja, satpam dekat pintu, tamu check-in, orang lalu-lalang. Kantor L1-L3: karyawan duduk mengetik di sekitar separuh PC (NPC menghilang saat pemain memakai PC itu). Pantry L2/L3 orang ngobrol, koridor L2-L8 tamu berjalan. NPC lantai pemain ±1 ditampilkan, lobi tetap terlihat dari luar; NPC tidak pernah menghilang mendadak: karyawan berdiri dan geser ke samping meja saat PC-nya mau dipakai.
-- Kualitas grafik (G / tombol Grafik) mengubah isi dunia, bukan cuma cahaya: Tinggi = AO, bayangan 4096, lampu malam, pohon dan detail kecil penuh, lalu lintas ramai; Sedang = pohon 80%; Rendah = tanpa bayangan, pohon 55%, detail kecil luar ruangan disembunyikan; Hemat = material sederhana (Lambert), pohon 30%, tanpa detail kecil, jarak pandang pendek.
 - NPC padat: pemain tidak bisa menembus NPC, dan NPC yang berjalan berhenti kalau jalannya dihalangi pemain.
 - Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
 
