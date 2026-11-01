@@ -14,7 +14,7 @@ export const HOOKS = {
   /** can this segment reach the internet right now (edge router WAN / NAT / ACL)? */
   internet: (_env: Env, _src: string, _dst: string, _proto: 'icmp' | 'udp53' | 'tcp80') => true as boolean,
 };
-export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'none';
+export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'none';
 export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
 export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
 export interface Env {
@@ -55,6 +55,12 @@ export const ENVS: Record<EnvId, Env> = {
   guest: mkEnv('guest', 40, 'Wi-Fi Tamu Hotel', '172.16.4.0', 22, 'tamu.hotel', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
     { ip: '172.16.4.1', name: 'gw-tamu', mac: '48-8f-5a-04-00-01', ttl: 64, web: 'router' },
   ], [100, 1000], 2),
+  // SMK Nusantara practice lab (separate building, own rack and router; not part of the hotel network)
+  prak: mkEnv('prak', 70, 'Lab Praktik SMK', '192.168.70.0', 24, 'praktik.lan', 'Realtek PCIe GbE Family Controller', false, [
+    { ip: '192.168.70.1', name: 'router-praktik', mac: '48-8f-5a-70-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.70.2', name: 'sw-lab', mac: '00-1e-7a-70-00-02', ttl: 255 },
+    { ip: '192.168.70.10', name: 'srv-jobsheet', mac: '52-54-00-70-00-0a', ttl: 64, web: 'server' },
+  ], [100, 150], 8),
   none: {
     id: 'none', vlan: -1, label: 'Tidak ada jaringan (VLAN tanpa router)', net: '169.254.0.0', prefix: 16, gateway: '', dns: [], dhcp: null,
     dnsSrv: { allow: false, upstream: [], records: [] }, suffix: '', hosts: [], internet: false, adapter: 'Intel(R) Ethernet Connection I219-LM', wireless: false, leases: new Map(),
@@ -96,7 +102,7 @@ export interface Switch {
 export const SWITCHES: Switch[] = [];
 const PANEL_OF = new Map<string, { sw: Switch; pp: PanelPort }>();
 export const portName = (n: number) => `Gi1/0/${n}`;
-export const outletId = (lv: number, n: number) => `L${lv}-${String(n).padStart(2, '0')}`;
+export const outletId = (lv: number, n: number) => `${lv === 0 ? 'LAB' : `L${lv}`}-${String(n).padStart(2, '0')}`;
 /** The real identifier of a desk's outlet (= its patch-panel port). */
 export const outletOf = (pc: string) => { const p = PANEL_OF.get(pc); return p ? outletId(p.sw.level, p.pp.n) : '-'; };
 /** What is printed on the wall plate ('' when the label is missing). */
@@ -147,6 +153,14 @@ export function initSwitches(pcNames: string[]) {
     mine.forEach((pc, i) => { const pp = sw.panel[i + Math.floor(i / 4)]; pp.pc = pc; pp.label = outletId(lv, pp.n); pp.patch = i + 1; sw.ports[i].desc = pc.replace(/^PROP_/, '').slice(0, 18); PANEL_OF.set(pc, { sw, pp }); });
     repatch(sw);
     SWITCHES.push(sw);
+  }
+  // Lab Praktik SMK: one 24-port switch in its own rack, VLAN 70, outlets LAB-01.. (no spare outlets: a teaching lab)
+  const lab = pcNames.filter(p => /^PROP_LAB_PC_/.test(p)).sort();
+  if (lab.length) {
+    const sw: Switch = { name: 'SW-LAB', level: 0, ip: '192.168.70.2', ports: [], vlans: new Map([[1, 'default'], [70, 'PRAKTIK']]), dirty: false, panel: [], uplink: null, upPort: { n: 25, pc: null, shutdown: true, vlan: 1, desc: '' }, loop: null, rack: 'LAB' };
+    for (let n = 1; n <= 24; n++) { sw.ports.push({ n, pc: null, shutdown: false, vlan: 70, desc: '', poe: false }); sw.panel.push({ n, pc: null, label: '', patch: null, hang: false }); }
+    lab.forEach((pc, i) => { const pp = sw.panel[i]; pp.pc = pc; pp.label = outletId(0, pp.n); pp.patch = i + 1; sw.ports[i].desc = `MEJA-${i + 1}`; PANEL_OF.set(pc, { sw, pp }); });
+    repatch(sw); SWITCHES.push(sw);
   }
 }
 /** The switch port a PC reaches right now through its outlet + patch cord (null = not patched). */

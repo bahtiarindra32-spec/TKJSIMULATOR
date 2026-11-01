@@ -1,15 +1,14 @@
-// Lab Praktik: a teacher composes a practice sheet, gets a 6-character code; a student types the code (and name)
-// and runs the same simulator jobs in order. The code holds the whole scenario, so no server is needed.
-// Grading is deterministic: each step is an ordinary NOC job that closes only when netsim is healthy and the
-// student tested from the device. AI may only turn the teacher's sentence into form ticks; it never grades.
+// Lab Praktik: a teacher composes a practice sheet (jobsheet), gets a 6-character code; a student types the code
+// (and name) at the lab and works the steps in order on one desk of the school lab building. The code holds the whole scenario, so no server is needed.
+// Grading is deterministic: rubric checkpoints read from netsim (src/game/praktik.ts). AI may only turn the teacher's sentence into form ticks; it never grades.
 export const LAB_STEPS = [
-  { id: 'crimp', name: 'Crimping patch cord T568B', tpl: 'crimp', cp: 'Fase E · Media transmisi' },
-  { id: 'desk', name: 'Pengkabelan terstruktur: outlet → patch panel → switch', tpl: 'desk', cp: 'Fase E · Pengkabelan terstruktur' },
-  { id: 'static', name: 'Alamat IP statis', tpl: 'static', cp: 'Fase E · Pengalamatan IPv4' },
-  { id: 'dhcp', name: 'DHCP server di Linux', tpl: 'x_dhcpsrv', cp: 'Fase F · Administrasi server' },
-  { id: 'vlan', name: 'VLAN di switch', tpl: 'vlan', cp: 'Fase F · VLAN' },
-  { id: 'dns', name: 'DNS lokal', tpl: 'dns', cp: 'Fase F · DNS' },
-  { id: 'trouble', name: 'Troubleshooting 2 gangguan acak', tpl: '', cp: 'Fase F · Troubleshooting' },
+  { id: 'crimp', name: 'Crimping patch cord T568B', cp: 'Fase E · Media transmisi' },
+  { id: 'desk', name: 'Pengkabelan terstruktur: outlet → patch panel → switch', cp: 'Fase E · Pengkabelan terstruktur' },
+  { id: 'static', name: 'Alamat IP statis', cp: 'Fase E · Pengalamatan IPv4' },
+  { id: 'dhcp', name: 'DHCP server di router', cp: 'Fase F · DHCP' },
+  { id: 'vlan', name: 'VLAN di switch lab', cp: 'Fase F · VLAN' },
+  { id: 'dns', name: 'DNS lokal', cp: 'Fase F · DNS' },
+  { id: 'trouble', name: 'Troubleshooting 2 gangguan', cp: 'Fase F · Troubleshooting' },
 ] as const;
 export type LabStepId = typeof LAB_STEPS[number]['id'];
 export interface LabSpec { steps: LabStepId[]; minutes: number; perStudent: boolean; seed: number }

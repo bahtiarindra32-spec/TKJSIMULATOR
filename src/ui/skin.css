@@ -282,3 +282,24 @@ body.hints-off #hints { opacity: 0; }
 .noc-box.labres .lab-tab th, .noc-box.labres .lab-tab td { text-align: left; padding: 6px 6px; border-bottom: 1px solid rgba(0,0,0,.15); }
 .noc-box.labres .lab-tab th { font: 600 10.5px/1 var(--k-mono); letter-spacing: .06em; text-transform: uppercase; }
 @media (max-width: 560px) { .noc-box .lab-form { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------------ Lab Praktik jobsheet (school lab, not the internship board) */
+.jobsheet { position: fixed; left: 12px; top: 104px; width: min(340px, 42vw); max-height: calc(100vh - 140px); overflow: auto; z-index: 60; background: #f4f1e8; color: #1c1d1f; border: 1px solid #c9c3b4; border-top: 4px solid #2bd46b; border-radius: 3px; font: 13px/1.4 var(--k-ui); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.jobsheet .js-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #d8d2c2; }
+.jobsheet .js-h b { font: 700 13px/1 var(--k-cond); letter-spacing: .12em; }
+.jobsheet .js-h span { flex: 1; font-size: 11px; color: #5d5f62; }
+.jobsheet .js-t { background: none; border: 1px solid #b9b3a3; border-radius: 3px; font: 600 11px/1 var(--k-ui); padding: 4px 7px; cursor: pointer; color: #1c1d1f; }
+.jobsheet.min .js-b { display: none; } .jobsheet.min { width: auto; }
+.jobsheet .js-b { padding: 8px 12px 12px; }
+.jobsheet .js-step { font-size: 12.5px; margin-bottom: 6px; }
+.jobsheet dl { margin: 0 0 8px; display: grid; grid-template-columns: 82px 1fr; gap: 3px 8px; font-size: 12px; }
+.jobsheet dt { font: 600 10px/1.6 var(--k-mono); text-transform: uppercase; letter-spacing: .06em; color: #6b6d70; } .jobsheet dd { margin: 0; }
+.jobsheet .js-l { margin: 0 0 8px; padding-left: 18px; font-size: 12.5px; } .jobsheet .js-l li { margin: 2px 0; }
+.jobsheet .js-c { list-style: none; margin: 0 0 10px; padding: 0 0 8px; border-bottom: 1px dashed #c9c3b4; }
+.jobsheet .js-lt { font: 600 10px/1.6 var(--k-mono); text-transform: uppercase; letter-spacing: .06em; color: #6b6d70; }
+.jobsheet .js-c li { display: flex; gap: 8px; align-items: flex-start; margin: 3px 0; font-size: 12.5px; color: #505255; }
+.jobsheet .js-c li i { flex: none; width: 12px; height: 12px; margin-top: 2px; border: 1.5px solid #8a8c8f; border-radius: 2px; }
+.jobsheet .js-c li.ok { color: #1c1d1f; } .jobsheet .js-c li.ok i { background: #2bd46b; border-color: #1e9c4f; }
+body.cb .jobsheet .js-c li.ok i { background: #3b82f6; border-color: #1d4ed8; }
+.noc-box.labres .lab-tab td small { display: block; color: #8a3b30; font-size: 11px; margin-top: 2px; }
+@media (max-width: 560px) { .jobsheet { top: auto; bottom: 120px; width: calc(100vw - 24px); max-height: 40vh; } }

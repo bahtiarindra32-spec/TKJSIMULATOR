@@ -28,7 +28,7 @@ import { hotelAnchorsWorld } from './game/missionSystem';
 import { initLinux, linuxQa } from './pcos/linux';
 import { initOffice, officeQa } from './pcos/office';
 import { edgeQa } from './pcos/edge';
-import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy } from './pcos/net';
+import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy, ENVS } from './pcos/net';
 import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
 import { Vertical } from './game/vertical';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
@@ -38,6 +38,9 @@ import { dressL1, l1Lights } from './world/interiorDressing';
 import { Minimap } from './ui/minimap';
 import { PcOS } from './pcos/os';
 import { Noc } from './game/noc';
+import { Praktik } from './game/praktik';
+import { buildLabTkj, insideLab } from './world/labBuilding';
+import { DEVICES } from './pcos/ext';
 import { setupTouch, touch, isTouch, releaseTouch } from './ui/touch';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -117,6 +120,9 @@ const hotel = buildHotel(world);
 const PCS: { name: string; label: string; p: THREE.Vector3; o: THREE.Object3D }[] = [];
 hotel.updateMatrixWorld(true);
 hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exec(o.name); if (m) PCS.push({ name: o.name, label: `${m[2] === 'PC' ? 'PC' : 'Laptop'} ${m[3].replace(/_/g, ' ')} · ${m[1]}`, p: new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), o }); });
+// the SMK practice lab building (its own rack, switch and segment; not part of the internship)
+const labB = buildLabTkj(world); labB.group.updateMatrixWorld(true);
+for (const c of labB.pcs) PCS.push({ name: c.name, label: c.label, p: new THREE.Box3().setFromObject(c.o).getCenter(new THREE.Vector3()), o: c.o });
 const pcos = new PcOS();
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
@@ -127,6 +133,17 @@ for (const c of PCS) { const lv = +(/_L(\d)_/.exec(c.name)?.[1] ?? 1); if (lv >=
 // IDF wall racks of the office floors (one access switch + patch panel each); the player stands in front of them
 const IDFS = [2, 3, 4, 5, 6, 7, 8].map(lv => { const o = hotel.getObjectByName(`PROP_L${lv}_IDF_RACK_01`); const c = o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : new THREE.Vector3(); return { id: `IDF-L${lv}`, level: lv, x: c.x, y: c.y, z: c.z - 0.9 }; });
 const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET, IDFS);
+(noc.RACKS as Record<string, unknown>).LAB = { name: 'LAB', label: 'Rak Lab Praktik TKJ · SMK Nusantara', x: labB.spots.rack.x, y: 0, z: labB.spots.rack.z, level: 1 };
+const labBoard = (() => { const c = document.createElement('canvas'); c.width = 1024; c.height = 400; const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; (labB.spots.board.material as THREE.MeshStandardMaterial).map = t; (labB.spots.board.material as THREE.MeshStandardMaterial).needsUpdate = true; return { c, t }; })();
+const drawLabBoard = (lines: string[]) => { const g = labBoard.c.getContext('2d')!; g.fillStyle = '#f4f4f0'; g.fillRect(0, 0, 1024, 400); g.fillStyle = '#2bd46b'; g.fillRect(0, 0, 1024, 10); g.fillStyle = '#13202b'; lines.forEach((l, k) => { g.font = k === 0 ? 'bold 46px sans-serif' : '30px sans-serif'; g.fillText(l.slice(0, 60), 30, 64 + (k === 0 ? 0 : 20) + k * 40); }); labBoard.t.needsUpdate = true; };
+const praktik = new Praktik(noc, pcos, labB.pcs.map(c => ({ name: c.name, label: c.label })), drawLabBoard);
+drawLabBoard(['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode']);
+DEVICES.push(
+  { id: 'LAB_GURU', x: labB.spots.guru.x, z: labB.spots.guru.z, level: 1, r: 1.4, hint: () => praktik.run ? '[F] Meja guru · jobsheet berjalan' : '[F] Meja guru · Lab Praktik', use: () => praktik.openDesk() },
+  { id: 'LAB_TOOLS', x: labB.spots.tools.x, z: labB.spots.tools.z, level: 1, r: 1.3, hint: () => '[F] Lemari alat lab', use: () => noc.openCabinet(true) },
+  { id: 'LAB_CRIMP', x: labB.spots.crimp.x, z: labB.spots.crimp.z, level: 1, r: 1.2, hint: () => '[F] Meja crimping', use: () => noc.openCrimpBench() },
+  { id: 'LAB_RACK', x: labB.spots.rack.x, z: labB.spots.rack.z, level: 1, r: 1.3, hint: () => '[F] Rak lab: patch panel & SW-LAB', use: () => noc.openRack('LAB') },
+);
 { // office devices (printers, desk IP phones) + NAS: positions before the static batches merge the meshes
   const pos = (n: string) => { const o = hotel.getObjectByName(n); return o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : null; };
   const printers = [2, 3].map(lv => ({ lv, c: pos(`PROP_L${lv}_PRINTER_01`) })).filter(x => x.c).map(x => ({ id: `PRN-L${x.lv}`, level: x.lv, x: x.c!.x, z: x.c!.z }));
@@ -291,7 +308,7 @@ function enterWalk(fresh = !started) {
   missionUI.setHudVisible(true); noc.setHudVisible(true);
   missions.start();
   const labCode = QS.get('lab');
-  if (labCode && !started) setTimeout(() => { if (mode === 'walk') noc.openLabStudent(labCode.slice(0, 7)); }, 900);
+  if (labCode && !started) setTimeout(() => { if (mode === 'walk') praktik.openStudent(labCode.slice(0, 7)); }, 900);
   else if (fresh && !started && (!QS.has('qa') || QS.has('tutor'))) setTimeout(() => { if (mode === 'walk') noc.maybeStartTutorial(); }, 900);
   started = true; menu.started = true;
 }
@@ -677,6 +694,7 @@ function cullHotel() {
 
 function nearRack(): string | null {
   if (player.level === 1 && Math.hypot(player.pos.x - RACK.x, player.pos.z - RACK.z) < 2.2) return 'MDF';
+  if (insideLab(player.pos.x, player.pos.z) && Math.hypot(player.pos.x - labB.spots.rack.x, player.pos.z - labB.spots.rack.z) < 1.8) return 'LAB';
   for (const d of IDFS) if (player.level === d.level && Math.hypot(player.pos.x - d.x, player.pos.z - (d.z + 0.9)) < 2.2) return d.id;
   return null;
 }
@@ -781,7 +799,7 @@ function updateWalk(dt: number) {
     for (const [nm, ax, az] of ANCHORS) { const d = Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + ax), player.pos.z - wz(HOTEL_ORIGIN[1] + az)); if (d < best) { best = d; nearAnchor = nm; } }
   }
   nearPc = null;
-  if (insideHotel(player.pos.x, player.pos.z)) {
+  if (insideHotel(player.pos.x, player.pos.z) || insideLab(player.pos.x, player.pos.z)) {
     let best = 1.5;
     for (const c of PCS) { if (Math.abs(c.p.y - (player.pos.y + 0.9)) > 1.2) continue; const d = Math.hypot(player.pos.x - c.p.x, player.pos.z - c.p.z); if (d < best) { best = d; nearPc = c; } }
     if (nearPc && nearAnchor && !noc.anchorHint(nearAnchor)) nearAnchor = null;
@@ -966,6 +984,7 @@ const ZONE_LABEL: Record<string, string> = { LOBI: 'Lobi', LOUNGE: 'Lounge', IT_
 /** internal zone id (L2_OPEN_OFFICE, L5_ROOM_503) to a player-facing name */
 function zoneLabel(id: string) { const k = id.replace(/^L\d_/, ''); const r = /^ROOM_(\d+)$/.exec(k); return r ? `Kamar ${r[1]}` : ZONE_LABEL[k] ?? k.replace(/_/g, ' ').toLowerCase(); }
 function locationName(x: number, z: number): string {
+  if (insideLab(x, z)) return 'SMK Nusantara · Lab Praktik TKJ';
   if (insideHotel(x, z)) { const zn = zoneAt(x, z, player.level); return `Nusantara Tech · Lantai ${player.level}${zn ? ' · ' + zoneLabel(zn) : ''}`; }
   const X = cityX(x), Z = cityZ(z);
   for (const r of ROADS) {
@@ -974,8 +993,10 @@ function locationName(x: number, z: number): string {
     if (Math.abs((h ? Z : X) - c) <= half && t >= t0 && t <= t1) return streetLabel(r.name);
   }
   const zn = ZONES.find(zz => X >= zz.x[0] && X <= zz.x[1] && Z >= zz.z[0] && Z <= zz.z[1]);
-  return zn ? zn.name : 'Kota Nusantara';
+  return zn ? (ZONE_NAMES[zn.name] ?? zn.name.replace(/^ZONE_/, '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())) : 'Kota Nusantara';
 }
+/** friendly names for city zones (the object names stay as in the source brief) */
+const ZONE_NAMES: Record<string, string> = { ZONE_SMK_APARTEMEN: 'SMK Nusantara', ZONE_TAMAN: 'Taman Kota', ZONE_CBD_BARAT: 'Perkantoran Barat', ZONE_CBD_TIMUR: 'Perkantoran Timur', ZONE_HUNIAN_TIMUR: 'Hunian Timur', ZONE_HOTEL: 'Halaman Nusantara Tech', ZONE_RUKO: 'Ruko', ZONE_PASAR: 'Pasar', ZONE_MASJID: 'Masjid', ZONE_KAMPUNG_A: 'Kampung', ZONE_KAMPUNG_B: 'Kampung', ZONE_KAMPUNG_C: 'Kampung', ZONE_KAMPUNG_D: 'Kampung', ZONE_LAPANGAN: 'Lapangan', ZONE_TAMAN_DAHLIA: 'Taman Dahlia', ZONE_MASJID_SELATAN: 'Masjid Selatan', ZONE_PERKANTORAN_SELATAN: 'Perkantoran Selatan' };
 
 // ---------- GLB export ----------
 $('btnExport').onclick = () => {
@@ -1158,11 +1179,11 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
     const o1 = d.open; toggleDoor(d); for (let i = 0; i < 90; i++) updateDoors(1 / 60, 1e6, 1e6, 0, null);
     return `opened=${o1.toFixed(2)} closed=${d.open.toFixed(2)} total=${(window as any).__doorCount ?? '?'}`;
   },
-  rawPort: (n: string) => portOf(n)?.port ?? null,
+  rawPort: (n: string) => portOf(n)?.port ?? null, adapter: (n: string) => adapterOf(n), prakEnv: () => ENVS.prak,
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
-  noc, missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
+  noc, praktik, labSpots: () => ({ guru: [labB.spots.guru.x + 200, labB.spots.guru.z + 150], rack: [labB.spots.rack.x + 200, labB.spots.rack.z + 150], tools: [labB.spots.tools.x + 200, labB.spots.tools.z + 150], crimp: [labB.spots.crimp.x + 200, labB.spots.crimp.z + 150] }), missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: is a point (city coords) inside a static collider (r = padding) */
   blockedAt: (X: number, Z: number, y: number, r = 0) => blocked(wx(X), wz(Z), y, r),
