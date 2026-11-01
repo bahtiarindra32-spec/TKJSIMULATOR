@@ -27,6 +27,14 @@ for (const ph of phases) {
       const gw = await K(n => window.__kota.noc.jobs[0] && (window.__kota.pcos ? null : null), pc); void gw;
       console.log('  focus', await K(() => document.activeElement?.tagName + '.' + document.activeElement?.className + ' modal=' + !!document.querySelector('.noc-modal') + ' open=' + window.__kota.pcos.isOpen() + ' cmd=' + !!document.querySelector('#pcos .cmd'))); await p.click('#pcos .cmd').catch(e => console.log('clickfail', e.message.slice(0,120))); await cmd('ping 192.168.10.1', 4500); await shot('c_crimp_cmd'); console.log('  cmd', (await cmdText()).slice(-200).replace(/\n+/g, ' '));
       await closeWins(); await closePc();
+      if (process.env.DOC) { await step(3);
+        console.log('  hud', await K(() => document.querySelector('#noc-hud .stg')?.innerText.replace(/\n/g, '|') + ' cur=' + document.querySelector('#noc-hud .stg .cur')?.textContent));
+        console.log('  open before sign', await K(() => window.__kota.noc.jobs.filter(x => x.status === 'open').length));
+        await K(() => window.__kota.noc.openOrder(window.__kota.noc.jobs.find(x => x.status === 'open' && x.docReady)));
+        await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'ok'; }); await mclick('ba-sign');
+        console.log('  short', await K(() => document.querySelector('.noc-modal .pp-sec:last-of-type')?.innerText.slice(-80)));
+        await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'Patch cord crossover diganti kabel T568B kedua ujung, dites LAN tester 1-8, ping gateway berhasil.'; }); await mclick('ba-sign');
+      }
       out.crimp = (await fin('crimp')) && /3/.test(t1 ?? '') && /1 sampai 8/.test(t2 ?? '') ? 'OK' : 'FAIL';
     }
     if (ph === 'printer') {

@@ -8,7 +8,7 @@ const S = () => K(() => window.__kota.praktik.state());
 const spot = async k => { const s = await K(k => window.__kota.labSpots()[k], k); for (const [dx, dz] of [[0.6, 0], [-0.6, 0], [0, 0.6], [0, -0.6], [0.5, 0.5]]) { await go(s[0] + dx, s[1] + dz, 1); const hint = await K(() => window.__kota.state().hint); if (/Meja guru|Lemari alat lab|Meja crimping|Rak lab/.test(hint)) return hint; } return null; };
 const goPcL = async name => { const c = await K(n => window.__kota.pcs().find(c => c.name === n), name); for (const [dx, dz] of [[0, .9], [0, -.9], [.9, 0], [-.9, 0], [0, .7], [0, -.7]]) { await go(c.x + dx, c.z + dz, 1); if (await K(() => window.__kota.state().hint?.includes('PC Lab') || /Duduk|PC/.test(window.__kota.state().hint ?? ''))) return true; } return false; };
 const pcDo = async (pc, fn) => { await goPcL(pc); await openPc(pc); await fn(); await closeWins(); await closePc(); await step(3); };
-const tick = () => K(() => { window.__kota.praktik.tick(); if (window.__kota.praktik.state()?.ready) window.__kota.praktik.paraf(); });
+const tick = async () => { for (let k = 0; k < 12; k++) { const r = await K(() => { const p = window.__kota.praktik; p.tick(); const st = p.state(); if (st?.ready) { p.paraf(); return 1; } return st ? 0 : 1; }); if (r) return; await new Promise(z => setTimeout(z, 700)); } };
 try {
   if (ph === 'sheet') {
     await go(240, 500, 1, -Math.PI / 2);

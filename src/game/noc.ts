@@ -107,6 +107,8 @@ export interface Job {
   envId: string; sw?: string; vlanName?: string; record?: { name: string; ip: string }; router?: { ip: string; prefix: number; start: string; end: string };
   tut?: Tut;
   wrong: number; log: string[]; snap: string[]; hint: boolean; swPort?: Record<string, number>; detail?: string; xp?: number; stars?: number; slaMet?: boolean; collateral?: string[]; reported?: boolean; aiVoice?: boolean; swTouched?: boolean; apId?: string;
+  /** work stages: survei (been at the device) → kerja → uji → dokumentasi (berita acara signed) */
+  surveyed?: boolean; docReady?: boolean; berita?: string;
   /** legacy alias for the HUD/waypoint code: the next place to go */
   pc: PcInfo;
 }
@@ -194,6 +196,8 @@ export class Noc {
   private tutEl: HTMLElement;
   /** set by the game every frame: is the player walking? (stuck detection for tutorial hints) */
   playerMoving = false;
+  /** a verified job waits for the technician's berita acara before it closes (QA can switch it off) */
+  docRequired = true;
   private stuck = { key: '', t: 0, idle: 0, wrong: 0, lvl: 0 };
   /** first time in the game: start the tutorial job by itself */
   maybeStartTutorial() { if (this.mode === 'idle' && !this.s.mastery.tutor && this.s.closed === 0) this.acceptContract('tutor', 1); }
@@ -296,6 +300,7 @@ export class Noc {
     return (j.targets.find(t => !(t.ok && t.tested)) ?? j.targets[0]).pc;
   }
   nextHint(j: Job): string {
+    if (j.docReady) return 'Dokumentasi: buka surat kerja (T → Surat), isi berita acara, tanda tangan & serahkan';
     const n = this.needs(j);
     if (j.faults.some(f => EDGE_F.includes(f)) && n.length) return `Ambil di Lemari Alat: ${n.map(i => ITEM_NAME[i]).join(', ')}`;
     if (j.faults.some(f => EDGE_F.includes(f)) && !j.faults.every(f => !EXT[f] || EXT[f].ok(j.targets[0].pc.name))) return 'Router edge R-EDGE di rak 1 ruang server L1 [F]: console';
@@ -795,6 +800,7 @@ export class Noc {
   // ---------------------------------------------------------------- physical work
   hintAt(nearPc: string | null, nearRack: string | null): string | null {
     this.whereNow = { pc: nearPc, rack: nearRack };
+    if (nearPc) for (const j of this.openJobs()) if (j.targets.some(t => t.pc.name === nearPc)) j.surveyed = true;
     if (nearPc && !isWireless(nearPc)) return '[C] Cek fisik kabel & outlet';
     if (nearRack && nearRack !== 'MDF') return `[F] ${this.RACKS[nearRack]?.label ?? 'Rak IDF'} (patch panel · switch)`;
     return null;
@@ -1143,7 +1149,10 @@ export class Noc {
   private check(fromTest: boolean) {
     for (const j of this.openJobs()) {
       for (const t of j.targets) { const ok = this.targetOk(j, t); if (!ok) { t.ok = false; t.tested = false; } else t.ok = true; }
-      if (j.targets.every(t => t.ok && t.tested) && !this.globalProblem(j)) this.close(j);
+      const done = j.targets.every(t => t.ok && t.tested) && !this.globalProblem(j);
+      if (!done) { j.docReady = false; continue; }
+      if (!this.docRequired || j.tut) { this.close(j); continue; }
+      if (!j.docReady) { j.docReady = true; this.toast(`${j.id} lolos uji. Tutup dengan berita acara: T → Surat → tanda tangan.`, 4200); }
     }
     void fromTest;
   }
@@ -1373,10 +1382,34 @@ export class Noc {
     const g = this.globalProblem(j);
     this.hud.innerHTML = `<div class="top"><b>${this.mode === 'shift' ? `SHIFT ${this.shift}` : 'SURAT KERJA'}</b><span>${done}/${this.jobs.length} selesai</span></div>
       <div class="tk"><span class="pr p-${j.prio}">${j.prio}</span> <b>${j.id}</b> <span class="sla ${left < 0 ? 'late' : left < 60 ? 'warn' : ''}">SLA ${mmss(left)}</span></div>
-      <div class="ttl">${esc(j.kind === 'ticket' ? `“${j.title}”` : j.title)}</div>${rows}${g ? `<div class="gp"><i class="st no"></i>${esc(g)}</div>` : ''}
+      <div class="ttl">${esc(j.kind === 'ticket' ? `“${j.title}”` : j.title)}</div>${this.stageBar(j)}${rows}${g ? `<div class="gp"><i class="st no"></i>${esc(g)}</div>` : ''}
       <div class="nx">${esc(this.nextHint(j))}</div>
       ${j.hint && j.kind === 'ticket' ? `<div class="hint">Petunjuk: ${FAULTS[j.faults[0]].hint}</div>` : ''}
       ${bag ? `<div class="bag">Dibawa: ${bag}</div>` : ''}<div class="keys"><kbd>T</kbd> Papan kerja <kbd>J</kbd> Pak Nusa</div>`;
+  }
+
+  /** survei → kerja → uji → dokumentasi, read from the real job state */
+  stage(j: Job): 0 | 1 | 2 | 3 | 4 {
+    const ok = j.targets.every(t => t.ok) && !this.globalProblem(j);
+    if (j.status === 'closed') return 4;
+    if (j.docReady) return 3;
+    if (ok) return 2;
+    if (j.surveyed || j.targets.some(t => t.ok)) return 1;
+    return 0;
+  }
+  private stageBar(j: Job) {
+    if (j.tut) return '';
+    const n = this.stage(j);
+    return `<div class="stg">${['Survei', 'Kerja', 'Uji', 'Dokumentasi'].map((x, i) => `<span class="${i < n ? 'done' : i === n ? 'cur' : ''}">${x}</span>`).join('')}</div>`;
+  }
+  /** berita acara: written by the technician, signed, then the job closes (live state re-checked first) */
+  signBerita(j: Job, text: string): string {
+    if (j.status === 'closed') return 'Sudah ditutup.';
+    if (text.trim().length < 25) return 'Tulis uraian penyebab & tindakan minimal satu kalimat (25 huruf).';
+    for (const t of j.targets) if (!this.targetOk(j, t)) { t.ok = false; t.tested = false; j.docReady = false; return `Belum bisa ditandatangani: ${t.pc.label} tidak lagi lolos uji (${t.note || 'cek ulang'}).`; }
+    if (this.globalProblem(j)) { j.docReady = false; return 'Belum bisa ditandatangani: masih ada masalah di jaringan.'; }
+    j.berita = text.trim().slice(0, 600); j.log.push('Berita acara ditandatangani & diserahkan');
+    this.close(j); return '';
   }
 
   // ---------------------------------------------------------------- UI
@@ -1495,7 +1528,16 @@ export class Noc {
     box.append(h('div', 'pp-sign', `<div><small>Diterbitkan oleh</small><b>Kak Rani</b><span>Supervisor NOC</span></div><div><small>Teknisi pelaksana</small><b>${esc(this.rank())}</b><span>${j.status === 'closed' ? 'sudah dikerjakan' : 'tanda tangan setelah selesai'}</span></div><i class="stamp ${j.status === 'closed' ? 'done' : ''}">${j.status === 'closed' ? 'SELESAI' : 'DITERIMA'}</i>`));
     const rw = h('div', 'row');
     if (spk) rw.append(btn('Briefing', () => this.openBrief(j)));
-    rw.append(btn('Mulai kerja', () => this.closeModal(), 'btn pri', 'order-ok'));
+    if (j.status === 'open' && j.docReady) {
+      const log = [...new Set(j.log)].slice(-8);
+      const ba = h('div', 'pp-sec', `<small>BERITA ACARA PEKERJAAN</small><div class="pp-line">Hasil uji: ${j.targets.map(t => esc(t.pc.label) + ' lolos').join(' · ')}</div>${log.map(x => `<div class="pp-line">${esc(x)}</div>`).join('')}<label class="pp-line">Uraian penyebab &amp; tindakan (ditulis teknisi):</label>`);
+      const ta = document.createElement('textarea'); ta.name = 'ba-note'; ta.rows = 3; ta.className = 'ba-note'; ta.placeholder = 'Contoh: kabel di outlet putus, dibuat patch cord baru T568B, dites LAN tester 1–8, ping gateway berhasil.';
+      ta.addEventListener('keydown', e => e.stopPropagation());
+      const msg = h('div', 'pp-line', '');
+      ba.append(ta, msg); box.append(ba);
+      rw.append(btn('Tanda tangan & serahkan', () => { const m = this.signBerita(j, ta.value); if (m) msg.textContent = m; else this.closeModal(); }, 'btn pri', 'ba-sign'));
+      rw.append(btn('Nanti', () => this.closeModal(), 'btn', 'order-ok'));
+    } else rw.append(btn('Mulai kerja', () => this.closeModal(), 'btn pri', 'order-ok'));
     box.append(rw);
     this.show(box);
   }
@@ -1513,6 +1555,7 @@ export class Noc {
     box.append(h('h2', '', `Laporan kerja ${j.id} <span class="stars">${'★'.repeat(j.stars!)}${'☆'.repeat(3 - j.stars!)}</span><i class="stamp done mini">SELESAI</i>`));
     const lines: string[] = [];
     lines.push(`<b>Pekerjaan:</b> ${esc(j.title)}`);
+    if (j.berita) lines.push(`<b>Berita acara:</b> ${esc(j.berita)}`);
     if (j.kind === 'ticket') lines.push(`<b>Temuan:</b> ${j.detail ? esc(j.detail) + (j.faults.length > 1 ? ' + ' : '') : ''}${j.faults.filter((f, i) => !(i === 0 && j.detail)).map(f => `${FAULTS[f].cause} → ${FAULTS[f].fix}`).join(' + ')} <small>(${j.faults.map(f => FAULTS[f].cp).join(' · ')})</small>`);
     if (j.kind === 'contract') lines.push(`<b>Hasil:</b> ${j.targets.map(t => esc(`${t.pc.label}: ${(() => { const l = live(adapterOf(t.pc.name)); return `${l.ip}/${l.prefix}${adapterOf(t.pc.name).dhcp ? ' (DHCP)' : ' (statis)'}`; })()}`)).join(' · ')}`);
     box.append(h('div', 'order', lines.map(x => `<div>${x}</div>`).join('')));

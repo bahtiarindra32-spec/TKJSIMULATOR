@@ -303,3 +303,9 @@ body.hints-off #hints { opacity: 0; }
 body.cb .jobsheet .js-c li.ok i { background: #3b82f6; border-color: #1d4ed8; }
 .noc-box.labres .lab-tab td small { display: block; color: #8a3b30; font-size: 11px; margin-top: 2px; }
 @media (max-width: 560px) { .jobsheet { top: auto; bottom: 120px; width: calc(100vw - 24px); max-height: 40vh; } }
+
+#noc-hud .stg { display: flex; gap: 2px; margin: 4px 0 6px; font: 600 9.5px/1.2 var(--k-mono); text-transform: uppercase; letter-spacing: .04em; }
+#noc-hud .stg span { flex: 1; padding: 3px 0; text-align: center; border: 1px solid var(--k-line); color: var(--k-mute); }
+#noc-hud .stg span.done { color: var(--k-tx); border-color: var(--k-line2); }
+#noc-hud .stg span.cur { color: var(--k-acc); border-color: var(--k-acc); }
+.noc-box textarea.ba-note { width: 100%; box-sizing: border-box; font: 13px/1.4 var(--k-ui); padding: 6px; }
