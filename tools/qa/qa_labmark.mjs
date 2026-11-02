@@ -1,0 +1,10 @@
+import { boot } from './qa_lib.mjs';
+const Q = await boot({ v: 1, xp: 1234, shifts: 2, closed: 5, slaMet: 5, seq: 9, contracts: 3, stars: 12, days: 2, streak: 1, best: 25, day: null, seen: ['tutor'], mastery: { tutor: { ok: 1, miss: 0 } } }, { viewport: { width: 1280, height: 720 } });
+const { p, K, go, step, openPc, errs } = Q; const out = {};
+await K(() => { window.__kota.praktik.start({ steps: ['static', 'trouble'], minutes: 60, perStudent: true, seed: 77 }, 'TEST01', 'Budi'); window.__kota.noc.closeModal?.(); });
+await go(240, 497, 1, Math.PI); await step(10);
+out.wp = await K(() => document.elementsFromPoint(100, 300).map(e => e.id + '.' + String(e.className).slice(0,20)).join(' > '));
+await p.screenshot({ path: '/workspace/work/shots/lab_mark.png' });
+const pc = await K(() => window.__kota.praktik.state().pc); await openPc(pc); await p.waitForTimeout(1300);
+out.obj = await K(() => document.querySelector('#pcos .pc-obj')?.textContent);
+console.log('RESULT', JSON.stringify(out), errs); await Q.b.close();

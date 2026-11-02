@@ -21,6 +21,8 @@ const camPos = new THREE.Vector3();
 
 export interface WaypointOpts {
   label?: string;
+  /** a panel the marker must not sit under (it slides to the panel's right edge) */
+  avoid?: HTMLElement | null;
   /** Height of the marker above the floor (metres). Default 1.4. */
   height?: number;
   /** Distance at which the label switches to "Tekan F". Default 1.6. */
@@ -59,6 +61,8 @@ export function updateWaypoint(wp: WaypointEl, camera: THREE.PerspectiveCamera, 
     sx = cx + dx * s; sy = cy + dy * s;
     angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
   }
+  // never hide under a side panel (job HUD / jobsheet): slide out to its right edge
+  const av = opts.avoid; if (av && av.offsetWidth) { const r = av.getBoundingClientRect(); if (sx < r.right + 24 && sy > r.top - 40 && sy < r.bottom + 60) sx = r.right + 34; }
   wp.el.hidden = false;
   wp.el.classList.toggle('edge', !onScreen);
   wp.el.classList.toggle('near', near);

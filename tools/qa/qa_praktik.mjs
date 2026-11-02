@@ -71,7 +71,8 @@ try {
     const res = await modalText(); console.log('  result', res?.slice(0, 600));
     const xp = await K(() => JSON.parse(localStorage.getItem('kotaNusantara.noc.v1')).xp), jobs = await K(() => window.__kota.noc.jobs.length);
     console.log('  career xp', xp, 'noc jobs', jobs);
-    out.run = /Nilai/.test(res ?? '') && /100/.test(res ?? '') && xp === 1234 ? 'OK' : 'FAIL';
+    const csv = await K(() => window.__kota.praktik.last?.csv ?? ''); console.log('  csv lines', csv.split('\r\n').length, csv.split('\r\n')[1]?.slice(0, 160));
+    out.run = /Sangat Kompeten/.test(res ?? '') && /nilai/i.test(res ?? '') && csv.split('\r\n').length > 30 && xp === 1234 ? 'OK' : 'FAIL';
   }
 } catch (e) { console.log('  !!', e.message.slice(0, 300)); out[ph] = 'ERR'; }
 console.log('\nRESULT', JSON.stringify(out), 'errors', JSON.stringify(errs.slice(0, 5)));

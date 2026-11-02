@@ -7,6 +7,7 @@ import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstr
 import { judge } from './crimp';
 import { ENVS, SWITCHES, adapterOf, bounce, live, linkUp, panelOf, portOf, portName, outletOf, repatch, type Switch } from '../pcos/net';
 import { aiReady, chat } from '../ai/nusa';
+import { ukkGrade, ukkCsv, isCore, type UkkStep } from './ukk';
 import type { Noc } from './noc';
 import type { PcOS } from '../pcos/os';
 
@@ -43,7 +44,7 @@ const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langk
 
 export class Praktik {
   run: Run | null = null;
-  last: { score: number; txt: string } | null = null;
+  last: { score: number; txt: string; predikat?: string; csv?: string } | null = null;
   private panel = h('div', 'jobsheet');
   private timer = 0;
   private collapsed = false;
@@ -68,7 +69,7 @@ export class Praktik {
     } else {
       box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk. Penilaian dari rubrik simulator, bukan AI.'));
       const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); box.append(rw);
-      if (this.last) box.append(h('p', 'msg', `Hasil terakhir: nilai ${this.last.score}.`));
+      if (this.last) box.append(h('p', 'msg', `Hasil terakhir: ${this.last.predikat ?? ""} nilai ${this.last.score}.`));
     }
     this.noc.present(box);
   }
@@ -231,19 +232,35 @@ export class Praktik {
     this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board();
     const total = performance.now() - R.t0, over = R.spec.minutes > 0 && total > R.spec.minutes * 60000;
     const got = R.res.reduce((s, r) => s + r.got, 0), of = R.res.reduce((s, r) => s + r.of, 0);
-    const score = Math.round(got / Math.max(1, of) * 100);
+    const steps: UkkStep[] = R.res.map(r => ({ name: LAB_STEPS.find(x => x.id === r.step)!.name, checks: r.checks, ms: r.ms, done: r.done }));
+    const G = ukkGrade(steps, total, R.spec.minutes), score = G.nilai;
     const mm = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
     const when = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
     const box = h('div', 'noc-box paper labres');
     box.append(h('div', 'pp-head', `<div><b>LAB PRAKTIK TKJ · SMK NUSANTARA</b><small>Lembar hasil jobsheet</small></div><div class="pp-no"><small>KODE</small><b>${esc(R.code)}</b></div>`));
-    box.append(h('table', 'pp-fields', `<tr><th>Nama</th><td>${esc(R.name)}</td><th>Meja</th><td class="mono">${R.P.desk}</td></tr><tr><th>Tanggal</th><td class="mono">${esc(when)}</td><th>Durasi</th><td class="mono">${mm(total)}${R.spec.minutes ? ` / ${R.spec.minutes}:00` : ''}${over ? ' · LEWAT' : ''}</td></tr><tr><th>Checkpoint</th><td class="mono">${got}/${of}</td><th>Nilai</th><td class="mono"><b>${score}</b></td></tr>`));
-    box.append(h('table', 'lab-tab', `<tr><th>Langkah</th><th>Checkpoint</th><th>Waktu</th><th>Status</th></tr>${R.res.map(r => `<tr><td>${LAB_STEPS.find(x => x.id === r.step)!.name}${r.checks.filter(c => !c.ok).length ? `<small>${r.checks.filter(c => !c.ok).map(c => '✗ ' + esc(c.label)).join('<br>')}</small>` : ''}</td><td class="mono">${r.got}/${r.of}</td><td class="mono">${r.ms ? mm(r.ms) : '-'}</td><td>${r.done ? 'Tuntas' : r.checks.length ? 'Belum tuntas' : 'Tidak dikerjakan'}</td></tr>`).join('')}`));
-    box.append(h('p', 'how', 'Nilai = checkpoint terpenuhi ÷ seluruh checkpoint × 100. Checkpoint dibaca langsung dari simulator jaringan (urutan kabel, port switch, VLAN, IP, DHCP, DNS, hasil uji dari PC), tidak dinilai AI. Tanpa server, lembar ini bisa dipalsukan; guru sebaiknya melihat langsung atau meminta tangkapan layar.'));
-    const txt = `Lab Praktik TKJ ${R.code} · ${R.name} · Meja ${R.P.desk} · ${when}\nNilai ${score} (${got}/${of} checkpoint) · durasi ${mm(total)}${over ? ' (lewat batas)' : ''}\n${R.res.map(r => `- ${LAB_STEPS.find(x => x.id === r.step)!.name}: ${r.checks.length ? `${r.got}/${r.of}` : `tidak dikerjakan (0/${r.of})`}${r.done ? `, ${mm(r.ms)}` : ''}`).join('\n')}`;
-    this.last = { score, txt };
-    const rw = h('div', 'row'); rw.append(btn('Salin hasil', () => { void navigator.clipboard?.writeText(txt).catch(() => {}); this.noc.toast('Hasil disalin.'); }, 'btn', 'lab-copyres')); rw.append(btn('Tutup', () => this.noc.closeModal(), 'btn pri', 'lab-done'));
+    box.append(h('table', 'pp-fields', `<tr><th>Nama</th><td>${esc(R.name)}</td><th>Meja</th><td class="mono">${R.P.desk}</td></tr><tr><th>Tanggal</th><td class="mono">${esc(when)}</td><th>Durasi</th><td class="mono">${mm(total)}${R.spec.minutes ? ` / ${R.spec.minutes}:00` : ''}${over ? ' · LEWAT' : ''}</td></tr><tr><th>Elemen utama</th><td class="mono">${G.coreOk}/${G.coreOf}</td><th>Pendukung</th><td class="mono">${G.supOk}/${G.supOf}</td></tr><tr><th>Predikat</th><td><b>${G.predikat}</b></td><th>Nilai</th><td class="mono"><b>${score}</b></td></tr>`));
+    box.append(h('table', 'lab-tab', `<tr><th>Langkah</th><th>Checkpoint</th><th>Waktu</th><th>Status</th></tr>${R.res.map(r => `<tr><td>${LAB_STEPS.find(x => x.id === r.step)!.name}${r.checks.filter(c => !c.ok).length ? `<small>${r.checks.filter(c => !c.ok).map(c => '✗ ' + esc(c.label) + (isCore(c.label) ? ' · utama' : ' · pendukung')).join('<br>')}</small>` : ''}</td><td class="mono">${r.got}/${r.of}</td><td class="mono">${r.ms ? mm(r.ms) : '-'}</td><td>${r.done ? 'Tuntas' : r.checks.length ? 'Belum tuntas' : 'Tidak dikerjakan'}</td></tr>`).join('')}`));
+    box.append(h('p', 'how', 'Format mengikuti lembar penilaian UKK: kriteria utama (jaringan berfungsi & teruji) dan pendukung (label, nama VLAN, simpan konfigurasi). Ada kriteria utama yang gagal = Belum Kompeten. Posisi nilai di dalam rentang predikat memakai aturan simulator (porsi pendukung, efisiensi waktu); guru tetap berhak mengoreksi. Semua kriteria dibaca dari simulator jaringan, tidak dinilai AI. Tanpa server, lembar ini bisa dipalsukan; guru sebaiknya melihat langsung.'));
+    const txt = `Lab Praktik TKJ ${R.code} · ${R.name} · Meja ${R.P.desk} · ${when}\n${G.predikat} · nilai ${score} (utama ${G.coreOk}/${G.coreOf}, pendukung ${G.supOk}/${G.supOf}) · durasi ${mm(total)}${over ? ' (lewat batas)' : ''}\n${R.res.map(r => `- ${LAB_STEPS.find(x => x.id === r.step)!.name}: ${r.checks.length ? `${r.got}/${r.of}` : `tidak dikerjakan (0/${r.of})`}${r.done ? `, ${mm(r.ms)}` : ''}`).join('\n')}`;
+    const csv = ukkCsv({ kode: R.code, nama: R.name, meja: R.P.desk, tanggal: when, durasi: mm(total) }, steps, G);
+    this.last = { score, txt, predikat: G.predikat, csv };
+    const rw = h('div', 'row'); rw.append(btn('Salin hasil', () => { void navigator.clipboard?.writeText(txt).catch(() => {}); this.noc.toast('Hasil disalin.'); }, 'btn', 'lab-copyres')); rw.append(btn('Unduh CSV', () => this.download(csv, `praktik-${R.code}-${R.name.replace(/[^\w]+/g, '_')}.csv`), 'btn', 'lab-csv'));
+    rw.append(btn('Cetak A4', () => this.print(box, R.name), 'btn', 'lab-print'));
+    rw.append(btn('Tutup', () => this.noc.closeModal(), 'btn pri', 'lab-done'));
     box.append(rw);
     this.noc.present(box);
+  }
+
+  private download(text: string, name: string) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); a.download = name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  /** A4 sheet with signature boxes for the assessor and the student, printed from a hidden frame (works offline) */
+  private print(box: HTMLElement, name: string) {
+    const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0'; document.body.append(f);
+    const d = f.contentDocument!; const body = box.cloneNode(true) as HTMLElement; body.querySelectorAll('.row, button').forEach(e => e.remove());
+    d.open(); d.write(`<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Lembar hasil praktik · ${esc(name)}</title><style>@page{size:A4;margin:16mm}body{font:11pt/1.4 system-ui,Arial,sans-serif;color:#000}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #444;padding:4px 6px;text-align:left;vertical-align:top}small{display:block;color:#333}.pp-head{display:flex;justify-content:space-between;border-bottom:2px solid #000;margin-bottom:8px}.how{font-size:9pt;color:#333}.sig{display:flex;gap:24px;margin-top:28px}.sig div{flex:1;border-top:1px solid #000;padding-top:4px;text-align:center;margin-top:56px}</style></head><body>${body.innerHTML}<div class="sig"><div>Peserta</div><div>Penilai / Guru</div></div></body></html>`);
+    d.close(); setTimeout(() => { f.contentWindow?.print(); setTimeout(() => f.remove(), 1000); }, 200);
   }
 
   // ---------------------------------------------------------------- jobsheet panel + whiteboard
@@ -265,5 +282,13 @@ export class Praktik {
     this.onBoard(R ? [`JOBSHEET ${R.code}`, `${R.name} · Meja ${R.P.desk}`, ...R.spec.steps.map((s, i) => `${i < R.i ? '✓' : i === R.i ? '▶' : '·'} ${i + 1}. ${LAB_STEPS.find(x => x.id === s)!.name}`)] : ['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode', this.last ? `Hasil terakhir: nilai ${this.last.score}` : '']);
   }
   /** for QA and the HUD */
+  /** one line for the PC screen: which jobsheet step, and what is still open on its rubric */
+  objective(): string {
+    const R = this.run; if (!R) return '';
+    const s = R.spec.steps[R.i]; if (!s) return '';
+    if (R.ready) return `Langkah ${R.i + 1}/${R.spec.steps.length} selesai · minta paraf di meja guru`;
+    const c = this.checks(), n = c.filter(x => x.ok).length;
+    return `Langkah ${R.i + 1}/${R.spec.steps.length} · ${LAB_STEPS.find(x => x.id === s)!.name} · checkpoint ${n}/${c.length}`;
+  }
   state() { const R = this.run; return R && { step: R.spec.steps[R.i], i: R.i, pc: R.pc, desk: R.P.desk, P: R.P, checks: this.checks(), ready: !!R.ready }; }
 }

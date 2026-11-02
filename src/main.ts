@@ -125,7 +125,7 @@ const labB = buildLabTkj(world); labB.group.updateMatrixWorld(true);
 for (const c of labB.pcs) PCS.push({ name: c.name, label: c.label, p: new THREE.Box3().setFromObject(c.o).getCenter(new THREE.Vector3()), o: c.o });
 const pcos = new PcOS();
 pcos.clock = () => dn.clock();
-pcos.objective = () => { const j = noc.tracked(); if (!j || j.status === 'closed') return ''; return `${j.tut ? 'Tugas' : ['Survei', 'Kerja', 'Uji', 'Dokumentasi', 'Selesai'][noc.stage(j)]} · ${noc.nextHint(j)}`; };
+pcos.objective = () => { if (praktik.run) return praktik.objective(); const j = noc.tracked(); if (!j || j.status === 'closed') return ''; return `${j.tut ? 'Tugas' : ['Survei', 'Kerja', 'Uji', 'Dokumentasi', 'Selesai'][noc.stage(j)]} · ${noc.nextHint(j)}`; };
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));
@@ -1105,11 +1105,14 @@ function frame() {
     const onL1 = player.level === 1;
     missions.setPlayerPos(onL1 ? player.pos.x : 1e6, onL1 ? player.pos.z : 1e6);
     const cur = missions.current();
-    const tk = noc.tracked();
-    if (tk && !uiBlocked()) {
+    const tk = noc.tracked(), lt = labTarget();
+    if (lt && !uiBlocked()) {
+      missionMarker.setTarget({ x: lt.x, z: lt.z, y: lt.y }); missionMarker.update(t);
+      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: lt.x, z: lt.z, y: lt.y + 1.3 }, { label: lt.label, avoid: (document.querySelector('.jobsheet') as HTMLElement | null) ?? document.getElementById('noc-hud') });
+    } else if (tk && !uiBlocked()) {
       const same = player.level === tk.pc.level, fy = tk.pc.y - 1.0;
       missionMarker.setTarget(same ? { x: tk.pc.x, z: tk.pc.z, y: fy } : null); missionMarker.update(t);
-      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: tk.pc.x, z: tk.pc.z, y: fy + 1.3 }, { label: same ? `${tk.id} · ${tk.pc.label}` : `${tk.pc.level > player.level ? 'Naik' : 'Turun'} ke Lantai ${tk.pc.level} · ${tk.id}` });
+      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: tk.pc.x, z: tk.pc.z, y: fy + 1.3 }, { label: same ? `${tk.id} · ${tk.pc.label}` : `${tk.pc.level > player.level ? 'Naik' : 'Turun'} ke Lantai ${tk.pc.level} · ${tk.id}`, avoid: (document.querySelector('.jobsheet') as HTMLElement | null) ?? document.getElementById('noc-hud') });
     } else {
     const tgt = cur.targetPos && !missions.isModalOpen() ? { x: cur.targetPos.x, z: cur.targetPos.z, y: cur.targetY } : null;
     missionMarker.setTarget(tgt); missionMarker.update(t);
@@ -1125,7 +1128,20 @@ window.addEventListener('resize', () => { camera.aspect = window.innerWidth / wi
 applyQuality(qName, 'start');
 $('btnGfx').style.display = 'none';
 function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
-function missionTarget(): { x: number; z: number } | null { const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
+/** Lab Praktik: point at the place the current jobsheet step happens (crimping table, rack, the student's desk, or the teacher for initials) */
+const labPcPos = new Map<string, THREE.Vector3>();
+function labTarget(): { x: number; z: number; y: number; label: string } | null {
+  const R = praktik.run; if (!R) return null;
+  const fy = labB.group.getWorldPosition(new THREE.Vector3()).y, S = labB.spots;
+  if (R.ready) return { ...S.guru, y: fy, label: 'Meja guru · minta paraf' };
+  const step = R.spec.steps[R.i];
+  if (step === 'crimp') return { ...S.crimp, y: fy, label: 'Meja crimping' };
+  if (step === 'desk' || step === 'vlan') return { ...S.rack, y: fy, label: 'Rak lab · patch panel & SW-LAB' };
+  const pc = labB.pcs.find(c => c.name === R.pc); if (!pc) return null;
+  const v = labPcPos.get(pc.name) ?? new THREE.Box3().setFromObject(pc.o).getCenter(new THREE.Vector3()); labPcPos.set(pc.name, v);  // the PC group sits at the origin; its parts carry the position
+  return { x: v.x, z: v.z, y: fy, label: R.label };
+}
+function missionTarget(): { x: number; z: number } | null { const lt = labTarget(); if (lt) return { x: cityX(lt.x), z: cityZ(lt.z) }; const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
 
 goView('overview', true);
 applySettings();
