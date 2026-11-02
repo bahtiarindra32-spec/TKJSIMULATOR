@@ -28,7 +28,7 @@ import { hotelAnchorsWorld } from './game/missionSystem';
 import { initLinux, linuxQa } from './pcos/linux';
 import { initOffice, officeQa } from './pcos/office';
 import { edgeQa } from './pcos/edge';
-import { initSwitches, portOf, panelOf, adapterOf, envOf, healthy, ENVS } from './pcos/net';
+import { initSwitches, SWITCHES, portOf, panelOf, adapterOf, envOf, healthy, ENVS } from './pcos/net';
 import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
 import { Vertical } from './game/vertical';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
@@ -165,7 +165,6 @@ const hotelNpcs = new HotelNpcs(gameLayer, PCS);
 const vertical = new Vertical(hotel, gameLayer);
 // The old linear quiz chain is retired: all work now comes from the NOC work board (game/noc.ts).
 const missions = { isModalOpen: () => false, hintFor: (_a: string | null): string | null => null, interact: (_a: string | null) => false, onModalChange: (_f: (o: boolean) => void) => {}, setPlayerPos: (_x: number, _z: number) => {}, current: () => ({ targetPos: null as { x: number; z: number } | null, targetY: 0, place: '' }), start: () => {} };
-const missionUI = { setHudVisible: (_v: boolean) => {} };
 const waypoint = createWaypoint();
 const missionMarker = createAnchorMarker(); gameLayer.add(missionMarker.group);
 const south = buildSouth(world);   // v9: Kota Selatan (own RNG, built after the seeded systems)
@@ -305,7 +304,7 @@ function enterWalk(fresh = !started) {
   document.querySelectorAll('#views button').forEach(b => b.classList.remove('active'));
   if (!isTouch()) { try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ } }
   touchUi?.onEnter();
-  missionUI.setHudVisible(true); noc.setHudVisible(true);
+  noc.setHudVisible(true);
   missions.start();
   const labCode = QS.get('lab');
   if (labCode && !started) setTimeout(() => { if (mode === 'walk') praktik.openStudent(labCode.slice(0, 7)); }, 900);
@@ -319,7 +318,7 @@ function exitWalk() {
   mode = 'orbit'; document.body.classList.remove('entered'); controls.enabled = true;
   $('hints').textContent = 'Klik/tarik untuk memutar · roda untuk zoom';
   if (document.pointerLockElement) document.exitPointerLock();
-  missionUI.setHudVisible(false); noc.setHudVisible(false);
+  noc.setHudVisible(false);
   prompt.hide(); $('hudHint').textContent = '';   // the walk prompt ([F] Buka pintu…) used to stay on screen over the orbit views
 }
 // ---------- title screen / pause ----------
@@ -1180,6 +1179,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
     return `opened=${o1.toFixed(2)} closed=${d.open.toFixed(2)} total=${(window as any).__doorCount ?? '?'}`;
   },
   rawPort: (n: string) => portOf(n)?.port ?? null, adapter: (n: string) => adapterOf(n), prakEnv: () => ENVS.prak,
+  switchObj: (name: string) => SWITCHES.find(s => s.name === name) ?? null,
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),

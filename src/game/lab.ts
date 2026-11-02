@@ -3,7 +3,7 @@
 // Grading is deterministic: rubric checkpoints read from netsim (src/game/praktik.ts). AI may only turn the teacher's sentence into form ticks; it never grades.
 export const LAB_STEPS = [
   { id: 'crimp', name: 'Crimping patch cord T568B', cp: 'Fase E · Media transmisi' },
-  { id: 'desk', name: 'Pengkabelan terstruktur: outlet → patch panel → switch', cp: 'Fase E · Pengkabelan terstruktur' },
+  { id: 'desk', name: 'Pengkabelan terstruktur: outlet → patch panel → switch', cp: 'Fase F · Pengkabelan terstruktur' },
   { id: 'static', name: 'Alamat IP statis', cp: 'Fase E · Pengalamatan IPv4' },
   { id: 'dhcp', name: 'DHCP server di router', cp: 'Fase F · DHCP' },
   { id: 'vlan', name: 'VLAN di switch lab', cp: 'Fase F · VLAN' },

@@ -111,3 +111,4 @@ body.paused #touchui, body.menu #touchui { display: none !important; }
 @media (max-width: 420px) { .mn-sub { letter-spacing: .14em; font-size: 11px; } }
 
 .pn-text { min-width: min(320px, 70vw); min-height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #e8efe9; font: 500 13px var(--sys); }
+.pn-ai { align-items: center; } .pn-ai output { flex: 1 1 180px; padding: 0 8px; color: #8d9993; font: 12.5px var(--sys); }

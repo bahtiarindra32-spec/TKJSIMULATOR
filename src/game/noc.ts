@@ -53,9 +53,9 @@ export const FAULTS: Record<string, FaultDef> = {
   cablebad: { cause: 'Patch cord rusak (pasangan kabel putus)', fix: 'patch cord diganti yang baru', symptom: 'Kabel terpasang tapi lampu link mati.', hint: 'Konektor terpasang tapi LED mati? Tes pakai LAN tester (ambil di lemari alat).', cp: 'Fase E · Alat ukur jaringan', wired: true, rank: 1 },
   port: { cause: 'Port switch shutdown', fix: 'interface di-no shutdown lewat console', symptom: 'Kabel bagus, tapi lampu link tetap mati.', hint: 'Kabel lolos LAN tester tapi link mati = cek port di switch (rak ruang server L1).', cp: 'Fase F · Konfigurasi switch', wired: true, rank: 1 },
   conflict: { cause: 'IP bentrok dengan perangkat lain', fix: 'IP diganti ke alamat yang kosong / DHCP', symptom: 'Muncul peringatan konflik alamat IP, koneksi kacau.', hint: 'arp -a / ping alamat itu: ada perangkat lain memakai IP yang sama.', cp: 'Fase E · Pengalamatan IPv4', wired: false, rank: 2 },
-  patch: { cause: 'Patch cord di rak lantai tercabut dari switch', fix: 'patch cord dari port patch panel outlet itu dicolok lagi ke port switch', symptom: 'Kabel di meja terpasang dan lolos tes, tapi lampu link tetap mati.', hint: 'Kabel meja baik tapi link mati: ke rak lantai itu. Cari port patch panel outlet ini (dari label, atau pakai toner kalau labelnya hilang) dan periksa patch cord-nya.', cp: 'Fase E · Sistem pengkabelan terstruktur', wired: true, rank: 1 },
+  patch: { cause: 'Patch cord di rak lantai tercabut dari switch', fix: 'patch cord dari port patch panel outlet itu dicolok lagi ke port switch', symptom: 'Kabel di meja terpasang dan lolos tes, tapi lampu link tetap mati.', hint: 'Kabel meja baik tapi link mati: ke rak lantai itu. Cari port patch panel outlet ini (dari label, atau pakai toner kalau labelnya hilang) dan periksa patch cord-nya.', cp: 'Fase F · Sistem pengkabelan terstruktur', wired: true, rank: 1 },
   uplink: { cause: 'Uplink switch lantai ke MDF terputus', fix: 'uplink dipulihkan', symptom: 'Satu lantai tidak bisa akses apa pun, padahal lampu link di PC menyala.', hint: 'Banyak PC satu lantai kena bersamaan = masalah di uplink switch lantai (rak IDF). Lihat LED uplink Gi1/0/49, lalu show interfaces trunk.', cp: 'Fase F · Trunk & uplink antar-switch', wired: true, rank: 2 },
-  loop: { cause: 'Loop: ada kabel yang menyambung dua port switch yang sama (broadcast storm)', fix: 'kabel loop dicabut', symptom: 'Jaringan satu lantai lumpuh total, semua lampu switch berkedip cepat.', hint: 'Semua LED switch berkedip + log MAC flapping di console = loop. Cari kabel yang menyambung dua port switch di rak lantai itu dan cabut.', cp: 'Fase F · Loop & STP', wired: true, rank: 2 },
+  loop: { cause: 'Loop: kabel menyambung dua port switch yang sama, padahal spanning-tree di switch itu dimatikan (broadcast storm)', fix: 'kabel loop dicabut dan spanning-tree diaktifkan lagi', symptom: 'Jaringan satu lantai lumpuh total, semua lampu switch berkedip cepat.', hint: 'Semua LED switch berkedip + log MAC flapping di console = loop. Catalyst bawaan menjalankan STP, jadi cek show spanning-tree: kalau mati, storm bisa terjadi. Cabut kabel loop di rak, lalu aktifkan lagi spanning-tree (spanning-tree mode rapid-pvst) dan write memory.', cp: 'Fase F · Loop & STP', wired: true, rank: 2 },
   portal: { cause: 'Laptop tamu belum login captive portal (sesi Wi-Fi tamu habis setelah ganti kamar)', fix: 'login captive portal dengan nomor kamar + nama belakang', symptom: 'Wi-Fi tersambung, tapi tidak ada situs yang bisa dibuka.', hint: 'Wi-Fi tamu memakai captive portal: dapat IP dan DNS jalan, tapi internet ditahan sampai tamu login. Buka browser di laptop itu.', cp: 'Fase F · Jaringan nirkabel', wired: false, rank: 1, wifi: true },
   appoe: { cause: 'AP koridor mati (tidak dapat daya PoE / link dari switch lantai)', fix: 'AP dinyalakan lagi dari switch lantai', symptom: 'Sinyal Wi-Fi di kamar tinggal 1–2 bar, internet putus-putus.', hint: 'Laptop pindah ke AP yang jauh = AP terdekat mati. Cek NusaWLC (status Offline) dan rak IDF lantai itu: show power inline, show interfaces status.', cp: 'Fase F · Jaringan nirkabel & PoE', wired: false, rank: 1, wifi: true },
   aprf: { cause: 'Gangguan radio AP: kanal tumpang tindih dengan AP tetangga / daya pancar terlalu kecil', fix: 'kanal/daya AP diatur ulang di kontroler Wi-Fi', symptom: 'Wi-Fi kamar lemot sekali, ping naik-turun ratusan ms dan sering timeout.', hint: 'Bawa Wi-Fi analyzer (R) ke kamar itu: lihat AP mana yang melayani dan siapa yang memakai kanal sama/berdekatan. Atur kanal 1/6/11 atau daya TX di NusaWLC (http://192.168.10.20 dari PC IT).', cp: 'Fase F · Jaringan nirkabel', wired: false, rank: 2, wifi: true },
@@ -68,9 +68,9 @@ export type TplId = 'static' | 'desk' | 'dns' | 'renum' | 'vlan' | 'ap' | 'tutor
 interface TplDef { name: string; rank: number; xp: number; sla: number; cp: string; brief: string[] }
 export const TEMPLATES = {
   static: { name: 'Pasang IP Statis', rank: 0, xp: 120, sla: 420, cp: 'Fase E · Pengalamatan IPv4', brief: ['Beberapa PC butuh alamat tetap (mis. dipakai aplikasi absensi). Alamatnya sudah ditentukan di surat kerja.', 'Di PC: Network Connections › Properties › IPv4 › "Use the following IP address". Isi IP, subnet mask, gateway, DNS persis seperti surat kerja.', 'Uji dari PC itu: ping gateway lalu ping/buka situs. Alamat yang sudah dipakai perangkat lain akan bentrok.'] },
-  desk: { name: 'Sambungkan Meja Baru', rank: 0, xp: 170, sla: 780, cp: 'Fase E · Sistem pengkabelan terstruktur', brief: ['Meja baru belum tersambung. Alurnya: PC → patch cord → outlet dinding → kabel horizontal → port patch panel di rak lantai → patch cord → port switch.', 'Ambil 2 patch cord per meja, toner + probe, kabel console, dan laptop teknisi di Lemari Alat (Workshop TKJ, L1).', 'Di meja [C]: pasang patch cord PC → outlet. Label outletnya belum ada, jadi pasang toner di outlet itu.', 'Ke rak lantai itu (L1: ruang server; L2/L3: ruang IDF). Nyalakan probe dan sapu port patch panel: bunyi paling keras = port outlet tadi. Klik port itu, lalu klik port switch di surat kerja untuk memasang patch cord.', 'Console ke switch: enable › conf t › interface gi1/0/N › switchport access vlan V › no shutdown › end › write memory.', 'Kembali ke meja: tempel label outlet sesuai nomor patch panel (mis. L2-07), lalu uji ping/browser dari PC itu.'] },
+  desk: { name: 'Sambungkan Meja Baru', rank: 0, xp: 170, sla: 780, cp: 'Fase F · Sistem pengkabelan terstruktur', brief: ['Meja baru belum tersambung. Alurnya: PC → patch cord → outlet dinding → kabel horizontal → port patch panel di rak lantai → patch cord → port switch.', 'Ambil 2 patch cord per meja, toner + probe, kabel console, dan laptop teknisi di Lemari Alat (Workshop TKJ, L1).', 'Di meja [C]: pasang patch cord PC → outlet. Label outletnya belum ada, jadi pasang toner di outlet itu.', 'Ke rak lantai itu (L1: ruang server; L2/L3: ruang IDF). Nyalakan probe dan sapu port patch panel: bunyi paling keras = port outlet tadi. Klik port itu, lalu klik port switch di surat kerja untuk memasang patch cord.', 'Console ke switch: enable › conf t › interface gi1/0/N › switchport access vlan V › no shutdown › end › write memory.', 'Kembali ke meja: tempel label outlet sesuai nomor patch panel (mis. L2-07), lalu uji ping/browser dari PC itu.'] },
   dns: { name: 'Nama untuk Server Intranet', rank: 1, xp: 180, sla: 540, cp: 'Fase F · DNS', brief: ['Server aplikasi baru sudah dipasang tim aplikasi. Karyawan mau membukanya pakai nama, bukan IP.', 'Buka router segmen itu dari browser PC (http://alamat-gateway, admin tanpa password) › IP › DNS › tambah record A: nama › IP server.', 'Klien harus memakai DNS router supaya nama lokal terbaca. DNS publik seperti 8.8.8.8 tidak mengenal nama internal.', 'Uji dengan membuka namanya di browser dari PC yang disebut di surat kerja.'] },
-  renum: { name: 'Pasang Router Baru & DHCP', rank: 1, xp: 260, sla: 900, cp: 'Fase F · DHCP & pengalamatan', brief: ['Router segmen diganti unit baru yang masih setelan pabrik (192.168.88.1/24, DHCP mati). Jaringan pindah ke subnet baru di surat kerja.', 'PC dengan DHCP akan dapat 169.254.x.x. Untuk bisa membuka router pabrik, beri satu PC IP statis sementara di 192.168.88.0/24.', 'Di WebKonfig ganti dulu IP › Addresses ke alamat LAN baru. Koneksimu ke router akan putus: pindahkan PC tadi ke IP statis di subnet baru, buka lagi router di alamat barunya.', 'Lalu atur IP › DHCP Server (pool, gateway, DNS) dan IP › DNS (upstream + Allow Remote Requests).', 'Kembalikan PC tadi ke DHCP, ipconfig /renew, lalu uji dari setiap PC di surat kerja. PC yang memakai IP statis lama juga harus dipindah.'] },
+  renum: { name: 'Pasang Router Baru & DHCP', rank: 1, xp: 260, sla: 900, cp: 'Fase F · DHCP & pengalamatan', brief: ['Router segmen diganti unit baru yang sudah di-reset oleh vendor: hanya alamat 192.168.88.1/24, DHCP server belum diaktifkan. Jaringan pindah ke subnet baru di surat kerja.', 'PC dengan DHCP akan dapat 169.254.x.x. Untuk bisa membuka router pabrik, beri satu PC IP statis sementara di 192.168.88.0/24.', 'Di WebKonfig ganti dulu IP › Addresses ke alamat LAN baru. Koneksimu ke router akan putus: pindahkan PC tadi ke IP statis di subnet baru, buka lagi router di alamat barunya.', 'Lalu atur IP › DHCP Server (pool, gateway, DNS) dan IP › DNS (upstream + Allow Remote Requests).', 'Kembalikan PC tadi ke DHCP, ipconfig /renew, lalu uji dari setiap PC di surat kerja. PC yang memakai IP statis lama juga harus dipindah.'] },
   vlan: { name: 'Pindahkan Meja ke VLAN Kasir', rank: 2, xp: 220, sla: 720, cp: 'Fase F · VLAN', brief: ['Beberapa meja kantor dipakai tim kasir. Mereka harus masuk VLAN 30 (KASIR) yang punya router dan server POS sendiri.', 'Di rak ruang server L1, console ke switch lantainya: conf t › vlan 30 › name KASIR › interface gi1/0/N › switchport access vlan 30.', 'PC baru pindah subnet setelah minta alamat lagi: ipconfig /renew (atau tunggu klien mencoba ulang).', 'Uji dari setiap PC: harus dapat 192.168.30.x dan bisa membuka server POS 192.168.30.10. Simpan konfigurasi switch: write memory.'] },
 } as Record<TplId, TplDef>;
 
@@ -220,7 +220,7 @@ export class Noc {
     const pool = (Object.keys(TEMPLATES) as TplId[]).filter(t => TEMPLATES[t].rank <= to - 1 && t !== 'crimp' && t !== 'tutor');
     const tpl = pool.sort((a, b) => TEMPLATES[b].rank - TEMPLATES[a].rank || TEMPLATES[b].xp - TEMPLATES[a].xp).slice(0, 3)[Math.floor(Math.random() * Math.min(3, pool.length))];
     const j = this.acceptContract(tpl); if (!j) return null;
-    j.exam = to; j.sla = Math.round(j.sla * 0.8); j.title = `UJI KOMPETENSI ${RANKS[to].name}: ${j.title}`;
+    j.exam = to; j.sla = Math.round(j.sla * 0.8); j.title = `UJI KENAIKAN PANGKAT ${RANKS[to].name}: ${j.title}`;
     this.openOrder(j);
     return j;
   }
@@ -499,7 +499,7 @@ export class Noc {
       const dh = shuffle(avail.filter(p => adapterOf(p.name).dhcp), r).slice(0, 3);
       for (const pc of dh) j.targets.push(this.target(pc, 'dhcp'));
       for (const p of this.wired()) if (envOf(p.name) === env && !adapterOf(p.name).dhcp && !j.targets.some(t => t.pc.name === p.name)) j.targets.push(this.target(p, 'any', { note: 'masih memakai IP statis subnet lama' }));
-      j.order = [`Router baru (setelan pabrik 192.168.88.1/24, admin tanpa password, DHCP mati).`, `LAN baru: ${gw}/${prefix} · DHCP pool ${start} – ${end} · gateway ${gw} · DNS ${gw}`, `DNS router: upstream 8.8.8.8 dan Allow Remote Requests aktif.`, `Uji dari: ${j.targets.map(t => t.pc.label).join(', ')}`];
+      j.order = [`Router baru (sudah di-reset: 192.168.88.1/24, admin tanpa password, DHCP server belum aktif).`, `LAN baru: ${gw}/${prefix} · DHCP pool ${start} – ${end} · gateway ${gw} · DNS ${gw}`, `DNS router: upstream 8.8.8.8 dan Allow Remote Requests aktif.`, `Uji dari: ${j.targets.map(t => t.pc.label).join(', ')}`];
     } else if (tpl === 'ap') {
       const lv = 4 + Math.floor(r() * 5);
       const ap = pick(APS.filter(a => a.level === lv), r);
@@ -663,7 +663,7 @@ export class Noc {
         const k = Math.floor(Math.random() * Math.max(1, free.length - 1));
         const [x1, x2] = [free[k], free[k + 1] ?? free[0]];
         for (const x of [x1, x2]) { x.shutdown = false; x.vlan = p.port.vlan; }
-        sw.loop = [x1.n, x2.n]; t.detail = `Kabel patch menyambung ${portName(x1.n)} ke ${portName(x2.n)} di switch yang sama → kabel dicabut`;
+        sw.loop = [x1.n, x2.n]; sw.stpOff = true; t.detail = `Kabel patch menyambung ${portName(x1.n)} ke ${portName(x2.n)} di switch yang sama dan spanning-tree dimatikan → kabel dicabut, STP diaktifkan`;
       }
     }
     a.arp.clear();
@@ -1227,7 +1227,7 @@ export class Noc {
   /** answer a question: AI when a key is set and online, otherwise the offline rule engine */
   async askNusa(q: string): Promise<{ text: string; ai: boolean }> {
     const ctx = this.mentorCtx();
-    const tj = this.tracked(); if (tj) { tj.hint = true; if (tj.exam !== undefined) this.toast('Catatan: minta bantuan saat uji kompetensi membuat uji tidak lulus.', 4200); }   // asking for help counts like a hint (no no-hint XP bonus)
+    const tj = this.tracked(); if (tj) { tj.hint = true; if (tj.exam !== undefined) this.toast('Catatan: minta bantuan saat uji kenaikan pangkat membuat uji tidak lulus.', 4200); }   // asking for help counts like a hint (no no-hint XP bonus)
     if (aiReady()) {
       try { const a = plain(await chat(mentorPrompt(ctx, this.nusaHist, q))); this.nusaHist.push({ role: 'user', content: q }, { role: 'assistant', content: a }); return { text: a, ai: true }; }
       catch { /* fall through */ }
@@ -1474,9 +1474,9 @@ export class Noc {
       this.ensureOffers();
       const ex = this.examFor();
       if (ex > 0) {
-        box.append(h('h3', '', `Uji kompetensi · ${RANKS[ex].name}`));
+        box.append(h('h3', '', `Uji kenaikan pangkat · ${RANKS[ex].name}`));
         box.append(h('p', 'how', `XP kamu sudah cukup untuk ${RANKS[ex].name}. Pangkat baru naik setelah lulus uji: satu surat kerja tingkat ${RANKS[ex - 1].name}, SLA 80%, tanpa minta bantuan Pak Nusa, minimal ★★.`));
-        const er = h('div', 'row left'); const eb = btn('Ikut uji kompetensi', () => { this.closeModal(); this.startExam(); }, 'btn pri', 'exam-start'); eb.disabled = !!d; er.append(eb); box.append(er);
+        const er = h('div', 'row left'); const eb = btn('Ikut uji kenaikan pangkat', () => { this.closeModal(); this.startExam(); }, 'btn pri', 'exam-start'); eb.disabled = !!d; er.append(eb); box.append(er);
       }
       box.append(h('h3', '', d ? 'Kerja bebas (setelah hari ini selesai)' : 'Kerja bebas · surat kerja tersedia'));
       const grid = h('div', 'offers');
@@ -1599,7 +1599,7 @@ export class Noc {
       if (j.exam !== undefined) {
         const pass = j.stars! >= 2 && !j.hint;
         if (pass) this.s.cert = Math.max(this.s.cert ?? 0, j.exam);
-        examMsg = pass ? `Lulus uji kompetensi ${RANKS[j.exam].name}.` : `Belum lulus uji kompetensi (${j.hint ? 'minta bantuan saat uji' : 'nilai di bawah ★★'}). Ulangi dari papan kerja kapan saja.`;
+        examMsg = pass ? `Lulus uji kenaikan pangkat ${RANKS[j.exam].name}.` : `Belum lulus uji kenaikan pangkat (${j.hint ? 'minta bantuan saat uji' : 'nilai di bawah ★★'}). Ulangi dari papan kerja kapan saja.`;
       }
       this.save();
     }

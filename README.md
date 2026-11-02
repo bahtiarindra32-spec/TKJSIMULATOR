@@ -12,7 +12,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 | Bagian | Yang dipakai |
 |---|---|
-| Bahasa | TypeScript 6 (strict, `tsc --noEmit` lolos) |
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 29 unit test vitest) |
 | Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
 | Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
 | Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
@@ -32,7 +32,7 @@ Dependensi runtime hanya `three`. Dev: `typescript`, `vite`, `@types/three`.
 - `three-webgl-game`: performa WebGL, kamera, bayangan, anti-flicker, dan kolisi.
 - `game-playtest`: playtest otomatis dengan Playwright, screenshot, dan audit kolisi/jangkauan.
 
-Dokumen sumber: PDF "Prompt Pascal Kota Nusantara" milik pengguna (`.world/source-pascal-prompt.md`). PDF ini **diaudit**, tidak diikuti mentah (lihat bagian 6). Tag CP mengacu pada dokumen CP TKJ Fase F (BSKAP), salinan dari situs SMKN 1 Pogalan:
+Dokumen sumber: PDF "Prompt Pascal Kota Nusantara" milik pengguna (`design/source-pascal-prompt.md`). PDF ini **diaudit**, tidak diikuti mentah (lihat bagian 6). Tag CP mengacu pada dokumen CP TKJ Fase F (BSKAP), salinan dari situs SMKN 1 Pogalan:
 https://huda.smkn1pogalan.sch.id/wp-content/uploads/2024/08/Fase-F-SMK-TKJ.pdf
 
 ## 3. Menjalankan
@@ -125,7 +125,7 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 
 **Hari kerja (siklus utama).** Pagi: satu surat kerja (dipilih dari jenis yang paling jarang/paling sering gagal kamu kerjakan). Siang: shift helpdesk. Sore: insiden, satu akar masalah dengan banyak pengguna terdampak (terbuka di Teknisi Junior). Lalu evaluasi harian Kak Rani dengan bonus XP untuk SLA penuh, bintang tinggi, dan rangkaian hari baik. Tiap hari SLA 3% lebih ketat (minimal 70%) dan shift makin banyak tiket. Mulai Teknisi Junior, sebagian tiket punya 2 akar masalah; mulai Teknisi bisa sampai 3.
 
-**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
+**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch saat spanning-tree dimatikan (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
 
 **Aturan dunia nyata**
 - Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak MDF di Ruang Server L1, Rak IDF di ruang IDF lantai 2 dan 3. Penanda hanya menunjuk arah.
@@ -134,7 +134,7 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Router tiap segmen bisa diubah di WebKonfig: alamat LAN, DHCP server (pool, gateway, DNS, lease, daftar lease), DNS forwarder (upstream, Allow Remote Requests, record A).
 - Klien DHCP menyimpan lease lama sampai renew; lease dari subnet lama ditolak dan klien mencoba ulang sendiri (±60 detik). Lepas/colok kabel atau enable adapter = minta alamat baru. IP bentrok antar-PC terdeteksi.
 - Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
-- Uji kompetensi kenaikan pangkat: XP cukup saja belum menaikkan pangkat. Di papan kerja muncul Uji kompetensi (satu surat kerja tingkat pangkat sekarang, SLA 80%). Lulus kalau minimal ★★ dan tidak minta bantuan Pak Nusa; gagal bisa diulang. Save lama tetap memakai pangkat yang sudah dicapai.
+- Uji kenaikan pangkat (bukan UKK resmi): XP cukup saja belum menaikkan pangkat. Di papan kerja muncul Uji kenaikan pangkat (satu surat kerja tingkat pangkat sekarang, SLA 80%). Lulus kalau minimal ★★ dan tidak minta bantuan Pak Nusa; gagal bisa diulang. Save lama tetap memakai pangkat yang sudah dicapai.
 - Tahapan kerja di HUD: Survei (sudah datang ke perangkat) → Kerja → Uji → Dokumentasi. Setelah lolos uji, pekerjaan baru ditutup kalau teknisi menulis berita acara (uraian penyebab & tindakan) di surat kerja lalu tanda tangan; saat tanda tangan kondisi jaringan dicek ulang. Waktu menulis berita acara ikut dihitung SLA. Tutorial pertama tidak memakai berita acara.
 - Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
 - Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
@@ -145,7 +145,7 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Rak MDF di ruang server L1 (SW-L1, inti). Rak IDF di ruang IDF L2 dan L3 (SW-L2, SW-L3), uplink fiber Gi1/0/49 (trunk 802.1Q) ke MDF.
 - Rak: patch panel 48 port + switch 48 port bisa diklik. Klik port patch panel lalu port switch untuk memasang patch cord; cabut patch cord; cabut kabel loop; pasang ulang fiber uplink.
 - Toner + probe: pasang toner di outlet meja, nyalakan probe di rak, sapu port patch panel. Port yang benar berbunyi keras, port sebelahnya samar (induksi), dan nadanya melemah kalau port itu sudah tersambung ke port switch yang aktif.
-- Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop.
+- Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop. Spanning tree: `show spanning-tree`, `spanning-tree mode rapid-pvst`, `no spanning-tree vlan 1`. STP aktif seperti bawaan Catalyst, jadi kabel loop baru bikin broadcast storm kalau STP dimatikan; dengan STP aktif port kedua masuk BLK.
 
 ### Hari pertama: tutorial (pekerjaan fisik, tanpa kuis)
 - Pemain baru langsung mendapat surat kerja **Hari Pertama: Sambungkan PC Workshop** (juga ada di papan kerja sampai selesai): ambil LAN tester + patch cord di Lemari Alat, pasang patch cord dan tes kabel (C / tombol Cek), nyalakan PC (F / tombol Aksi), `ipconfig`, lalu `ping` Default Gateway.

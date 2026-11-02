@@ -33,10 +33,12 @@ describe('VLAN and switch ports', () => {
     const sw = SWITCHES.find(s => s.name === 'SW-L2')!; expect(uplinkCarries(sw, 20)).toBe(true);
     sw.uplink!.allowed = [1, 30]; expect(uplinkCarries(sw, 20)).toBe(false); expect(envOf(L2).id).toBe('none');
   });
-  it('two switch ports cabled together cause a broadcast storm until one is shut down', () => {
+  it('a loop cable is blocked by spanning tree (Catalyst default) and storms only with STP off', () => {
     const sw = SWITCHES.find(s => s.name === 'SW-L2')!; sw.loop = [30, 31]; sw.ports[29].shutdown = false; sw.ports[30].shutdown = false;
-    expect(stormOn(sw)).toBe(true); expect(envOf(L2).id).toBe('none');
+    sw.stpOff = false; expect(stormOn(sw)).toBe(false); expect(envOf(L2).id).toBe('office');
+    sw.stpOff = true; expect(stormOn(sw)).toBe(true); expect(envOf(L2).id).toBe('none');
     sw.ports[30].shutdown = true; expect(stormOn(sw)).toBe(false); expect(envOf(L2).id).toBe('office');
+    sw.loop = null; sw.stpOff = false; sw.ports[30].shutdown = false;
   });
 });
 

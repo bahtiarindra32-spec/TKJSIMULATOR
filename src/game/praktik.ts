@@ -158,7 +158,7 @@ export class Praktik {
   /** the lab as the technician left it last night: every desk patched, DHCP on, VLAN 70, no records */
   reset() {
     const sw = this.sw(); const env = ENVS.prak;
-    sw.vlans = new Map([[1, 'default'], [70, 'PRAKTIK']]); sw.dirty = false; sw.loop = null;
+    sw.vlans = new Map([[1, 'default'], [70, 'PRAKTIK']]); sw.dirty = false; sw.loop = null; sw.stpOff = false;
     sw.ports.forEach(p => { p.vlan = 70; p.shutdown = p.n > this.pcs.length; p.desc = p.n <= this.pcs.length ? `MEJA-${p.n}` : ''; });
     sw.panel.forEach((pp, i) => { pp.patch = pp.pc ? i + 1 : null; pp.hang = false; pp.label = pp.pc ? outletOf(pp.pc) || pp.label : ''; });
     sw.panel.forEach(pp => { if (pp.pc) pp.label = `LAB-${String(pp.n).padStart(2, '0')}`; });

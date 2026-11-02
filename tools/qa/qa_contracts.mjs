@@ -48,7 +48,18 @@ for (const ph of phases) {
         j.hint = true; j.age = 0; j.wrong = 0; n.close(j); n.openReport(n.pendingReport.shift()); out.push(n.rank() + ' / ' + document.querySelector('.noc-modal .msg')?.textContent); n.closeModal();
         n.mode = 'idle'; n.jobs = []; const k = n.startExam(); k.hint = false; k.age = 0; k.wrong = 0; n.close(k); n.openReport(n.pendingReport.shift()); out.push(n.rank() + ' / ' + document.querySelector('.noc-modal .msg')?.textContent); return out; });
       console.log('  r0', JSON.stringify(r0), '\n  board', sec, '\n  job', JSON.stringify(j), '\n  res', res.join(' || '));
-      out.exam = r0.rank === 'Magang' && r0.ex === 1 && /Uji kompetensi/.test(sec) && j?.exam === 1 && /Magang/.test(res[0]) && /Teknisi Junior/.test(res[1]) ? 'OK' : 'FAIL';
+      out.exam = r0.rank === 'Magang' && r0.ex === 1 && /Uji kenaikan pangkat/.test(sec) && j?.exam === 1 && /Magang/.test(res[0]) && /Teknisi Junior/.test(res[1]) ? 'OK' : 'FAIL';
+    }
+    if (ph === 'loop') {
+      const r = await K(async () => { const n = window.__kota.noc; n.s.xp = 6000; n.s.cert = 9; n.s.day = null; n.mode = 'idle'; n.jobs = []; n.startShift(Math.random, ['loop']); n.closeModal();
+        const j = n.jobs[0]; const pc = j.targets[0].pc.name; const sw = window.__kota.noc.portOf ? null : null; void sw;
+        const before = window.__kota.switchObj(window.__kota.portOf(pc).sw); const out = { loop: before.loop, stpOff: before.stpOff, detail: j.detail };
+        n.inv.console = true; n.inv.laptop = true; n.openConsole(before); await new Promise(z => setTimeout(z, 300)); const T = async l => { n.consoleType(l); await new Promise(z => setTimeout(z, 500)); };
+        for (const l of ['', 'enable', 'show spanning-tree']) await T(l); out.showOff = document.querySelector('.swcli')?.innerText.slice(-700);
+        for (const l of ['conf t', 'spanning-tree mode rapid-pvst', 'end', 'show spanning-tree']) await T(l); out.showOn = document.querySelector('.swcli')?.innerText.slice(-260);
+        out.stpOffAfter = before.stpOff; out.env = window.__kota.wifi.env(pc); return out; });
+      console.log('  loop', JSON.stringify(r));
+      out.loop = r.loop && r.stpOff === true && r.stpOffAfter === false && /BLK/.test(r.showOn ?? '') && /No spanning tree/.test(r.showOff ?? '') ? 'OK' : 'FAIL';
     }
     if (ph === 'printer') {
       const j = await accept('x_printer'); const lv = +/_L(\d)_/.exec(j.targets[0])[1];

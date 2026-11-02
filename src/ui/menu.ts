@@ -1,7 +1,7 @@
 // Title screen, pause menu, settings / controls / about panels, fade + loading. DOM only, system fonts,
 // inline SVG art (no external resources). main.ts owns the game state; this module only renders and calls back.
 import './menu.css';
-import { aiCfg, saveAiCfg, DEFAULT_MODEL } from '../ai/nusa';
+import { aiCfg, saveAiCfg, DEFAULT_MODEL, chat, aiStats } from '../ai/nusa';
 
 export type QChoice = 'otomatis' | 'tinggi' | 'sedang' | 'rendah' | 'hemat';
 export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean; textSize: 'm' | 'l' | 'xl'; colorBlind: boolean }
@@ -135,7 +135,18 @@ export class Menu {
       row('Aktifkan AI', seg([['1', 'Aktif'], ['0', 'Mati (offline)']], () => (aiCfg.enabled ? '1' : '0'), v => { aiCfg.enabled = v === '1'; saveAiCfg(); }, 'ai'), 'Tanpa AI, Pak Nusa menjawab dari petunjuk offline');
       const txt = (val: () => string, set: (v: string) => void, name: string, ph: string, secret = false) => { const i = el('input', 'pn-text') as HTMLInputElement; i.type = secret ? 'password' : 'text'; i.name = name; i.id = name; i.placeholder = ph; i.value = val(); i.autocomplete = 'off'; i.spellcheck = false; i.addEventListener('change', () => { set(i.value.trim()); saveAiCfg(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
       row('API key OpenRouter', txt(() => aiCfg.key, v => (aiCfg.key = v), 'aiKey', 'sk-or-v1-…', true), 'Disimpan hanya di browser ini, tidak ikut ke server mana pun selain OpenRouter');
-      row('Model', txt(() => aiCfg.model, v => (aiCfg.model = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'Model gratis berakhiran :free');
+      row('Model', txt(() => aiCfg.model, v => (aiCfg.model = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'openrouter/free = OpenRouter memilih model gratis yang sedang tersedia');
+      { const w = el('div', 'pn-seg pn-ai'); const b = el('button', 'seg on', 'Tes koneksi AI') as HTMLButtonElement; b.type = 'button'; b.name = 'aiTest'; const o = el('output', '', aiStats.last ? (aiStats.last === 'ok' ? 'Terakhir: tersambung' : `Terakhir gagal: ${aiStats.last.slice(0, 60)}`) : 'Belum dites');
+        b.addEventListener('click', async () => {
+          saveAiCfg();
+          if (!aiCfg.enabled) { o.textContent = 'AI dimatikan: Pak Nusa memakai petunjuk offline.'; return; }
+          if (aiCfg.key.trim().length < 10) { o.textContent = 'Isi API key OpenRouter dulu. Tanpa key, Pak Nusa tetap jalan dengan petunjuk offline.'; return; }
+          b.disabled = true; o.textContent = 'Menghubungi OpenRouter…';
+          try { const t = await chat([{ role: 'user', content: 'Jawab satu kata: siap' }], { maxTokens: 10, timeoutMs: 15000 }); o.textContent = `Tersambung (${aiStats.lastModel ?? aiCfg.model}): “${t.slice(0, 30)}”`; }
+          catch (e) { o.textContent = `Gagal: ${String((e as Error).message ?? e).slice(0, 80)}. Pak Nusa memakai petunjuk offline.`; }
+          finally { b.disabled = false; }
+        });
+        w.append(b, o); row('Status AI', w); }
     } else if (kind === 'controls') {
       const sec = (title: string, rows: [string, string][]) => { body.appendChild(el('h4', '', title)); const t = el('div', 'pn-keys'); for (const [k, d] of rows) t.appendChild(el('div', 'pn-key', `<kbd>${k}</kbd><span>${d}</span>`)); body.appendChild(t); };
       if (h.touch) { sec('Layar sentuh', ROWS_TOUCH); sec('Keyboard', ROWS_KB); } else { sec('Keyboard & mouse', ROWS_KB); sec('Layar sentuh', ROWS_TOUCH); }

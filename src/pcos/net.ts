@@ -98,6 +98,8 @@ export interface Uplink { cable: boolean; allowed: number[] | null }
 export interface Switch {
   name: string; level: number; ip: string; ports: Port[]; vlans: Map<number, string>; dirty: boolean;
   panel: PanelPort[]; uplink: Uplink | null; upPort: Port; loop: [number, number] | null; rack: string;
+  /** spanning tree (Catalyst default: on). Off + a loop cable = broadcast storm; on = the loop port is blocked */
+  stpOff?: boolean;
 }
 export const SWITCHES: Switch[] = [];
 const PANEL_OF = new Map<string, { sw: Switch; pp: PanelPort }>();
@@ -180,8 +182,8 @@ export function portLink(sw: Switch, p: Port): boolean {
   if (p.pc.startsWith('AP-')) { const ap = APS.find(a => a.id === p.pc); return !!ap && ap.mounted && p.poe !== false && !p.shutdown; }
   const a = ADAPTERS.get(p.pc); return !!a && a.cable && !a.broken && !p.shutdown;
 }
-/** A cable between two ports of the same switch with no spanning tree: broadcast storm. */
-export const stormOn = (sw: Switch) => !!sw.loop && !sw.ports[sw.loop[0] - 1].shutdown && !sw.ports[sw.loop[1] - 1].shutdown;
+/** A cable between two ports of the same switch while spanning tree is off: broadcast storm (with STP on, one port goes blocking). */
+export const stormOn = (sw: Switch) => !!sw.loop && !!sw.stpOff && !sw.ports[sw.loop[0] - 1].shutdown && !sw.ports[sw.loop[1] - 1].shutdown;
 /** Uplink to the MDF carries this VLAN? */
 export function uplinkCarries(sw: Switch, vlan: number) {
   if (!sw.uplink) return true;

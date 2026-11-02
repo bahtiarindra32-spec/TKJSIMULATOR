@@ -283,7 +283,7 @@ const sedFile = (p: string, f: (s: string) => string) => FILES.set(p, f(FILES.ge
 const nm = (s: string) => ({ start: s, end: s });
 void nm; void ipStr; void prefixToMask; void adapterOf;
 EXT.srvdown = {
-  def: { cause: 'Layanan di server Linux srv-nusa berhenti', fix: 'layanan dijalankan lagi (systemctl start/restart) dan diaktifkan', symptom: 'PC lab tidak bisa membuka situs / intranet, padahal kabel dan IP terlihat normal.', hint: 'Masalah di sisi server, bukan PC. Ke ruang server L1, rak 2 (srv-nusa): login di console, atau SSH dari PC lab (ssh teknisi@192.168.10.5, sandi smkbisa). Cek: systemctl status bind9 / apache2 / isc-dhcp-server.', cp: 'Fase G · Administrasi server Linux', rank: 1 },
+  def: { cause: 'Layanan di server Linux srv-nusa berhenti', fix: 'layanan dijalankan lagi (systemctl start/restart) dan diaktifkan', symptom: 'PC lab tidak bisa membuka situs / intranet, padahal kabel dan IP terlihat normal.', hint: 'Masalah di sisi server, bukan PC. Ke ruang server L1, rak 2 (srv-nusa): login di console, atau SSH dari PC lab (ssh teknisi@192.168.10.5, sandi smkbisa). Cek: systemctl status bind9 / apache2 / isc-dhcp-server.', cp: 'Fase F · Administrasi Sistem Jaringan: server Linux', rank: 1 },
   eligible: isLabPc,
   inject(pc) {
     const v = (['bind9', 'apache2', 'isc-dhcp-server'] as Svc[])[Math.floor(Math.random() * 3)];
@@ -296,7 +296,7 @@ EXT.srvdown = {
   testHint: 'buka http://intranet.lab.smk.local',
 };
 EXT.zone = {
-  def: { cause: 'Record DNS di zone lab.smk.local salah', fix: 'record A intranet dibetulkan di /etc/bind/db.lab.smk.local lalu bind9 di-reload', symptom: 'http://intranet.lab.smk.local tidak terbuka dari PC lab (situs internet lain jalan).', hint: 'nslookup intranet.lab.smk.local dari PC: alamatnya benar? Zone ada di srv-nusa (rak 2 ruang server, atau SSH): /etc/bind/db.lab.smk.local. Setelah edit: named-checkzone lalu sudo systemctl reload bind9.', cp: 'Fase G · DNS server (BIND)', rank: 1 },
+  def: { cause: 'Record DNS di zone lab.smk.local salah', fix: 'record A intranet dibetulkan di /etc/bind/db.lab.smk.local lalu bind9 di-reload', symptom: 'http://intranet.lab.smk.local tidak terbuka dari PC lab (situs internet lain jalan).', hint: 'nslookup intranet.lab.smk.local dari PC: alamatnya benar? Zone ada di srv-nusa (rak 2 ruang server, atau SSH): /etc/bind/db.lab.smk.local. Setelah edit: named-checkzone lalu sudo systemctl reload bind9.', cp: 'Fase F · Administrasi Sistem Jaringan: DNS server (BIND)', rank: 1 },
   eligible: isLabPc,
   inject() {
     const v = Math.random() < 0.5 ? 'ip' : 'syntax';
@@ -310,7 +310,7 @@ EXT.zone = {
   testHint: 'buka http://intranet.lab.smk.local',
 };
 EXT.dhcpscope = {
-  def: { cause: 'Konfigurasi DHCP server Linux salah (scope)', fix: 'dhcpd.conf dibetulkan (range/routers sesuai subnet 192.168.10.0/24) dan isc-dhcp-server di-restart', symptom: 'PC lab dapat 169.254.x.x atau tidak bisa keluar jaringan setelah server di-update.', hint: 'DHCP lab dilayani srv-nusa (isc-dhcp-server), bukan router. Di server: sudo dhcpd -t, journalctl -u isc-dhcp-server, lalu edit /etc/dhcp/dhcpd.conf (sudo nano).', cp: 'Fase G · DHCP server (isc-dhcp-server)', rank: 2 },
+  def: { cause: 'Konfigurasi DHCP server Linux salah (scope)', fix: 'dhcpd.conf dibetulkan (range/routers sesuai subnet 192.168.10.0/24) dan isc-dhcp-server di-restart', symptom: 'PC lab dapat 169.254.x.x atau tidak bisa keluar jaringan setelah server di-update.', hint: 'DHCP lab dilayani srv-nusa (isc-dhcp-server), bukan router. Di server: sudo dhcpd -t, journalctl -u isc-dhcp-server, lalu edit /etc/dhcp/dhcpd.conf (sudo nano).', cp: 'Fase F · Administrasi Sistem Jaringan: DHCP server Linux', rank: 2 },
   eligible: pc => envOf(pc).id === 'lab' && adapterOf(pc).dhcp && adapterOf(pc).dnsAuto,
   inject(pc) {
     const v = Math.random() < 0.5 ? 'range' : 'routers';

@@ -5,14 +5,16 @@
 
 export interface AiConfig { key: string; model: string; enabled: boolean }
 const KEY = 'kotaNusantara.ai.v1';
-export const DEFAULT_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+/** OpenRouter's free router picks whichever free model is up (single free model ids get retired often) */
+export const DEFAULT_MODEL = 'openrouter/free';
+const RETIRED = ['meta-llama/llama-3.3-70b-instruct:free'];
 export const aiCfg: AiConfig = { key: '', model: DEFAULT_MODEL, enabled: true };
-try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { if (typeof o.key === 'string') aiCfg.key = o.key; if (typeof o.model === 'string' && o.model.trim()) aiCfg.model = o.model.trim(); if (typeof o.enabled === 'boolean') aiCfg.enabled = o.enabled; } } catch { /* ignore */ }
+try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { if (typeof o.key === 'string') aiCfg.key = o.key; if (typeof o.model === 'string' && o.model.trim()) aiCfg.model = RETIRED.includes(o.model.trim()) ? DEFAULT_MODEL : o.model.trim(); if (typeof o.enabled === 'boolean') aiCfg.enabled = o.enabled; } } catch { /* ignore */ }
 export function saveAiCfg() { try { localStorage.setItem(KEY, JSON.stringify(aiCfg)); } catch { /* ignore */ } }
 export const aiReady = () => aiCfg.enabled && aiCfg.key.trim().length > 10 && navigator.onLine !== false;
 
 export interface ChatMsg { role: 'system' | 'user' | 'assistant'; content: string }
-export interface AiStats { calls: number; fails: number; tokens: number; last: string }
+export interface AiStats { calls: number; fails: number; tokens: number; last: string; lastModel?: string }
 export const aiStats: AiStats = { calls: 0, fails: 0, tokens: 0, last: '' };
 
 /** test hook: QA replaces the network call with a fake */
@@ -27,11 +29,14 @@ export async function chat(messages: ChatMsg[], o: { maxTokens?: number; tempera
   const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), o.timeoutMs ?? 20000);
   aiStats.calls++;
   try {
-    const r = await aiTransport.fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const call = (model: string) => aiTransport.fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST', signal: ctl.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiCfg.key.trim()}`, 'X-Title': 'Kota Nusantara TKJ Simulator', 'HTTP-Referer': location.origin || 'https://tkjsimulator.my.id' },
-      body: JSON.stringify({ model: aiCfg.model, messages, max_tokens: o.maxTokens ?? 350, temperature: o.temperature ?? 0.6, ...(o.json ? { response_format: { type: 'json_object' } } : {}) }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiCfg.key.trim()}`, 'X-Title': 'Kota Nusantara TKJ Simulator', 'HTTP-Referer': location.origin || 'https://bahtiarindra32-spec.github.io' },
+      body: JSON.stringify({ model, messages, max_tokens: o.maxTokens ?? 350, temperature: o.temperature ?? 0.6, ...(o.json ? { response_format: { type: 'json_object' } } : {}) }),
     });
+    let r = await call(aiCfg.model);
+    // a chosen model that no longer exists: fall back to the free router once instead of going silent
+    if ((r.status === 400 || r.status === 404) && aiCfg.model !== DEFAULT_MODEL) { aiStats.lastModel = DEFAULT_MODEL; r = await call(DEFAULT_MODEL); } else aiStats.lastModel = aiCfg.model;
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`HTTP ${r.status} ${t.slice(0, 120)}`); }
     const d = await r.json() as { choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: number }; error?: { message?: string } };
     if (d.error) throw new Error(d.error.message ?? 'error');

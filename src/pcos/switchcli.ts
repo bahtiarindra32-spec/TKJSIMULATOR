@@ -108,6 +108,8 @@ export class SwitchCli {
         }
         if (kw(t[0], 'vlan', 2)) { const id = +t[1]; if (!t[1]) return this.incomplete(); if (!(id >= 2 && id <= 1001)) return this.bad(t[1]); if (!this.sw.vlans.has(id)) this.sw.vlans.set(id, `VLAN${String(id).padStart(4, '0')}`); this.vlanId = id; this.mode = 'vlan'; this.sw.dirty = true; return; }
         if (kw(t[0], 'no', 2) && kw(t[1], 'vlan', 2)) { const id = +t[2]; if (!this.sw.vlans.has(id) || id === 1) return this.bad(t[2]); this.sw.vlans.delete(id); this.sw.dirty = true; return; }
+        if (kw(t[0], 'spanning-tree', 2)) { if (!t[1]) return this.incomplete(); if (kw(t[1], 'mode', 1) || kw(t[1], 'vlan', 1)) { this.sw.stpOff = false; this.sw.dirty = true; return; } return this.bad(t[1]); }
+        if (kw(t[0], 'no', 2) && kw(t[1], 'spanning-tree', 2)) { if (!t[2]) return this.incomplete(); this.sw.stpOff = true; this.sw.dirty = true; return; }
         if (kw(t[0], 'hostname', 3)) { if (!t[1]) return this.incomplete(); this.print('% Hostname dikunci oleh label rak (dokumentasi NOC). Perubahan tidak disimpan.\n'); return; }
         return this.bad(t[0]);
       case 'vlan':
@@ -227,6 +229,13 @@ export class SwitchCli {
       const pd = sw.ports.filter(p => p.pc?.startsWith('AP-') && p.poe !== false && portLink(sw, p));
       s += `1           370.0${(pd.length * 13.4).toFixed(1).padStart(11)}${(370 - pd.length * 13.4).toFixed(1).padStart(12)}\nInterface Admin  Oper       Power   Device              Class Max\n                           (Watts)\n--------- ------ ---------- ------- ------------------- ----- ----\n`;
       for (const p of sw.ports) { const link = p.poe !== false && portLink(sw, p) && !!p.pc?.startsWith('AP-'); s += `${portName(p.n).padEnd(10)}${(p.poe === false ? 'off' : 'auto').padEnd(7)}${(p.poe === false ? 'off' : link ? 'on' : 'off').padEnd(11)}${(link ? '13.4' : '0.0').padStart(7)} ${(link ? 'NusaAP AX1800' : 'n/a').padEnd(20)}${(link ? '4' : 'n/a').padEnd(6)}30.0\n`; }
+      this.print(s + '\n'); return;
+    }
+    if (kw(t[0], 'spanning-tree', 2)) {
+      if (sw.stpOff) { this.print('No spanning tree instance exists.\n\n'); return; }
+      let s = `\nVLAN0001\n  Spanning tree enabled protocol rstp\n  Root ID    Priority    32769\n             This bridge is the root\n\nInterface           Role Sts Cost      Prio.Nbr Type\n------------------- ---- --- --------- -------- --------------------------------\n`;
+      const up = sw.ports.filter(p => portLink(sw, p) || (sw.loop?.includes(p.n) && !p.shutdown));
+      for (const p of up) { const blk = !!sw.loop && p.n === Math.max(...sw.loop) && !sw.ports[Math.min(...sw.loop) - 1].shutdown; s += `${portName(p.n).padEnd(20)}${(blk ? 'Altn' : 'Desg').padEnd(5)}${(blk ? 'BLK' : 'FWD').padEnd(4)}${'4'.padEnd(10)}128.${String(p.n).padEnd(5)}P2p\n`; }
       this.print(s + '\n'); return;
     }
     if (kw(t[0], 'vlan', 1)) {
