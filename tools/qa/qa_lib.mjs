@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 export async function boot(save, opt = {}) {
   const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
   b.on('disconnected', () => console.log('!! BROWSER DISCONNECTED', Date.now()));
-  const ctx = await b.newContext({ viewport: opt.viewport ?? { width: 960, height: 600 }, ...(process.env.VIDEO ? { recordVideo: { dir: process.env.VIDEO, size: { width: 960, height: 600 } } } : {}) });
+  const ctx = await b.newContext({ viewport: opt.viewport ?? { width: 960, height: 600 }, ...(opt.touch ? { hasTouch: true, isMobile: true, deviceScaleFactor: 2 } : {}), ...(process.env.VIDEO ? { recordVideo: { dir: process.env.VIDEO, size: { width: 960, height: 600 } } } : {}) });
   await ctx.addInitScript(s => { try { if (s) localStorage.setItem('kotaNusantara.noc.v1', s); else if (!sessionStorage.getItem('qa-keep')) localStorage.removeItem('kotaNusantara.noc.v1'); sessionStorage.setItem('qa-keep', '1'); } catch {} }, save ? JSON.stringify(save) : null);
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message.slice(0, 300))); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push('console: ' + m.text().slice(0, 200)); });

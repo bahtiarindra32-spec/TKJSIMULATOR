@@ -45,8 +45,8 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
       <button data-k="KeyR" class="sm" id="t-reset">↺<small>Reset</small></button>
     </div>
     <div class="ttop">
-      <button data-k="KeyT">Kerja</button><button data-k="KeyC" class="walk-only">Cek</button><button data-k="KeyR" class="walk-only">Wi-Fi</button>
-      <button data-k="KeyV">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyN" id="t-time">Waktu</button><button data-k="KeyJ" id="t-nusa">Pak Nusa</button><button data-fs>Full</button><button data-k="Escape">Keluar</button>
+      <button data-k="KeyT">Kerja</button><button data-k="KeyC" class="walk-only">Cek</button><button data-k="KeyR" class="walk-only sec">Wi-Fi</button>
+      <button data-k="KeyV" class="sec">Kamera</button><button data-k="KeyM">Peta</button><button data-k="KeyN" id="t-time" class="sec">Waktu</button><button data-k="KeyJ" id="t-nusa">Pak Nusa</button><button data-fs class="sec">Full</button><button data-k="Escape" class="sec">Keluar</button><button data-more class="more" aria-label="Tombol lain">⋯</button>
     </div>`;
   document.body.appendChild(root);
   const stop = (e: Event) => { e.stopPropagation(); };
@@ -56,6 +56,9 @@ export function setupTouch(o: { canvas: HTMLCanvasElement; look: (dx: number, dy
       stop(e); e.preventDefault(); b.classList.add('on');
       if (b.dataset.k) { key(b.dataset.k); held.add(b); }
       if (b.dataset.run !== undefined) { touch.run = !touch.run; b.classList.toggle('lock', touch.run); }
+      // portrait phones show the main buttons only; ⋯ folds the rest out (and folds back after a pick)
+      if (b.dataset.more !== undefined) { root.querySelector('.ttop')?.classList.toggle('open'); return; }
+      if (b.classList.contains('sec')) root.querySelector('.ttop')?.classList.remove('open');
       if (b.dataset.fs !== undefined) { if (document.fullscreenElement) document.exitFullscreen?.(); else if (isIOS() && !standalone()) iosHint(true); else goFullscreen(); }
     });
     const up = (e: Event) => { stop(e); b.classList.remove('on'); if (b.dataset.k && held.delete(b)) key(b.dataset.k, 'keyup'); };

@@ -152,7 +152,7 @@ export class Praktik {
     this.run = { spec, code, name, pc: pc.name, label: `Meja ${desk}`, P, i: 0, t0: performance.now(), st0: performance.now(), res: [], ping: false, browse: [], best: [] };
     this.setup();
     this.noc.closeModal(); this.collapsed = false;
-    this.noc.toast(`Praktik dimulai. Kamu di Meja ${desk}. Jobsheet ada di panel kiri.`, 4200);
+    this.noc.toast(`Praktik dimulai. Kamu di Meja ${desk}. Ikuti langkah di lembar jobsheet.`, 4200);
     clearInterval(this.timer); this.timer = window.setInterval(() => this.tick(), 700);
     this.render(); this.board();
   }

@@ -54,3 +54,30 @@ body.touch.entered #views { display: none !important; }
 .rbtns #t-reset { width: 46px; height: 46px; right: 84px; bottom: 84px; }
 body.touch.entered.riding .rbtns { display: block; }
 body.touch.entered.riding .tbtns, body.riding #touchui .walk-only { display: none !important; }
+
+/* ---- phone layout pass (Nov 2026): one row of tools, nothing stacked on the location box, cards clear of the joystick ---- */
+#touchui .ttop .more { display: none; }
+body.touch #clock { top: calc(56px + env(safe-area-inset-top)); left: auto; right: calc(10px + env(safe-area-inset-right)); transform: none; }
+body.touch #toast { top: calc(58px + env(safe-area-inset-top)); z-index: 70; }
+/* a lab jobsheet replaces the work card while it is open (both are left-side panels) */
+body:has(.jobsheet:not([style*="none"])) #noc-hud { display: none !important; }
+body.touch .jobsheet .js-b { max-height: none; }
+@media (orientation: portrait) {
+  .ttop { left: 10px; right: 10px; flex-wrap: nowrap; justify-content: flex-end; }
+  #touchui .ttop .more { display: grid; min-width: 44px; }
+  #touchui .ttop .sec { display: none; }
+  .ttop.open { flex-wrap: wrap; }
+  #touchui .ttop.open .sec { display: grid; }
+  .ttop.open .more { background: rgba(255,212,0,.55); color: #111; }
+  body.touch.entered #hud-loc { top: calc(58px + env(safe-area-inset-top)); max-width: calc(100vw - 150px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.touch #noc-hud { top: calc(98px + env(safe-area-inset-top)); width: min(300px, 72vw); max-height: 30vh; }
+  body.touch .jobsheet { top: calc(98px + env(safe-area-inset-top)); bottom: auto; left: 10px; width: calc(100vw - 20px); max-height: 34vh; }
+  body.touch #toast { top: calc(98px + env(safe-area-inset-top)); max-width: calc(100vw - 24px); }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  body.touch.entered #hud-loc { top: calc(10px + env(safe-area-inset-top)); max-width: 30vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.touch #noc-hud { top: calc(48px + env(safe-area-inset-top)); width: min(250px, 32vw); max-height: calc(100vh - 230px); overflow: auto; }
+  body.touch .jobsheet { top: calc(48px + env(safe-area-inset-top)); left: 10px; width: min(330px, 40vw); max-height: calc(100vh - 230px); }
+}
+/* tables in work papers scroll sideways instead of pushing buttons off a narrow screen */
+@media (max-width: 560px) { .noc-box table:not(.pp-fields) { display: block; overflow-x: auto; max-width: 100%; } }

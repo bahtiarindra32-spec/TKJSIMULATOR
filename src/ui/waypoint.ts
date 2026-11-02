@@ -62,13 +62,14 @@ export function updateWaypoint(wp: WaypointEl, camera: THREE.PerspectiveCamera, 
     angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
   }
   // never hide under a side panel (job HUD / jobsheet): slide out to its right edge
-  const av = opts.avoid; if (av && av.offsetWidth) { const r = av.getBoundingClientRect(); if (sx < r.right + 24 && sy > r.top - 40 && sy < r.bottom + 60) sx = r.right + 34; }
+  let pushed = false;
+  const av = opts.avoid; if (av && av.offsetWidth) { const r = av.getBoundingClientRect(); if (sx < r.right + 24 && sy > r.top - 40 && sy < r.bottom + 60) { sx = r.right + 34; pushed = true; } }
   wp.el.hidden = false;
   wp.el.classList.toggle('edge', !onScreen);
   wp.el.classList.toggle('near', near);
   wp.el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px)`;
   // keep the text label inside the screen when the marker sits at a side edge
-  const side = sx < W * 0.22 ? 'l' : sx > W * 0.78 ? 'r' : '';
+  const side = pushed || sx < W * 0.22 ? 'l' : sx > W * 0.78 ? 'r' : '';
   if (wp.el.dataset.side !== side) { wp.el.dataset.side = side; wp.label.style.transform = side === 'l' ? 'translateX(-18px)' : side === 'r' ? 'translateX(calc(-100% + 18px))' : ''; }
   wp.arrow.style.transform = `translate(-50%, -50%) rotate(${angle.toFixed(1)}deg) translateY(-34px)`;
   wp.dist.textContent = near ? 'F' : d < 10 ? `${d.toFixed(1)} m` : `${Math.round(d)} m`;

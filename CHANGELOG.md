@@ -6,6 +6,7 @@ Ringkasan per hari. Detail lengkap ada di riwayat git.
 - Review berlapis (juri, guru TKJ, playtester). AI bawaan pindah ke `openrouter/free` dengan fallback dan tombol Tes koneksi AI.
 - Spanning tree di switch: kabel loop hanya menimbulkan broadcast storm kalau STP dimatikan.
 - Uji kenaikan pangkat (XP saja tidak cukup), berita acara sebelum pekerjaan ditutup, tahapan Survei → Kerja → Uji → Dokumentasi, stok konektor RJ45, paraf guru per langkah di Lab Praktik.
+- Layout HP: portrait menampilkan tombol utama saja (⋯ untuk sisanya), kotak lokasi/jam/kartu kerja/jobsheet tidak bertumpuk dan tidak menutupi joystick, tabel papan kerja bisa digeser, penanda tujuan menghindari panel samping, keterangan langkah di layar PC menyesuaikan layar sempit.
 - Lab Praktik: penanda arah ke tempat langkah berikutnya (meja crimping, rak lab, meja siswa, meja guru untuk paraf); penanda tidak lagi tertutup panel jobsheet.
 - Lembar hasil Lab Praktik memakai format penilaian UKK: kriteria utama/pendukung, predikat Sangat Kompeten/Kompeten/Cukup Kompeten/Belum Kompeten, nilai 0–100; tombol Unduh CSV dan Cetak A4 dengan kolom tanda tangan.
 - Berita acara dicek isinya: alamat IP yang ditulis harus sesuai hasil kerja, dan harus menyebut cara verifikasi.

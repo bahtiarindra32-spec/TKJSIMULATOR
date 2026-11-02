@@ -1108,11 +1108,11 @@ function frame() {
     const tk = noc.tracked(), lt = labTarget();
     if (lt && !uiBlocked()) {
       missionMarker.setTarget({ x: lt.x, z: lt.z, y: lt.y }); missionMarker.update(t);
-      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: lt.x, z: lt.z, y: lt.y + 1.3 }, { label: lt.label, avoid: (document.querySelector('.jobsheet') as HTMLElement | null) ?? document.getElementById('noc-hud') });
+      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: lt.x, z: lt.z, y: lt.y + 1.3 }, { label: lt.label, avoid: sidePanel() });
     } else if (tk && !uiBlocked()) {
       const same = player.level === tk.pc.level, fy = tk.pc.y - 1.0;
       missionMarker.setTarget(same ? { x: tk.pc.x, z: tk.pc.z, y: fy } : null); missionMarker.update(t);
-      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: tk.pc.x, z: tk.pc.z, y: fy + 1.3 }, { label: same ? `${tk.id} · ${tk.pc.label}` : `${tk.pc.level > player.level ? 'Naik' : 'Turun'} ke Lantai ${tk.pc.level} · ${tk.id}`, avoid: (document.querySelector('.jobsheet') as HTMLElement | null) ?? document.getElementById('noc-hud') });
+      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: tk.pc.x, z: tk.pc.z, y: fy + 1.3 }, { label: same ? `${tk.id} · ${tk.pc.label}` : `${tk.pc.level > player.level ? 'Naik' : 'Turun'} ke Lantai ${tk.pc.level} · ${tk.id}`, avoid: sidePanel() });
     } else {
     const tgt = cur.targetPos && !missions.isModalOpen() ? { x: cur.targetPos.x, z: cur.targetPos.z, y: cur.targetY } : null;
     missionMarker.setTarget(tgt); missionMarker.update(t);
@@ -1129,6 +1129,8 @@ applyQuality(qName, 'start');
 $('btnGfx').style.display = 'none';
 function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
 /** Lab Praktik: point at the place the current jobsheet step happens (crimping table, rack, the student's desk, or the teacher for initials) */
+/** the left-side panel currently on screen (lab jobsheet or work card), so the waypoint never hides under it */
+const sidePanel = () => [document.querySelector('.jobsheet'), document.getElementById('noc-hud')].find(e => e instanceof HTMLElement && e.offsetWidth > 0) as HTMLElement | undefined;
 const labPcPos = new Map<string, THREE.Vector3>();
 function labTarget(): { x: number; z: number; y: number; label: string } | null {
   const R = praktik.run; if (!R) return null;
