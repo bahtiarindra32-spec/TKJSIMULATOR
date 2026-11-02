@@ -33,6 +33,11 @@ for (const ph of phases) {
         await K(() => window.__kota.noc.openOrder(window.__kota.noc.jobs.find(x => x.status === 'open' && x.docReady)));
         await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'ok'; }); await mclick('ba-sign');
         console.log('  short', await K(() => document.querySelector('.noc-modal .pp-sec:last-of-type')?.innerText.slice(-80)));
+        await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'Kabel diganti baru, gateway PC diset 192.168.99.254 lalu ping berhasil.'; }); await mclick('ba-sign');
+        const wrongGw = await K(() => [...document.querySelectorAll('.noc-modal .pp-line')].pop()?.textContent ?? 'NOMODAL'); console.log('  wrong gw', wrongGw);
+        await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'Kabel di meja sudah diganti dengan yang baru dan rapi.'; }); await mclick('ba-sign');
+        const noTest = await K(() => [...document.querySelectorAll('.noc-modal .pp-line')].pop()?.textContent ?? 'NOMODAL'); console.log('  no test', noTest);
+        if (!/tidak cocok/.test(wrongGw ?? '') || !/membuktikan/.test(noTest ?? '')) out.berita = 'FAIL'; else out.berita = 'OK';
         await K(() => { const t = document.querySelector('.noc-modal textarea[name=ba-note]'); t.value = 'Patch cord crossover diganti kabel T568B kedua ujung, dites LAN tester 1-8, ping gateway berhasil.'; }); await mclick('ba-sign');
       }
       out.crimp = (await fin('crimp')) && /3/.test(t1 ?? '') && /1 sampai 8/.test(t2 ?? '') ? 'OK' : 'FAIL';

@@ -6,6 +6,8 @@ Ringkasan per hari. Detail lengkap ada di riwayat git.
 - Review berlapis (juri, guru TKJ, playtester). AI bawaan pindah ke `openrouter/free` dengan fallback dan tombol Tes koneksi AI.
 - Spanning tree di switch: kabel loop hanya menimbulkan broadcast storm kalau STP dimatikan.
 - Uji kenaikan pangkat (XP saja tidak cukup), berita acara sebelum pekerjaan ditutup, tahapan Survei → Kerja → Uji → Dokumentasi, stok konektor RJ45, paraf guru per langkah di Lab Praktik.
+- Berita acara dicek isinya: alamat IP yang ditulis harus sesuai hasil kerja, dan harus menyebut cara verifikasi.
+- Di layar PC ada keterangan tahap dan langkah berikutnya; jam taskbar mengikuti jam di kota; akun Windows sesuai pemakai (siswa, teknisi, staf, tamu).
 - Menu judul punya Lab Praktik; tutorial dimulai tanpa panel teks panjang. Lisensi MIT, AI_USAGE.md.
 
 ## 2026-11-01

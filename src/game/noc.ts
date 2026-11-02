@@ -1424,9 +1424,26 @@ export class Noc {
     return `<div class="stg">${['Survei', 'Kerja', 'Uji', 'Dokumentasi'].map((x, i) => `<span class="${i < n ? 'done' : i === n ? 'cur' : ''}">${x}</span>`).join('')}</div>`;
   }
   /** berita acara: written by the technician, signed, then the job closes (live state re-checked first) */
+  /** a berita acara is a signed record: every IP it names must match the job's real addressing, and it must say how the work was verified */
+  beritaFacts(j: Job, text: string): string {
+    const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+    const known = new Set<string>();
+    for (const src of [...j.order, ...j.log, j.detail ?? '']) for (const m of src.match(IP) ?? []) known.add(m);
+    for (const t of j.targets) { const l = live(adapterOf(t.pc.name)); for (const v of [l.ip, l.gw, ...l.dns]) if (v) known.add(v); }
+    for (const t of j.targets) { const l = live(adapterOf(t.pc.name)); if (l.ip && l.prefix) { const net = l.ip.split('.').slice(0, 3).join('.'); known.add(`${net}.0`); known.add(`${net}.255`); } }
+    const bad = (text.match(IP) ?? []).filter(x => !known.has(x));
+    if (bad.length) {
+      const l = j.targets[0] ? live(adapterOf(j.targets[0].pc.name)) : null;
+      return `Alamat ${bad[0]} tidak cocok dengan hasil kerja di lapangan${l?.ip ? ` (${j.targets[0].pc.label}: IP ${l.ip}, gateway ${l.gw || '-'})` : ''}. Berita acara ditandatangani, jadi isinya harus sesuai fakta.`;
+    }
+    if (!/\b(ping|tes|tester|uji|diuji|dites|ipconfig|nslookup|cetak|print|browser|buka|wiremap|verifikasi|cek)\b/i.test(text))
+      return 'Tulis juga cara kamu membuktikan hasilnya (mis. LAN tester 1–8 lolos, ping gateway berhasil, situs terbuka dari PC).';
+    return '';
+  }
   signBerita(j: Job, text: string): string {
     if (j.status === 'closed') return 'Sudah ditutup.';
     if (text.trim().length < 25) return 'Tulis uraian penyebab & tindakan minimal satu kalimat (25 huruf).';
+    const fact = this.beritaFacts(j, text); if (fact) return fact;
     for (const t of j.targets) if (!this.targetOk(j, t)) { t.ok = false; t.tested = false; j.docReady = false; return `Belum bisa ditandatangani: ${t.pc.label} tidak lagi lolos uji (${t.note || 'cek ulang'}).`; }
     if (this.globalProblem(j)) { j.docReady = false; return 'Belum bisa ditandatangani: masih ada masalah di jaringan.'; }
     j.berita = text.trim().slice(0, 600); j.log.push('Berita acara ditandatangani & diserahkan');

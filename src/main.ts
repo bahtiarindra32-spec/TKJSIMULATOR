@@ -124,6 +124,8 @@ hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exe
 const labB = buildLabTkj(world); labB.group.updateMatrixWorld(true);
 for (const c of labB.pcs) PCS.push({ name: c.name, label: c.label, p: new THREE.Box3().setFromObject(c.o).getCenter(new THREE.Vector3()), o: c.o });
 const pcos = new PcOS();
+pcos.clock = () => dn.clock();
+pcos.objective = () => { const j = noc.tracked(); if (!j || j.status === 'closed') return ''; return `${j.tut ? 'Tugas' : ['Survei', 'Kerja', 'Uji', 'Dokumentasi', 'Selesai'][noc.stage(j)]} · ${noc.nextHint(j)}`; };
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));

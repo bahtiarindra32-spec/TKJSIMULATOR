@@ -75,6 +75,10 @@ export class PcOS {
   private ntfEl!: HTMLElement;
   private clockT = 0;
   onClose: (() => void) | null = null;
+  /** game clock (HH:MM) so the taskbar agrees with the world, and the current work step shown on the screen */
+  clock: (() => string) | null = null;
+  objective: ((pc: string) => string) | null = null;
+  private objEl: HTMLElement | null = null;
   onEvent: ((e: PcEvent) => void) | null = null;
 
   constructor() {
@@ -126,16 +130,24 @@ export class PcOS {
   }
 
   // ---------------------------------------------------------------- shell
+  /** the Windows account matches who uses the machine: school lab = siswa, workshop = teknisi, guest laptop = tamu, office = staf */
+  private acct(): [string, string] {
+    const host = (this.cur?.a.host ?? '').toUpperCase();
+    if (/^LAB|PRAK/.test(host)) return ['siswa', 'Siswa TKJ'];
+    if (/WORKSHOP|NOC|TEKNISI/.test(host)) return ['teknisi', 'Teknisi IT'];
+    if (/TAMU|GUEST|LAPTOP|LT-/.test(host)) return ['tamu', 'Tamu'];
+    return ['staf', 'Staf Kantor'];
+  }
   private lockScreen() {
     const d = new Date();
     const pw = h('input', { type: 'password', placeholder: 'PIN / Password' }) as HTMLInputElement;
-    const go = () => { this.cur!.signed = true; lock.remove(); this.notify('Selamat datang', `Kamu masuk sebagai siswa di ${this.cur!.a.host}.`); };
+    const go = () => { this.cur!.signed = true; lock.remove(); this.notify('Selamat datang', `Kamu masuk sebagai ${this.acct()[0]} di ${this.cur!.a.host}.`); };
     pw.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
     const lock = h('div', { class: 'lock' },
       h('div', { class: 'av', html: I.user }),
-      h('h2', {}, 'Siswa TKJ'),
+      h('h2', {}, this.acct()[1]),
       h('div', { class: 'pw' }, pw, h('button', { onclick: go, title: 'Sign in' }, '→')),
-      h('div', { class: 'hint' }, 'Akun lab tanpa password. Tekan Enter untuk masuk.'),
+      h('div', { class: 'hint' }, 'Akun tanpa password (simulasi). Tekan Enter untuk masuk.'),
       h('div', { class: 'clock' }, h('b', {}, d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })), d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })),
     );
     this.mon.append(lock); setTimeout(() => pw.focus(), 50);
@@ -199,7 +211,10 @@ export class PcOS {
   private toggleStart(force?: boolean) { const s = force ?? !this.startEl.classList.contains('show'); this.startEl.classList.toggle('show', s); }
   private tick() {
     const d = new Date();
-    if (this.clockEl) this.clockEl.innerHTML = `${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}<br>${d.toLocaleDateString('en-GB')}`;
+    if (this.clockEl) this.clockEl.innerHTML = `${this.clock?.() ?? d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}<br>${d.toLocaleDateString('id-ID')}`;
+    if (!this.objEl) { this.objEl = h('div', { class: 'pc-obj', name: 'pcObjective' }); this.root.append(this.objEl); }
+    const o = this.curName ? this.objective?.(this.curName) ?? '' : '';
+    this.objEl.textContent = o; this.objEl.hidden = !o;
   }
   private status(): 'none' | 'local' | 'internet' {
     const s = this.cur!; const l = live(s.a, s.env);
@@ -300,10 +315,10 @@ export class PcOS {
   // ---------------------------------------------------------------- Command Prompt
   openCmd() {
     const s = this.cur!; const out = h('div'); const inp = h('input', { spellcheck: 'false', autocomplete: 'off' }) as HTMLInputElement;
-    const prm = h('span', {}, 'C:\\Users\\siswa>');
+    const prm = h('span', {}, `C:\\Users\\${this.acct()[0]}>`);
     const inRow = h('div', { class: 'in' }, prm, inp);
     const term = h('div', { class: 'cmd' }, out, inRow);
-    let cwd = 'C:\\Users\\siswa', busy: { stop: () => void } | null = null, hi = s.history.length;
+    let cwd = `C:\\Users\\${this.acct()[0]}`, busy: { stop: () => void } | null = null, hi = s.history.length;
     let sub: LinuxShell | null = null;   // an SSH session running inside this window
     const print = (t = '') => { for (const ln of t.split('\n')) out.append(h('div', { class: 'ln' }, ln)); term.scrollTop = term.scrollHeight; };
     print(`${OSNAME} Nusantara [Version ${BUILD}]\n(c) ${CORP}. All rights reserved.\n`);
@@ -359,7 +374,7 @@ export class PcOS {
       case 'help': t.print('For more information on a specific command, type HELP command-name\nARP            Displays and modifies the IP-to-Physical address translation tables.\nCLS            Clears the screen.\nDATE           Displays the date.\nDIR            Displays a list of files and subdirectories in a directory.\nECHO           Displays messages.\nEXIT           Quits the CMD.EXE program (command interpreter).\nGETMAC         Displays the MAC address of network adapters.\nHOSTNAME       Prints the name of the current host.\nIPCONFIG       Displays all current TCP/IP network configuration values.\nNETSH          Network shell (interface ip show config).\nNSLOOKUP       Queries the DNS for host name resolution.\nPING           Sends ICMP ECHO_REQUEST packets to network hosts.\nROUTE          Displays the network routing table (route print).\nTIME           Displays the system time.\nTRACERT        Traces the route to a destination.\nVER            Displays the Jendela version.\nWHOAMI         Displays the current user.'); return;
       case 'ver': t.print(`\n${OSNAME} Nusantara [Version ${BUILD}]`); return;
       case 'hostname': t.print(a.host); return;
-      case 'whoami': t.print(`${a.host.toLowerCase()}\\siswa`); return;
+      case 'whoami': t.print(`${a.host.toLowerCase()}\\${this.acct()[0]}`); return;
       case 'echo': t.print(args.length ? line.slice(5) : 'ECHO is on.'); return;
       case 'date': t.print(`${new Date().toLocaleDateString('en-US', { weekday: 'short' })} ${new Date().toLocaleDateString('en-US')}`); return;
       case 'time': t.print(new Date().toLocaleTimeString('en-GB')); return;
