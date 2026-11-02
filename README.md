@@ -25,12 +25,9 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 Dependensi runtime hanya `three`. Dev: `typescript`, `vite`, `@types/three`.
 
-## 2. Skill (specialty) yang dipakai saat membangun
+## 2. Penggunaan AI dan lisensi
 
-- `threejs-world`: perancangan dunia/kota, hierarki objek, penamaan, dan zona.
-- `web-game-foundations`: game loop, input, state, save, dan struktur proyek.
-- `three-webgl-game`: performa WebGL, kamera, bayangan, anti-flicker, dan kolisi.
-- `game-playtest`: playtest otomatis dengan Playwright, screenshot, dan audit kolisi/jangkauan.
+Game ini dibangun dengan bantuan agen AI; pembagian peran, data yang dikirim fitur AI di dalam game, dan batasannya dijelaskan di [AI_USAGE.md](AI_USAGE.md). Riwayat perubahan: [CHANGELOG.md](CHANGELOG.md). Lisensi: MIT ([LICENSE](LICENSE)).
 
 Dokumen sumber: PDF "Prompt Pascal Kota Nusantara" milik pengguna (`design/source-pascal-prompt.md`). PDF ini **diaudit**, tidak diikuti mentah (lihat bagian 6). Tag CP mengacu pada dokumen CP TKJ Fase F (BSKAP), salinan dari situs SMKN 1 Pogalan:
 https://huda.smkn1pogalan.sch.id/wp-content/uploads/2024/08/Fase-F-SMK-TKJ.pdf
