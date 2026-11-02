@@ -12,7 +12,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 | Bagian | Yang dipakai |
 |---|---|
-| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 29 unit test vitest) |
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 34 unit test vitest) |
 | Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
 | Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
 | Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
