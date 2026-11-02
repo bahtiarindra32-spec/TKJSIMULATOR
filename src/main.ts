@@ -326,6 +326,7 @@ const menu = new Menu({
   build: __BUILD__, touch: TOUCH0,
   start: fresh => menu.fade(() => enterWalk(fresh), QA),
   resume: () => { if (mode === 'walk' && menu.paused) resumeGame(); else menu.fade(() => enterWalk(false), QA); },
+  lab: () => menu.fade(() => { enterWalk(false); if (riding) endRide(riding, null); document.body.classList.remove('riding'); speedo.classList.remove('on'); player.level = 1; player.pos.set(labB.spots.guru.x, LEVELS[0].elev + 0.12, labB.spots.guru.z + 1.4); setTimeout(() => { if (mode === 'walk') praktik.openDesk(); }, 500); }, QA),
   tour: () => menu.fade(() => { menu.show(false); tourMode = true; document.body.classList.add('tour'); goView('overview', true); }, QA),
   toMainMenu: () => toMainMenu(),
   setQuality: q => setQualityChoice(q),

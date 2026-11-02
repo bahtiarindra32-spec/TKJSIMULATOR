@@ -74,7 +74,7 @@ body.entered #ident { opacity: .7; }
 #minimap canvas { width: 100%; height: calc(100% - 22px); display: block; }
 #minimap .mm-legend { height: 22px; font: 500 11px/22px var(--mono); color: var(--muted); padding: 0 8px; white-space: nowrap; overflow: hidden; }
 .mm-me, .mm-tg { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #4fc3ff; vertical-align: -1px; }
-.mm-tg { background: #ffd400; margin-left: 6px; }
+.mm-tg { background: #2bd46b; margin-left: 6px; }
 #minimap.big { width: min(470px, 92vw); height: min(680px, 86vh); right: 50%; top: 50%; transform: translate(50%, -50%); z-index: 5; }
 body.entered #minimap { display: block; }
 @media (max-width: 720px) { body.entered #minimap:not(.big) { display: none; } }

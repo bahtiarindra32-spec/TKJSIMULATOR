@@ -13,7 +13,7 @@ try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY) ?? '{}')); } 
 export function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* ignore */ } }
 
 export interface MenuHooks {
-  start(fresh: boolean): void; resume(): void; tour(): void; toMainMenu(): void;
+  start(fresh: boolean): void; resume(): void; tour(): void; lab(): void; toMainMenu(): void;
   setQuality(q: QChoice): void; setTime(id: 'pagi' | 'siang' | 'sore' | 'malam'): void; applySettings(): void;
   build: string; touch: boolean;
 }
@@ -45,21 +45,22 @@ export class Menu {
     // ---- title screen
     this.root.id = 'menu'; this.root.className = 'on';
     this.root.innerHTML = `<div class="mn-shade"></div>
-      <header class="mn-top"><span class="mn-tag">PROYEK TKJ <b>/</b> KOTA 001</span><span class="mn-clock" data-clock></span></header>
+      <header class="mn-top"><span class="mn-tag">SMK · Teknik Komputer &amp; Jaringan</span><span class="mn-clock" data-clock></span></header>
       <main class="mn-main"><div class="mn-logo">${LOGO}</div>
         <h1 class="mn-title">Kota <span>Nusantara</span></h1>
         <p class="mn-sub">Simulator Teknik Komputer &amp; Jaringan</p>
-        <p class="mn-desc">Kota 400 × 600 m bergaya Jakarta. Rawat jaringan Nusantara Tech Hotel &amp; Office, keliling kota naik motor matic, dari Sudirman sampai kampung bergang.</p>
+        <p class="mn-desc">Magang jadi teknisi jaringan di kota bergaya Jakarta: crimping kabel, setel switch dan router, tangani tiket gangguan, lalu buktikan hasilnya dari perangkat itu sendiri.</p>
         <nav class="mn-list" aria-label="Menu utama"></nav></main>
       <footer class="mn-foot"><span>Versi ${h.build}</span><span>${h.touch ? 'Ketuk untuk memilih' : '↑ ↓ pilih · Enter mulai'}</span></footer>`;
     const list = this.root.querySelector('.mn-list')!;
     this.startBtn = btn('Mulai', 'enter', 'mn-btn primary'); this.startBtn.innerHTML = '<span>Mulai</span><i>›</i>';
     this.newBtn = btn('Mulai dari Awal', 'mnNew'); this.newBtn.hidden = true;
-    const tour = btn('Jelajah Kota', 'mnTour'), set = btn('Pengaturan', 'mnSettings'), ctl = btn('Kontrol', 'mnControls'), about = btn('Tentang', 'mnAbout');
-    list.append(this.startBtn, this.newBtn, tour, set, ctl, about);
+    const lab = btn('Lab Praktik (guru & siswa)', 'mnLab'), tour = btn('Jelajah Kota', 'mnTour'), set = btn('Pengaturan', 'mnSettings'), ctl = btn('Kontrol', 'mnControls'), about = btn('Tentang', 'mnAbout');
+    list.append(this.startBtn, this.newBtn, lab, tour, set, ctl, about);
     this.startBtn.addEventListener('click', () => { this.started ? h.resume() : h.start(true); });
     this.newBtn.addEventListener('click', () => h.start(true));
     tour.addEventListener('click', () => h.tour());
+    lab.addEventListener('click', () => h.lab());
     set.addEventListener('click', () => this.showPanel(this.panel, 'settings'));
     ctl.addEventListener('click', () => this.showPanel(this.panel, 'controls'));
     about.addEventListener('click', () => this.showPanel(this.panel, 'about'));

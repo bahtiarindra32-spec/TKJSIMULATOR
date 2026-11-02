@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--no-sandbox'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('http://127.0.0.1:8787/?qa&low'); await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 });
+await p.evaluate(() => { const r = document.getElementById('menu'); r.classList.add('on'); r.hidden = false; r.style.display = 'block'; r.style.visibility = 'visible'; r.style.opacity = '1'; });
+await p.waitForTimeout(300); await p.screenshot({ path: '/workspace/work/shots/menu_title.png' });
+await p.evaluate(() => document.getElementById('mnLab').click());
+await p.waitForTimeout(4000);
+const st = await p.evaluate(() => ({ desk: !!document.querySelector('.labdesk'), h2: document.querySelector('.labdesk h2')?.textContent, pl: (({ x, z }) => ({ x, z }))(window.__kota.player.pos) }));
+await p.screenshot({ path: '/workspace/work/shots/menu_lab.png' });
+console.log('RESULT', JSON.stringify(st), errs); await b.close();

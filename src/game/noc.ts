@@ -533,7 +533,11 @@ export class Noc {
     this.jobs = [j]; this.mode = 'contract'; this.trackedId = j.id;
     this.offers = [];
     this.save();
-    if (!this.s.seen.includes(tpl)) { this.s.seen.push(tpl); this.save(); this.openBrief(j); }
+    if (tpl === 'tutor') {
+      // first minute of the game: one line from the supervisor instead of two text panels; the surat kerja stays one key away (T)
+      if (!this.s.seen.includes(tpl)) { this.s.seen.push(tpl); this.save(); }
+      this.toast('Kak Rani: Hari pertama! Satu PC di Workshop TKJ belum tersambung. Ambil alat di Lemari Alat dulu, ikuti penanda hijau. Surat kerja: T.', 9000);
+    } else if (!this.s.seen.includes(tpl)) { this.s.seen.push(tpl); this.save(); this.openBrief(j); }
     else this.openOrder(j);
     return j;
   }

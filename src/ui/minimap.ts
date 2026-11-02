@@ -41,7 +41,7 @@ export class Minimap {
     }
     // v9 landmarks in the south district
     g.font = 'bold 13px Arial'; g.fillStyle = '#e8f5e9';
-    for (const [t, x, z] of [['LAPANGAN', 124, 404], ['MASJID', 340, 380], ['TAMAN DAHLIA', 116, 524], ['SMK NUSANTARA', 236, 550], ['KAMPUNG C', 14, 386], ['KAMPUNG D', 14, 506]] as [string, number, number][]) g.fillText(t, x * s, z * s);
+    for (const [t, x, z] of [['LAPANGAN', 124, 404], ['MASJID', 340, 380], ['TAMAN DAHLIA', 116, 524], ['SMK NUSANTARA', 236, 550], ['LAB TKJ', 242, 489], ['KAMPUNG C', 14, 386], ['KAMPUNG D', 14, 506]] as [string, number, number][]) g.fillText(t, x * s, z * s);
     g.fillStyle = '#d0693f'; g.font = 'bold 22px Arial'; g.fillText('U', CITY_W * s - 22, 18);
   }
   /** px, pz in city coords; heading radians (0 = north, clockwise); target city coords */
@@ -61,9 +61,9 @@ export class Minimap {
       let [tx, ty] = toScreen(target.x, target.z);
       const off = tx < 8 || ty < 8 || tx > W - 8 || ty > H - 8;
       tx = Math.min(W - 10, Math.max(10, tx)); ty = Math.min(H - 10, Math.max(10, ty));
-      g.fillStyle = '#ffd400'; g.strokeStyle = '#2a2300'; g.lineWidth = 3;
+      g.fillStyle = '#2bd46b'; g.strokeStyle = '#06301a'; g.lineWidth = 3;
       g.beginPath(); g.arc(tx, ty, off ? 8 : 10, 0, Math.PI * 2); g.fill(); g.stroke();
-      g.fillStyle = '#2a2300'; g.font = 'bold 13px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('!', tx, ty + 1);
+      g.fillStyle = '#06301a'; g.font = 'bold 13px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('!', tx, ty + 1);
     }
     const [mx, my] = toScreen(px, pz);
     g.save(); g.translate(mx, my); g.rotate(heading);
