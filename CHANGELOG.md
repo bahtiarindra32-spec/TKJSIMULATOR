@@ -6,6 +6,7 @@ Ringkasan per hari. Detail lengkap ada di riwayat git.
 - Review berlapis (juri, guru TKJ, playtester). AI bawaan pindah ke `openrouter/free` dengan fallback dan tombol Tes koneksi AI.
 - Spanning tree di switch: kabel loop hanya menimbulkan broadcast storm kalau STP dimatikan.
 - Uji kenaikan pangkat (XP saja tidak cukup), berita acara sebelum pekerjaan ditutup, tahapan Survei → Kerja → Uji → Dokumentasi, stok konektor RJ45, paraf guru per langkah di Lab Praktik.
+- Mode Juri (menu utama atau ?juri): tur 6 pemberhentian ke fitur unggulan, save pemain dicadangkan dan dikembalikan (juga setelah reload). Playtest qa_demo.
 - Rekap kelas tanpa server: kode hasil di lembar hasil (salin), meja guru → Guru: rekap kelas (tempel chat, tolak kode rusak, percobaan terbaru per nama, tabel + CSV). 3 unit test baru (44), playtest qa_recap.
 - Lab Praktik: tiga langkah baru. Rancang VLSM (tabel di jobsheet, desain benar apa pun diterima), routing antar-VLAN router-on-a-stick di router lab R-LAB (console IOS: subinterface dot1Q, trunk Gi1/0/24 + native VLAN 70 di SW-LAB), dan firewall antar-VLAN dengan ACL extended. Kode jobsheet 7 karakter bila memakai langkah baru; kode 6 karakter lama tetap valid. 7 unit test baru (41 total), playtest qa_ivlan.
 - Performa (satu level grafis tetap): Lab Praktik dan papan nama jalan di-batch, warna polos digabung per jenis permukaan (warna pindah ke vertex), mobil jauh (>70 m) memakai model sederhana, dan mobil parkir tidak lagi tergambar dua kali. Draw call di titik awal 6.048 → 3.714, di Lab 1.751 → 759.

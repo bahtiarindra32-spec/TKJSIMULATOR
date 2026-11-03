@@ -13,7 +13,7 @@ try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY) ?? '{}')); } 
 export function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* ignore */ } }
 
 export interface MenuHooks {
-  start(fresh: boolean): void; resume(): void; tour(): void; lab(): void; toMainMenu(): void;
+  start(fresh: boolean): void; resume(): void; tour(): void; lab(): void; demo(): void; toMainMenu(): void;
   setQuality(q: QChoice): void; setTime(id: 'pagi' | 'siang' | 'sore' | 'malam'): void; applySettings(): void;
   build: string; touch: boolean;
 }
@@ -55,12 +55,13 @@ export class Menu {
     const list = this.root.querySelector('.mn-list')!;
     this.startBtn = btn('Mulai', 'enter', 'mn-btn primary'); this.startBtn.innerHTML = '<span>Mulai</span><i>›</i>';
     this.newBtn = btn('Mulai dari Awal', 'mnNew'); this.newBtn.hidden = true;
-    const lab = btn('Lab Praktik (guru & siswa)', 'mnLab'), tour = btn('Jelajah Kota', 'mnTour'), set = btn('Pengaturan', 'mnSettings'), ctl = btn('Kontrol', 'mnControls'), about = btn('Tentang', 'mnAbout');
-    list.append(this.startBtn, this.newBtn, lab, tour, set, ctl, about);
+    const lab = btn('Lab Praktik (guru & siswa)', 'mnLab'), juri = btn('Mode Juri (tur 5 menit)', 'mnJuri'), tour = btn('Jelajah Kota', 'mnTour'), set = btn('Pengaturan', 'mnSettings'), ctl = btn('Kontrol', 'mnControls'), about = btn('Tentang', 'mnAbout');
+    list.append(this.startBtn, this.newBtn, lab, juri, tour, set, ctl, about);
     this.startBtn.addEventListener('click', () => { this.started ? h.resume() : h.start(true); });
     this.newBtn.addEventListener('click', () => h.start(true));
     tour.addEventListener('click', () => h.tour());
     lab.addEventListener('click', () => h.lab());
+    juri.addEventListener('click', () => h.demo());
     set.addEventListener('click', () => this.showPanel(this.panel, 'settings'));
     ctl.addEventListener('click', () => this.showPanel(this.panel, 'controls'));
     about.addEventListener('click', () => this.showPanel(this.panel, 'about'));

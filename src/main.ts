@@ -1,3 +1,4 @@
+import './game/demoGuard';   // first: puts the player's save back if a judge tour was left open
 import './style.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -40,6 +41,8 @@ import { PcOS } from './pcos/os';
 import { Noc } from './game/noc';
 import { Praktik } from './game/praktik';
 import { buildLabTkj, insideLab } from './world/labBuilding';
+import { DemoTour } from './game/demo';
+import { encodeResult } from './game/recap';
 import { DEVICES } from './pcos/ext';
 import { setupTouch, touch, isTouch, releaseTouch } from './ui/touch';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -331,6 +334,7 @@ const menu = new Menu({
   build: __BUILD__, touch: TOUCH0,
   start: fresh => menu.fade(() => enterWalk(fresh), QA),
   resume: () => { if (mode === 'walk' && menu.paused) resumeGame(); else menu.fade(() => enterWalk(false), QA); },
+  demo: () => menu.fade(() => { enterWalk(false); if (riding) endRide(riding, null); document.body.classList.remove('riding'); speedo.classList.remove('on'); demo.start(); }, QA),
   lab: () => menu.fade(() => { enterWalk(false); if (riding) endRide(riding, null); document.body.classList.remove('riding'); speedo.classList.remove('on'); player.level = 1; player.pos.set(labB.spots.guru.x, LEVELS[0].elev + 0.12, labB.spots.guru.z + 1.4); setTimeout(() => { if (mode === 'walk') praktik.openDesk(); }, 500); }, QA),
   tour: () => menu.fade(() => { menu.show(false); tourMode = true; document.body.classList.add('tour'); goView('overview', true); }, QA),
   toMainMenu: () => toMainMenu(),
@@ -338,6 +342,29 @@ const menu = new Menu({
   setTime: id => { dn.goTo(id as PresetId); menu.setTimeActive(id[0].toUpperCase() + id.slice(1)); },
   applySettings: () => applySettings(),
 });
+// ---------- Mode Juri (guided tour of the main features; src/game/demo.ts) ----------
+function placeAt(x: number, z: number, level: number, yaw = player.yaw) { player.level = level; player.pos.set(x, LEVELS[level - 1].elev + 0.12, z); player.yaw = yaw; player.vy = 0; }
+function placeNearPc(name: string) { const c = PCS.find(p => p.name === name); if (!c) return; const lv = /_L(\d)_/.exec(name) ? +/_L(\d)_/.exec(name)![1] : 1; placeAt(c.p.x, c.p.z + 1.1, lv, 0); }
+function demoReset() { noc.demoClear(); praktik.abort(); pcos.close?.(); noc.inv.console = true; noc.inv.laptop = true; noc.inv.tester = true; noc.inv.toner = true; noc.inv.patch = Math.max(noc.inv.patch, 2);
+  const s = (noc as unknown as { s: { xp: number; cert?: number } }).s; s.xp = Math.max(s.xp, 9000); s.cert = 9; }
+const demo = new DemoTour([
+  { title: 'Surat kerja magang: Pasang IP Statis', text: 'Pekerjaan nyata dari papan kerja NOC. Datangi PC di surat kerja, buka [F], atur IPv4, lalu uji ping. Surat hanya selesai kalau simulator jaringan sehat dan kamu menguji dari PC itu.',
+    go: () => { demoReset(); const j = noc.acceptContract('static', 20261103); if (j) { placeNearPc(j.targets[0].pc.name); noc.openOrder(j); } } },
+  { title: 'Rak switch & console IOS', text: 'Surat pindah VLAN: buka rak lantai, colok console, lalu ketik perintah Cisco (vlan, switchport access vlan, write memory). Lampu port dan PC di meja langsung ikut berubah.',
+    go: () => { demoReset(); const j = noc.acceptContract('vlan', 4242); const sw = j?.sw ? SWITCHES.find(x => x.name === j.sw) : null; const r = sw ? noc.RACKS[sw.rack] : null; if (r) { placeAt(r.x, r.z + 1.0, r.level, 0); noc.openRack(sw!.rack); } } },
+  { title: 'Shift helpdesk: tiket gangguan', text: 'Tiket dengan SLA dari karyawan hotel. Penyebabnya disuntikkan ke simulator (kabel, port, VLAN, DNS, DHCP, ISP). Diagnosis urut lapisan OSI: lampu link, ipconfig, ping, nslookup.',
+    go: () => { demoReset(); noc.startShift(); noc.openBoard(); } },
+  { title: 'Lab Praktik: VLSM → router-on-a-stick → ACL', text: 'Mode guru-siswa di gedung lab SMK. Isi tabel VLSM di jobsheet, lalu konfigurasi R-LAB (subinterface dot1Q) dan trunk SW-LAB, lalu ACL antar-VLAN. Checkpoint dicek dari simulator, bukan AI.',
+    go: () => { demoReset(); praktik.start({ steps: ['vlsm', 'intervlan', 'acl'], minutes: 0, perStudent: false, seed: 2026 }, 'JURI26', 'Juri LOGICODIX'); placeAt(labB.spots.rack.x, labB.spots.rack.z + 1.2, 1, 0); } },
+  { title: 'Pak Nusa: mentor AI', text: 'Tanya apa saja soal pekerjaan yang sedang jalan. Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban. Tanpa API key, ia memakai mode offline. AI tidak pernah menilai.',
+    go: () => { demoReset(); noc.openNusa(); } },
+  { title: 'Rekap kelas untuk guru (tanpa server)', text: 'Tiap siswa mendapat kode hasil satu baris. Guru menempel semua kode di meja guru dan mendapat tabel + CSV. Data di bawah ini contoh tiga siswa fiktif.',
+    go: () => { demoReset(); placeAt(labB.spots.guru.x, labB.spots.guru.z + 1.4, 1, 0); const when = Date.now();
+      const ex = [['Ayu Lestari', 3, 97, 'Sangat Kompeten', 1440, [8, 10, 5]], ['Bagas Pratama', 5, 82, 'Kompeten', 2210, [8, 9, 5]], ['Citra Dewi', 7, 48, 'Belum Kompeten', 2700, [6, 4, 0]]] as const;
+      const txt = ex.map(([n, d, v, p, t, g]) => `${n}: ${encodeResult({ sheet: 'JURI26', name: n, desk: d, nilai: v, predikat: p, durSec: t, overtime: false, when, steps: [{ step: 'vlsm', got: g[0], of: 8, done: g[0] === 8 }, { step: 'intervlan', got: g[1], of: 10, done: g[1] >= 9 }, { step: 'acl', got: g[2], of: 5, done: g[2] === 5 }] })}`).join('\n');
+      praktik.openRecap(txt); } },
+], () => { location.replace(location.pathname + location.search.replace(/[?&]juri\b/, '').replace(/^&/, '?')); });
+if (QS.has('juri')) setTimeout(() => { if (!demo.active) menu.fade(() => { enterWalk(false); demo.start(); }, QA); }, 600);
 function openPause() {
   if (mode !== 'walk' || menu.paused) return;
   keys.clear(); releaseTouch(); drag = false; motors.engine.on = false; motors.engine.update(0, 0);
@@ -1207,7 +1234,7 @@ requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classL
   portOf: (n: string) => { const q = portOf(n); return q && { sw: q.sw.name, n: q.port.n, vlan: q.port.vlan, home: q.sw.level === 1 ? 10 : 20 }; },
   panelOf: (n: string) => { const q = panelOf(n); return q && { sw: q.sw.name, pp: q.pp.n, label: q.pp.label, patch: q.pp.patch, hang: q.pp.hang, lv: q.sw.level }; },
   nearRack: () => nearRack(), idfs: () => IDFS.map(d => ({ ...d, x: d.x + 200, z: d.z + 150 })),
-  noc, praktik, labSpots: () => ({ guru: [labB.spots.guru.x + 200, labB.spots.guru.z + 150], rack: [labB.spots.rack.x + 200, labB.spots.rack.z + 150], tools: [labB.spots.tools.x + 200, labB.spots.tools.z + 150], crimp: [labB.spots.crimp.x + 200, labB.spots.crimp.z + 150] }), missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
+  noc, praktik, demo, labSpots: () => ({ guru: [labB.spots.guru.x + 200, labB.spots.guru.z + 150], rack: [labB.spots.rack.x + 200, labB.spots.rack.z + 150], tools: [labB.spots.tools.x + 200, labB.spots.tools.z + 150], crimp: [labB.spots.crimp.x + 200, labB.spots.crimp.z + 150] }), missions, pcos, linux: linuxQa, office: officeQa, edge: edgeQa, swPort: (pc: string) => portOf(pc)?.port.n ?? null, anchors: () => hotelAnchorsWorld().map(a => ({ name: a.name, x: a.x + 200, z: a.z + 150 })), pcs: () => PCS.map(c => ({ name: c.name, x: c.p.x + 200, z: c.p.z + 150, y: c.p.y })), nearPc: () => nearPc?.name ?? null,
   look: (pitch: number) => { player.pitch = pitch; },
   /** QA: is a point (city coords) inside a static collider (r = padding) */
   blockedAt: (X: number, Z: number, y: number, r = 0) => blocked(wx(X), wz(Z), y, r),

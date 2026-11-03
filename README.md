@@ -148,6 +148,10 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Pemain baru langsung mendapat surat kerja **Hari Pertama: Sambungkan PC Workshop** (juga ada di papan kerja sampai selesai): ambil LAN tester + patch cord di Lemari Alat, pasang patch cord dan tes kabel (C / tombol Cek), nyalakan PC (F / tombol Aksi), `ipconfig`, lalu `ping` Default Gateway.
 - Langkah dicatat dari aksi nyata. Petunjuk Kak Rani hanya muncul saat pemain tampak macet: diam ±8 detik tanpa kemajuan setelah ±22 detik, langkah salah (membuka PC sebelum kabel beres, mengetik perintah lain), atau terlalu lama. Petunjuk naik dari arahan singkat ke langkah rinci dan hilang begitu ada kemajuan. Teks menyesuaikan kontrol sentuh.
 
+### Mode Juri (tur 5 menit) — `src/game/demo.ts`
+- Tombol **Mode Juri** di menu utama atau tautan `?juri`. Enam pemberhentian, masing-masing langsung ke keadaan siap dicoba: surat kerja Pasang IP Statis di depan PC-nya, rak IDF dengan console switch, shift helpdesk dengan tiket gangguan, Lab Praktik VLSM → router-on-a-stick → ACL di rak lab, Pak Nusa, dan rekap kelas berisi contoh tiga siswa fiktif.
+- Tidak ada yang diskenariokan berhasil: pemain tetap mengerjakan sendiri. Save pemain disimpan dulu dan dikembalikan saat keluar (juga bila tab ditutup atau dimuat ulang di tengah tur).
+
 ### Gedung Lab Praktik TKJ (SMK Nusantara, Kota Selatan) — `src/world/labBuilding.ts`, `src/game/praktik.ts`
 Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahlia). Terpisah dari magang di Nusantara Tech: tidak ada surat kerja, tiket, SLA, XP, atau supervisor.
 - Isi: 8 meja PC siswa (outlet LAB-01..08), meja guru + papan tulis, lemari alat, meja crimping, rak dengan patch panel dan switch SW-LAB. Jaringannya segmen sendiri: VLAN 70, 192.168.70.0/24, router-praktik 192.168.70.1 (WebKonfig), srv-jobsheet 192.168.70.10.

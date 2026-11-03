@@ -30,3 +30,11 @@ real-world standard it follows, and what is deliberately not simulated. Full his
 - One graphics level only (user rule). Savings come from batching: plain coloured materials merge per finish
   (colour moves to vertices, materials flagged `userData.live` stay separate), lab and street signs are baked,
   cars past ~70 m draw a 2-mesh stand-in. Measured with `tools/qa/qa_perf.mjs`.
+
+## Mode Juri (Nov 2026)
+- Judges get ~5 minutes. Six stops jump straight to a playable state of each pillar; nothing auto-completes.
+- The player's save is stashed in sessionStorage and restored on exit or on the next load (demoGuard.ts runs first).
+
+## Class recap (Nov 2026)
+- Result code `KN1.<sheet>.<base64url payload>.<checksum>`; teacher pastes any text, codes are extracted,
+  newest attempt per name wins. Checksum = typo/edit guard only, stated on the sheet (no server, no signature).

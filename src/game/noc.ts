@@ -1572,6 +1572,8 @@ export class Noc {
       g.fillStyle = t.status === 'closed' ? '#43c07f' : '#c9c6be'; g.fillText(st, 880, y + 30);
     });
   }
+  /** Mode Juri: drop whatever is running without a result or a streak penalty (the network keeps its state) */
+  demoClear() { for (const j of this.openJobs()) j.status = 'closed'; this.mode = 'idle'; this.trackedId = null; this.jobs = []; this.closeModal(); }
   private abandon() {
     for (const j of this.openJobs()) j.status = 'closed';
     if (this.s.day) { this.s.day = null; this.s.streak = 0; this.save(); }

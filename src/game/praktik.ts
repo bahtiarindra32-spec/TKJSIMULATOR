@@ -211,6 +211,8 @@ export class Praktik {
     clearInterval(this.timer); this.timer = window.setInterval(() => this.tick(), 700);
     this.render(); this.board();
   }
+  /** stop a run without a result sheet (Mode Juri switching stops) */
+  abort() { if (!this.run) return; this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board(); }
   /** the lab as the technician left it last night: every desk patched, DHCP on, VLAN 70, no records */
   reset() {
     const sw = this.sw(); const env = ENVS.prak;
