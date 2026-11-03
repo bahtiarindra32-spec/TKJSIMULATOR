@@ -12,7 +12,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 | Bagian | Yang dipakai |
 |---|---|
-| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 34 unit test vitest) |
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 41 unit test vitest) |
 | Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
 | Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
 | Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
@@ -151,8 +151,11 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 ### Gedung Lab Praktik TKJ (SMK Nusantara, Kota Selatan) — `src/world/labBuilding.ts`, `src/game/praktik.ts`
 Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahlia). Terpisah dari magang di Nusantara Tech: tidak ada surat kerja, tiket, SLA, XP, atau supervisor.
 - Isi: 8 meja PC siswa (outlet LAB-01..08), meja guru + papan tulis, lemari alat, meja crimping, rak dengan patch panel dan switch SW-LAB. Jaringannya segmen sendiri: VLAN 70, 192.168.70.0/24, router-praktik 192.168.70.1 (WebKonfig), srv-jobsheet 192.168.70.10.
-- Meja guru: guru mencentang langkah (crimping T568B, pengkabelan terstruktur, IP statis, DHCP router, VLAN, DNS lokal, troubleshooting 2 gangguan), batas waktu, dan opsi soal & meja beda tiap siswa, lalu mendapat kode 6 karakter atau tautan `?lab=KODE`. Kode menyimpan seluruh jobsheet, tanpa server. Kalimat guru bisa diubah jadi centang lewat kata kunci, atau AI kalau diaktifkan; AI tidak menilai.
+- Meja guru: guru mencentang langkah (crimping T568B, pengkabelan terstruktur, IP statis, DHCP router, VLAN, rancang VLSM, routing antar-VLAN router-on-a-stick, firewall antar-VLAN dengan ACL extended, DNS lokal, troubleshooting 2 gangguan), batas waktu, dan opsi soal & meja beda tiap siswa, lalu mendapat kode 6 karakter (7 karakter bila memakai langkah VLSM/antar-VLAN/ACL; kode lama tetap bisa dibuka) atau tautan `?lab=KODE`. Kode menyimpan seluruh jobsheet, tanpa server. Kalimat guru bisa diubah jadi centang lewat kata kunci, atau AI kalau diaktifkan; AI tidak menilai.
 - Siswa memasukkan kode + nama di meja guru, mendapat satu meja, dan mengerjakan jobsheet berurutan. Panel jobsheet berisi tujuan, alat & bahan, K3, langkah kerja, dan checkpoint yang tercentang langsung dari simulator (urutan kabel, port switch, VLAN, label outlet, IP, DHCP, DNS, hasil ping/browser dari PC).
+- **VLSM**: blok 192.168.x.0/24 dengan empat kebutuhan host (GURU, SISWA, SERVER, link router). Siswa mengisi network, prefix, gateway, dan broadcast di jobsheet. Desain apa pun yang benar diterima (prefix terkecil yang cukup, mulai di batas blok, tidak tumpang tindih), bukan hanya urutan buku.
+- **Routing antar-VLAN (router-on-a-stick)**: router lab **R-LAB** di rak lab, console bergaya Cisco IOS (`interface g0/0.N`, `encapsulation dot1Q N`, `ip address`, `show ip interface brief`, `show vlans`, `show running-config`, `write memory`). Kabel Gi0/0 ke SW-LAB Gi1/0/24, yang harus dijadikan trunk (`switchport mode trunk`, `switchport trunk native vlan 70` agar meja lain tetap di VLAN 70, `switchport trunk allowed vlan`). Alamat memakai tabel VLSM siswa bila benar. PC GURU dan SISWA saling ping lewat router; gateway salah di salah satu PC membuat balasan tidak kembali.
+- **Firewall antar-VLAN**: ACL extended bernomor di R-LAB (`access-list 110 deny ip … …`, `permit ip any any`, `ip access-group 110 in|out`, `show access-lists`). Dicek dari simulator: SISWA tidak bisa ke GURU, tapi server lab 192.168.70.10 tetap terbuka.
 - Paraf guru: langkah yang checkpoint-nya terpenuhi harus diparaf di meja guru (dicek ulang langsung dari simulator) sebelum lanjut.
 - Lembar hasil: checkpoint terpenuhi ÷ seluruh checkpoint × 100, waktu per langkah, checkpoint yang gagal. Batasan: tanpa server, lembar hasil bisa dipalsukan, jadi guru sebaiknya melihat langsung.
 

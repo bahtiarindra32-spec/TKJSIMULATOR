@@ -156,7 +156,27 @@ export class SwitchCli {
         }
         if (kw(t[0], 'no', 2) && kw(t[1], 'switchport', 2) && kw(t[2], 'voice', 2)) { for (const p of this.ifs) p.voice = undefined; this.sw.dirty = true; return; }
         if (kw(t[0], 'switchport', 2)) {
-          if (kw(t[1], 'mode', 2)) { if (!t[2]) return this.incomplete(); if (!kw(t[2], 'access', 2)) { this.print('% Port akses ke PC: gunakan "switchport mode access". Trunk hanya untuk uplink.\n'); return; } return; }
+          // a port with a router (not a PC) behind it may be an 802.1Q trunk: router-on-a-stick in the lab
+          const dev = this.ifs.every(p => !p.pc);
+          if (kw(t[1], 'mode', 2)) {
+            if (!t[2]) return this.incomplete();
+            if (kw(t[2], 'access', 2)) { for (const p of this.ifs) p.trunk = undefined; this.sw.dirty = true; return; }
+            if (!kw(t[2], 'trunk', 2)) return this.bad(t[2]);
+            if (!dev) { this.print('% Port akses ke PC: gunakan "switchport mode access". Trunk untuk port ke switch lain atau router.\n'); return; }
+            for (const p of this.ifs) { if (!p.trunk) { p.trunk = { allowed: null, native: 1 }; this.print(`%LINEPROTO-5-UPDOWN: Line protocol on Interface ${portName(p.n)}, changed state to down\n%LINEPROTO-5-UPDOWN: Line protocol on Interface ${portName(p.n)}, changed state to up\n`); } }
+            this.sw.dirty = true; return;
+          }
+          if (kw(t[1], 'trunk', 2)) {
+            if (kw(t[2], 'encapsulation', 2)) return;   // the C2960X only speaks dot1q: accepted, nothing to change
+            if (!this.ifs.every(p => p.trunk)) { this.print('% Port ini masih mode access. Jalankan dulu "switchport mode trunk".\n'); return; }
+            if (kw(t[2], 'native', 2) && kw(t[3], 'vlan', 2)) { const id = +t[4]; if (!t[4]) return this.incomplete(); if (!(id >= 1 && id <= 4094)) return this.bad(t[4]); for (const p of this.ifs) p.trunk!.native = id; this.sw.dirty = true; return; }
+            if (kw(t[2], 'allowed', 2) && kw(t[3], 'vlan', 2)) {
+              const arg = t[4]?.toLowerCase(); if (!arg) return this.incomplete();
+              for (const p of this.ifs) { const r = this.allowedList(p.trunk!.allowed, arg, t[5]); if (r === 'bad') return this.bad(t[5] ?? t[4]); p.trunk!.allowed = r; }
+              this.sw.dirty = true; return;
+            }
+            return this.bad(t[2]);
+          }
           if (kw(t[1], 'access', 2) && kw(t[2], 'vlan', 2)) {
             const id = +t[3]; if (!t[3]) return this.incomplete(); if (!(id >= 1 && id <= 1001)) return this.bad(t[3]);
             if (!this.sw.vlans.has(id)) { this.print(`% Access VLAN does not exist. Creating vlan ${id}\n`); this.sw.vlans.set(id, `VLAN${String(id).padStart(4, '0')}`); }
@@ -198,17 +218,35 @@ export class SwitchCli {
     if (!this.sw.vlans.has(p.vlan)) return 'inactive';
     return 'connected';
   }
+  /** IOS "switchport trunk allowed vlan" argument (all / none / add / remove / except / list) */
+  private allowedList(cur: number[] | null, arg: string, next: string | undefined): number[] | null | 'bad' {
+    const list = (x: string | undefined) => { if (!x) return null; const out: number[] = []; for (const part of x.split(',')) { const r = /^(\d+)(?:-(\d+))?$/.exec(part); if (!r) return null; const a = +r[1], b = r[2] ? +r[2] : a; if (a < 1 || b > 4094 || b < a) return null; for (let k = a; k <= b; k++) out.push(k); } return out; };
+    const ALL = () => Array.from({ length: 4094 }, (_, i) => i + 1);
+    if (kw(arg, 'all', 2)) return null;
+    if (kw(arg, 'none', 2)) return [];
+    if (kw(arg, 'add', 2)) { const l = list(next); if (!l) return 'bad'; return cur ? [...new Set([...cur, ...l])].sort((a, b) => a - b) : null; }
+    if (kw(arg, 'remove', 2)) { const l = list(next); if (!l) return 'bad'; return (cur ?? ALL()).filter(v => !l.includes(v)); }
+    if (kw(arg, 'except', 2)) { const l = list(next); if (!l) return 'bad'; return ALL().filter(v => !l.includes(v)); }
+    const l = list(arg); if (!l) return 'bad'; return [...new Set(l)].sort((a, b) => a - b);
+  }
   private show(t: string[]) {
     if (!t.length) return this.incomplete();
     const sw = this.sw;
     if (kw(t[0], 'interfaces', 2) && (kw(t[1], 'status', 2))) {
       let s = 'Port      Name               Status       Vlan       Duplex  Speed Type\n';
-      for (const p of sw.ports) { const st = this.status(p); s += `${portName(p.n).padEnd(10)}${p.desc.slice(0, 18).padEnd(19)}${st.padEnd(13)}${String(p.vlan).padEnd(11)}${(st === 'connected' ? 'a-full' : 'auto').padEnd(8)}${(st === 'connected' ? 'a-1000' : 'auto').padEnd(6)}10/100/1000BaseTX\n`; }
+      for (const p of sw.ports) { const st = this.status(p); s += `${portName(p.n).padEnd(10)}${p.desc.slice(0, 18).padEnd(19)}${st.padEnd(13)}${(p.trunk ? 'trunk' : String(p.vlan)).padEnd(11)}${(st === 'connected' ? 'a-full' : 'auto').padEnd(8)}${(st === 'connected' ? 'a-1000' : 'auto').padEnd(6)}10/100/1000BaseTX\n`; }
       if (sw.uplink) { const st = this.status(sw.upPort); s += `${portName(49).padEnd(10)}${sw.upPort.desc.padEnd(19)}${st.padEnd(13)}${'trunk'.padEnd(11)}${(st === 'connected' ? 'full' : 'auto').padEnd(8)}${(st === 'connected' ? '1000' : 'auto').padEnd(6)}1000BaseLX SFP\n`; }
       this.print(s + '\n'); return;
     }
     if (kw(t[0], 'interfaces', 2) && kw(t[1], 'trunk', 2)) {
-      if (!sw.uplink) { this.print('\n% Switch inti (MDF): trunk ke IDF ada di modul fiber, tidak dikonfigurasi dari sini.\n\n'); return; }
+      if (!sw.uplink) {
+        const tr = sw.ports.filter(p => p.trunk && portLink(sw, p));
+        if (!tr.length) { this.print(sw.name === 'SW-LAB' ? '\n' : '\n% Switch inti (MDF): trunk ke IDF ada di modul fiber, tidak dikonfigurasi dari sini.\n\n'); return; }
+        let o = '\nPort        Mode         Encapsulation  Status        Native vlan\n' + tr.map(p => `${portName(p.n).padEnd(12)}on           802.1q         trunking      ${p.trunk!.native}\n`).join('');
+        o += '\nPort        Vlans allowed on trunk\n' + tr.map(p => `${portName(p.n).padEnd(12)}${p.trunk!.allowed === null ? '1-4094' : p.trunk!.allowed.length ? p.trunk!.allowed.join(',') : 'none'}\n`).join('');
+        o += '\nPort        Vlans allowed and active in management domain\n' + tr.map(p => `${portName(p.n).padEnd(12)}${[...sw.vlans.keys()].filter(v => p.trunk!.allowed === null || p.trunk!.allowed.includes(v)).sort((a, b) => a - b).join(',') || 'none'}\n`).join('');
+        this.print(o + '\n'); return;
+      }
       const st = this.status(sw.upPort) === 'connected';
       if (!st) { this.print('\n'); return; }
       const al = sw.uplink.allowed === null ? '1-4094' : sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none';
@@ -241,7 +279,7 @@ export class SwitchCli {
     if (kw(t[0], 'vlan', 1)) {
       let s = 'VLAN Name                             Status    Ports\n---- -------------------------------- --------- -------------------------------\n';
       for (const [id, name] of [...sw.vlans.entries()].sort((a, b) => a[0] - b[0])) {
-        const ports = sw.ports.filter(p => p.vlan === id).map(p => portName(p.n));
+        const ports = sw.ports.filter(p => p.vlan === id && !p.trunk).map(p => portName(p.n));
         const chunks: string[] = []; for (let i = 0; i < ports.length; i += 4) chunks.push(ports.slice(i, i + 4).join(', '));
         s += `${String(id).padEnd(5)}${name.padEnd(33)}${'active'.padEnd(10)}${chunks[0] ?? ''}\n`;
         for (const c of chunks.slice(1)) s += `${''.padEnd(48)}${c}\n`;
@@ -259,7 +297,7 @@ export class SwitchCli {
       if (this.mode === 'user') return this.bad(t[0]);
       let s = `Building configuration...\n\nCurrent configuration:\n!\nhostname ${sw.name}\n!\n`;
       for (const [id, name] of sw.vlans) if (id !== 1) s += `vlan ${id}\n name ${name}\n!\n`;
-      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.voice) s += ` switchport voice vlan ${p.voice}\n`; if (p.poe === false) s += ' power inline never\n'; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
+      for (const p of sw.ports) { s += `interface ${portName(p.n).replace('Gi', 'GigabitEthernet')}\n`; if (p.desc) s += ` description ${p.desc}\n`; s += p.trunk ? ` switchport mode trunk\n${p.trunk.native !== 1 ? ` switchport trunk native vlan ${p.trunk.native}\n` : ''}${p.trunk.allowed ? ` switchport trunk allowed vlan ${p.trunk.allowed.length ? p.trunk.allowed.join(',') : 'none'}\n` : ''}` : ` switchport access vlan ${p.vlan}\n switchport mode access\n`; if (p.voice) s += ` switchport voice vlan ${p.voice}\n`; if (p.poe === false) s += ' power inline never\n'; if (p.shutdown) s += ' shutdown\n'; s += '!\n'; }
       if (sw.uplink) { s += `interface GigabitEthernet1/0/49\n description ${sw.upPort.desc}\n switchport mode trunk\n`; if (sw.uplink.allowed) s += ` switchport trunk allowed vlan ${sw.uplink.allowed.length ? sw.uplink.allowed.join(',') : 'none'}\n`; if (sw.upPort.shutdown) s += ' shutdown\n'; s += '!\n'; }
       s += `interface Vlan1\n ip address ${sw.ip} 255.255.255.0\n!\nend\n`;
       this.print(s + '\n'); return;

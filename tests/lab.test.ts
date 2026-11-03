@@ -9,6 +9,13 @@ describe('lab code', () => {
       const c = encodeLab(s); expect(c).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/); expect(decodeLab(c)).toEqual(s);
     }
   });
+  it('sheets with the newer steps (VLSM, inter-VLAN, ACL) use 7 characters; old 6-character codes still open', () => {
+    const s: LabSpec = { steps: ['static', 'vlsm', 'intervlan', 'acl'], minutes: 120, perStudent: true, seed: 65535 };
+    const c = encodeLab(s); expect(c).toHaveLength(7); expect(decodeLab(c)).toEqual(s);
+    const old: LabSpec = { steps: ['crimp', 'vlan', 'trouble'], minutes: 30, perStudent: false, seed: 4321 };
+    expect(encodeLab(old)).toHaveLength(6); expect(decodeLab(encodeLab(old))).toEqual(old);
+    expect(parseInstruction('vlsm lalu routing antar vlan dan firewall acl').steps).toEqual(['vlsm', 'intervlan', 'acl']);
+  });
   it('rejects most typos', () => {
     const c = encodeLab({ steps: ['crimp', 'static'], minutes: 60, perStudent: true, seed: 1234 });
     let bad = 0; const A = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

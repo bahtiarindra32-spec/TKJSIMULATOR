@@ -13,8 +13,12 @@ export const HOOKS = {
   dns: new Map<string, (name: string, a: Adapter, env: Env) => { ip: string } | null | 'timeout' | 'servfail'>(),
   /** can this segment reach the internet right now (edge router WAN / NAT / ACL)? */
   internet: (_env: Env, _src: string, _dst: string, _proto: 'icmp' | 'udp53' | 'tcp80') => true as boolean,
+  /** Lab Praktik: the segment a VLAN on SW-LAB reaches through router R-LAB (labrouter.ts); null = no router for it */
+  labVlan: (_vlan: number): Env | null => (_vlan === 70 ? ENVS.prak : null),
+  /** Lab Praktik: routing between the lab's VLANs on R-LAB (subinterfaces + ACL); null = not a lab route, use the default path */
+  labRoute: (_env: Env, _src: string, _dst: string): PingRes | null => null,
 };
-export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'none';
+export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'none' | `v${number}`;
 export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
 export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
 export interface Env {
@@ -90,7 +94,9 @@ export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 // Each floor follows TIA-568 structured cabling: wall outlet -> horizontal cable -> patch panel port in the
 // floor rack -> patch cord -> switch port. L1's rack in the server room is the MDF (core); L2/L3 have an IDF
 // rack in the IDF room with their own access switch, uplinked to the MDF on Gi1/0/49 (802.1Q trunk).
-export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string; poe?: boolean; voice?: number }
+export interface Port { n: number; pc: string | null; shutdown: boolean; vlan: number; desc: string; poe?: boolean; voice?: number; trunk?: { allowed: number[] | null; native: number };
+  /** a network device (not a PC) cabled to this port, e.g. the lab router */
+  peer?: string }
 /** A patch-panel port: `pc` = the desk whose wall outlet is wired to it, `label` = what is printed on that
  *  wall outlet ('' = missing), `patch` = switch port its patch cord goes to, `hang` = a cord hangs unplugged. */
 export interface PanelPort { n: number; pc: string | null; label: string; patch: number | null; hang: boolean }
@@ -162,6 +168,7 @@ export function initSwitches(pcNames: string[]) {
     const sw: Switch = { name: 'SW-LAB', level: 0, ip: '192.168.70.2', ports: [], vlans: new Map([[1, 'default'], [70, 'PRAKTIK']]), dirty: false, panel: [], uplink: null, upPort: { n: 25, pc: null, shutdown: true, vlan: 1, desc: '' }, loop: null, rack: 'LAB' };
     for (let n = 1; n <= 24; n++) { sw.ports.push({ n, pc: null, shutdown: false, vlan: 70, desc: '', poe: false }); sw.panel.push({ n, pc: null, label: '', patch: null, hang: false }); }
     lab.forEach((pc, i) => { const pp = sw.panel[i]; pp.pc = pc; pp.label = outletId(0, pp.n); pp.patch = i + 1; sw.ports[i].desc = `MEJA-${i + 1}`; PANEL_OF.set(pc, { sw, pp }); });
+    Object.assign(sw.ports[23], { desc: 'KE-R-LAB-Gi0/0', peer: 'R-LAB Gi0/0', shutdown: false });   // Gi1/0/24: cable to the lab router
     repatch(sw); SWITCHES.push(sw);
   }
 }
@@ -178,7 +185,7 @@ export function apPowered(ap: Ap) { const p = apPort(ap); return !!p && ap.mount
 setApOnlineFn(apPowered);
 /** Is there a link on this switch port (a PC NIC, or a powered AP)? */
 export function portLink(sw: Switch, p: Port): boolean {
-  if (!p.pc) return false;
+  if (!p.pc) return !!p.peer && !p.shutdown;
   if (p.pc.startsWith('AP-')) { const ap = APS.find(a => a.id === p.pc); return !!ap && ap.mounted && p.poe !== false && !p.shutdown; }
   const a = ADAPTERS.get(p.pc); return !!a && a.cable && !a.broken && !p.shutdown;
 }
@@ -207,6 +214,7 @@ export function envOf(pc: string): Env {
   if (!p.sw.vlans.has(p.port.vlan)) return ENVS.none;          // VLAN not created on the switch: port inactive
   if (stormOn(p.sw)) return ENVS.none;                          // broadcast storm: nothing gets through
   if (!uplinkCarries(p.sw, p.port.vlan)) return ENVS.none;      // routers live behind the MDF
+  if (p.sw.name === 'SW-LAB') return HOOKS.labVlan(p.port.vlan) ?? ENVS.none;   // lab VLANs exist only where R-LAB routes them
   return Object.values(ENVS).find(e => e.vlan === p.port.vlan && !e.wireless) ?? ENVS.none;
 }
 /** Legacy name kept for callers that only need the default segment. */
@@ -398,6 +406,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   const gwHost = env.hosts.find(x => x.ip === l.gw);
   if (!seg || !gwHost || gwHost.web !== 'router') return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
+  const lr = HOOKS.labRoute(env, l.ip, target); if (lr) return lr;
   for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && inEnv(target, e)) {
     const h = e.hosts.find(x => x.ip === target && !x.down);
     const mgmt = env.id === 'lab' && h?.web === 'router';                                          // IT/NOC (lab segment) may manage every router

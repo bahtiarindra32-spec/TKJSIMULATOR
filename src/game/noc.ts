@@ -22,6 +22,7 @@ import { LinuxShell, SRV, linuxQa } from '../pcos/linux';
 import { Term } from '../pcos/term';
 import { nasPanel } from '../pcos/office';
 import { EdgeShell, EDGE, activeRoute } from '../pcos/edge';
+import { LabRouterShell, LABR } from '../pcos/labrouter';
 const EDGE_F = ['isp1', 'nat', 'acl'];
 import './noc.css';
 import { aiReady, aiCfg, aiStats, chat, mentorPrompt, offlineMentor, plain, offlineComplaint, aiComplaints, offlineNoteFeedback, aiNoteFeedback, type ChatMsg, type MentorCtx, type NoteCtx } from '../ai/nusa';
@@ -1080,8 +1081,27 @@ export class Noc {
       box.append(card);
     }
     box.append(tone);
+    if (id === 'LAB') {
+      // the lab router sits in the same rack: Gi0/0 is cabled to SW-LAB Gi1/0/24
+      const rc = h('div', 'swcard');
+      const subs = [...LABR.subs.values()].filter(x => x.vlan !== null);
+      rc.append(h('div', 'uplink', `<b>R-LAB</b> (ISR 4321) · Gi0/0 ${LABR.phys.shut ? '<b>shutdown</b>' : 'LED hijau'} → kabel ke SW-LAB Gi1/0/24 · ${subs.length ? `subinterface: ${subs.map(x => `Gi0/0.${x.name.split('.')[1]} (VLAN ${x.vlan})`).join(', ')}` : 'belum ada subinterface'}`));
+      const rr = h('div', 'row left'); rr.append(btn('Colok console ke R-LAB', () => this.openLabRouter(), 'btn', 'console-R-LAB')); rc.append(rr);
+      box.append(rc);
+    }
     const rw = h('div', 'row'); rw.append(btn('Tutup [Esc]', () => this.closeModal())); box.append(rw);
     this.show(box);
+  }
+  /** console session to the practice-lab router R-LAB (router-on-a-stick, ACL) */
+  openLabRouter() {
+    if (!this.inv.console || !this.inv.laptop) { this.toast('Butuh laptop dan kabel console dari lemari alat.', 4200); return; }
+    const box = h('div', 'noc-box wide');
+    box.append(h('h2', '', 'Laptop → console R-LAB (router lab praktik)'));
+    const sh = new LabRouterShell(); this.term = new Term(sh, 'COM3 - PuTTY · Console R-LAB (9600 8N1)');
+    sh.onCmd = line => { this.logAll(`R-LAB: ${line.slice(0, 60)}`); this.check(false); };
+    box.append(this.term.root);
+    const rw = h('div', 'row'); rw.append(btn('Cabut console', () => { this.term = null; this.openRack('LAB'); }, 'btn', 'console-close')); box.append(rw);
+    this.show(box, false); const tm = this.term; setTimeout(() => tm.focus(), 80);
   }
   private logProbe(sw: Switch, n: number, v: number) { if (v >= 0.5) this.logAll(`${sw.name.replace('SW-', 'PP-')}: probe toner berbunyi keras di port ${n}`); }
   private renderSel(sw: Switch, info: HTMLElement, acts: HTMLElement, id: string) {

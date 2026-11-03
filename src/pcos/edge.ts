@@ -7,7 +7,7 @@ import { HOOKS, ENVS, envOf, live, adapterOf, parseIp, networkOf, parseMask, typ
 import { EXT, EXT_C } from './ext';
 import type { Shell, TermIO } from './term';
 
-interface Ace { seq: number; act: 'permit' | 'deny'; proto: 'ip' | 'icmp' | 'udp' | 'tcp'; src: string; sw: string; dst: string; dw: string; eq?: number; text: string }
+export interface Ace { seq: number; act: 'permit' | 'deny'; proto: 'ip' | 'icmp' | 'udp' | 'tcp'; src: string; sw: string; dst: string; dw: string; eq?: number; text: string }
 interface Iface { name: string; ip: string; mask: string; shut: boolean; nat: 'inside' | 'outside' | null; aclIn: number | null; desc: string; isp: 1 | 2 | 0 }
 interface Route { net: string; mask: string; nh: string; ad: number; track: number | null }
 export const EDGE = {
@@ -27,7 +27,7 @@ export const EDGE = {
 };
 const ip2n = (s: string) => parseIp(s) ?? -1;
 const wildMatch = (ip: string, base: string, wild: string) => { if (base === 'any') return true; const w = ip2n(wild) >>> 0; return ((ip2n(ip) & ~w) >>> 0) === ((ip2n(base) & ~w) >>> 0); };
-function ace(seq: number, text: string, std: boolean): Ace | string {
+export function ace(seq: number, text: string, std: boolean): Ace | string {
   const t = text.trim().split(/\s+/); const act = t[0] as Ace['act']; if (act !== 'permit' && act !== 'deny') return '% Invalid input (permit/deny)';
   let i = 1; let proto: Ace['proto'] = 'ip';
   if (!std) { const p = t[i++]?.toLowerCase(); if (!['ip', 'icmp', 'udp', 'tcp'].includes(p)) return '% Invalid protocol (ip/icmp/udp/tcp)'; proto = p as Ace['proto']; }
@@ -43,6 +43,13 @@ addAce(110, 'deny tcp any any eq 23'); addAce(110, 'permit ip any any'); EDGE.di
 const proto = (p: 'icmp' | 'udp53' | 'tcp80') => (p === 'udp53' ? { pr: 'udp', port: 53 } : p === 'tcp80' ? { pr: 'tcp', port: 80 } : { pr: 'icmp', port: 0 });
 function aclPermit(n: number | null, src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80') {
   if (n === null) return true; const l = EDGE.acl.get(n); if (!l || !l.length) return true;   // an applied but empty/undefined ACL permits all (IOS)
+  const { pr, port } = proto(p);
+  for (const a of l) { if (a.proto !== 'ip' && a.proto !== pr) continue; if (!wildMatch(src, a.src, a.sw) || !wildMatch(dst, a.dst, a.dw)) continue; if (a.eq !== undefined && a.eq !== port) continue; return a.act === 'permit'; }
+  return false;
+}
+/** first-match ACL evaluation with the implicit deny at the end (shared with the lab router R-LAB) */
+export function aclMatch(l: Ace[] | undefined, src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80') {
+  if (!l || !l.length) return true;
   const { pr, port } = proto(p);
   for (const a of l) { if (a.proto !== 'ip' && a.proto !== pr) continue; if (!wildMatch(src, a.src, a.sw) || !wildMatch(dst, a.dst, a.dw)) continue; if (a.eq !== undefined && a.eq !== port) continue; return a.act === 'permit'; }
   return false;

@@ -5,7 +5,9 @@
 // AI may only turn the teacher's sentence into form ticks; it never grades.
 import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstruction, type LabSpec, type LabStepId } from './lab';
 import { judge } from './crimp';
-import { ENVS, SWITCHES, adapterOf, bounce, live, linkUp, panelOf, portOf, portName, outletOf, repatch, type Switch } from '../pcos/net';
+import { ENVS, SWITCHES, adapterOf, bounce, live, linkUp, panelOf, portOf, portName, outletOf, repatch, envOf, ping as netPing, parseIp, ipStr, maskStr, type Switch } from '../pcos/net';
+import { LABR, resetLabRouter, labPermits } from '../pcos/labrouter';
+import { vlsmCase, vlsmKey, vlsmCheck, type Plan, type Row } from './vlsm';
 import { aiReady, chat } from '../ai/nusa';
 import { ukkGrade, ukkCsv, isCore, type UkkStep } from './ukk';
 import type { Noc } from './noc';
@@ -17,13 +19,15 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;
 const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) >>> 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const GW = '192.168.70.1', SRV = '192.168.70.10';
 /** checkpoints per step (for steps never reached, so the score still counts them) */
-const CHECKN: Record<LabStepId, number> = { crimp: 5, desk: 6, static: 6, dhcp: 5, vlan: 5, dns: 3, trouble: 3 };
+const CHECKN: Record<LabStepId, number> = { crimp: 5, desk: 6, static: 6, dhcp: 5, vlan: 5, vlsm: 8, intervlan: 10, acl: 5, dns: 3, trouble: 3 };
 
 type Fault = 'kabel' | 'port' | 'ip' | 'gw' | 'dns';
-interface Params { desk: number; host: number; swPort: number; poolStart: number; dnsName: string; faults: Fault[] }
+interface Params { desk: number; host: number; swPort: number; poolStart: number; dnsName: string; faults: Fault[]; vl: Plan; guru: number }
 interface Check { label: string; ok: boolean }
 interface StepRes { step: LabStepId; got: number; of: number; ms: number; done: boolean; checks: Check[] }
-interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[]; ready?: boolean }
+interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[]; ready?: boolean;
+  /** the student's VLSM table (same order as P.vl.needs) and the last ping result per target from the student's PC */
+  rows: Partial<Row>[]; pings: Map<string, boolean> }
 
 const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langkah: (P: Params, R: Run) => string[] }> = {
   crimp: { tujuan: 'Membuat kabel UTP straight-through standar T568B dan menyambungkan PC ke jaringan.', alat: 'Kabel UTP Cat6, 2 konektor RJ45, tang crimping, LAN tester (lemari alat & meja crimping).', k3: 'Potong dan kupas kabel menjauh dari badan. Sisa potongan kabel dibuang ke tempat sampah, bukan di lantai.',
@@ -36,12 +40,36 @@ const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langk
     langkah: P => ['DHCP server router lab mati, PC mendapat 169.254.x.x.', `Beri PC IP statis sementara (mis. 192.168.70.${P.poolStart - 5}/24) agar bisa membuka http://${GW}.`, `Login router › DHCP: aktifkan, pool 192.168.70.${P.poolStart} – 192.168.70.${P.poolStart + 49}, gateway ${GW}, DNS ${GW}.`, 'Kembalikan PC ke "Obtain an IP address automatically", ipconfig /renew.', 'Ping 192.168.70.1.'] },
   vlan: { tujuan: 'Membuat VLAN dan menempatkan port meja sebagai access port VLAN tersebut.', alat: 'Kabel console + laptop.', k3: 'Jangan mematikan port meja lain.',
     langkah: (P, R) => ['Switch lab baru di-reset: VLAN 70 belum ada.', `Console SW-LAB (rak lab): vlan 70 › name PRAKTIK.`, `interface ${portName(portOf(R.pc)?.port.n ?? P.desk)} › switchport mode access › switchport access vlan 70.`, 'show vlan brief untuk memeriksa, lalu write memory.', 'Di PC: ipconfig /renew, ping 192.168.70.1.'] },
+  vlsm: { tujuan: 'Membagi satu blok alamat dengan VLSM untuk beberapa kebutuhan host, tanpa boros dan tanpa tumpang tindih.', alat: 'Tabel pengalamatan di jobsheet. Kalkulator boleh.', k3: 'Tidak ada alat fisik. Kerjakan mandiri.',
+    langkah: P => [`Blok yang tersedia: ${P.vl.block}. Kebutuhan host: ${P.vl.needs.map(n => `${n.name} ${n.hosts}`).join(', ')}.`, 'Mulai dari kebutuhan terbesar. Pilih prefix terkecil yang cukup: 2^(32 − prefix) − 2 ≥ jumlah host.', 'Tiap subnet mulai tepat di batas bloknya, tepat setelah subnet sebelumnya.', 'Isi tabel: network, prefix, gateway (host pertama), broadcast.'] },
+  intervlan: { tujuan: 'Menghubungkan VLAN GURU dan VLAN SISWA lewat satu router (router-on-a-stick, 802.1Q).', alat: 'Kabel console + laptop (lemari alat), PC meja kamu dan PC meja GURU.', k3: 'Meja lain tetap di VLAN 70: jangan sampai terputus. Lihat konfigurasi lama (show run) sebelum mengubah.',
+    langkah: (P, R) => { const A = ivPlan(R); return [
+      `Tabel: VLAN 10 GURU ${A.g.net}/${A.g.prefix} gw ${A.g.gw} · VLAN 20 SISWA ${A.s.net}/${A.s.prefix} gw ${A.s.gw}.`,
+      `SW-LAB: vlan 10 › name GURU, vlan 20 › name SISWA. Port Meja ${P.desk} (${portName(P.desk)}) access VLAN 20, port Meja ${P.guru} (${portName(P.guru)}) access VLAN 10.`,
+      'SW-LAB Gi1/0/24 (kabel ke R-LAB): switchport mode trunk, lalu switchport trunk native vlan 70 agar meja lain tetap di VLAN 70.',
+      `R-LAB (console di rak lab): interface g0/0.10 › encapsulation dot1Q 10 › ip address ${A.g.gw} ${maskStr(A.g.prefix)}. Lakukan juga untuk g0/0.20.`,
+      `PC Meja ${P.desk}: IP ${A.sIp}, mask ${maskStr(A.s.prefix)}, gateway ${A.s.gw}. PC Meja ${P.guru}: IP ${A.gIp}, mask ${maskStr(A.g.prefix)}, gateway ${A.g.gw}.`,
+      `Uji dari PC Meja ${P.desk}: ping ${A.gIp}. Simpan konfigurasi switch dan router (write memory).`]; } },
+  acl: { tujuan: 'Membatasi akses VLAN SISWA ke VLAN GURU dengan ACL extended, tanpa memutus akses ke server lab.', alat: 'Kabel console + laptop.', k3: 'ACL dibaca dari baris teratas, dan ada deny implisit di akhir. Tulis dulu di kertas sebelum dipasang.',
+    langkah: (P, R) => { const A = ivPlan(R); return [
+      `Aturan: SISWA (${A.s.net}/${A.s.prefix}) tidak boleh ke GURU (${A.g.net}/${A.g.prefix}). Ke server lab 192.168.70.10 tetap boleh.`,
+      'R-LAB: buat ACL extended bernomor 100-199. Baris deny dari network SISWA ke network GURU (pakai wildcard), lalu permit untuk sisanya.',
+      'Pasang ACL di subinterface VLAN SISWA arah masuk (ip access-group … in).',
+      `Uji dari PC Meja ${P.desk}: ping ${A.gIp} harus gagal, http://192.168.70.10 harus terbuka. Simpan (write memory).`]; } },
   dns: { tujuan: 'Membuat record DNS lokal agar server bisa dibuka dengan nama.', alat: 'PC meja praktik, browser.', k3: 'Jangan menghapus record milik orang lain.',
     langkah: P => [`Login router lab (http://${GW}) › DNS: tambah record A ${P.dnsName} → ${SRV}.`, `Pastikan DNS PC ${GW} (otomatis dari DHCP sudah benar).`, `Buka http://${P.dnsName} di browser PC.`] },
   trouble: { tujuan: 'Menemukan dan memperbaiki gangguan jaringan pada PC meja praktik.', alat: 'LAN tester, kabel console + laptop, PC.', k3: 'Periksa fisik dulu, baru konfigurasi.',
     langkah: () => ['PC meja tidak bisa membuka server lab. Ada 2 penyebab.', 'Periksa lampu link dan kabel [C], ipconfig, ping gateway, nslookup.', 'Perbaiki tiap penyebab, lalu buka http://192.168.70.10 dari PC.'] },
 };
 
+/** the addressing the inter-VLAN steps use: the student's own VLSM table when it is fully correct, else the key */
+function ivPlan(R: Run) {
+  const key = vlsmKey(R.P.vl);
+  const own = R.rows.length === R.P.vl.needs.length && vlsmCheck(R.P.vl, R.rows).every(c => c.netOk && c.hostsOk) ? R.rows as Row[] : key;
+  const g = { ...own[0], prefix: Number(own[0].prefix) }, s = { ...own[1], prefix: Number(own[1].prefix) };
+  const host = (r: { net: string }) => ipStr(parseIp(r.net)! + 10);
+  return { g, s, gIp: host(g), sIp: host(s) };
+}
 export class Praktik {
   run: Run | null = null;
   last: { score: number; txt: string; predikat?: string; csv?: string } | null = null;
@@ -52,6 +80,7 @@ export class Praktik {
     const prev = pcos.onEvent;
     pcos.onEvent = e => { prev?.(e); const R = this.run; if (!R || e.pc !== R.pc) return;
       if (e.type === 'ping' && e.detail?.ok && e.detail?.target === GW) R.ping = true;
+      if (e.type === 'ping' && e.detail?.target) R.pings.set(String(e.detail.target), !!e.detail.ok);
       if (e.type === 'browse' && e.detail?.url) R.browse.push(String(e.detail.url));
       this.tick();
     };
@@ -146,10 +175,10 @@ export class Praktik {
     const desk = Math.floor(r() * this.pcs.length) + 1;
     const pool: Fault[] = ['kabel', 'port', 'ip', 'gw', 'dns'];
     const f1 = pool[Math.floor(r() * pool.length)]; const rest = pool.filter(x => x !== f1 && !(f1 === 'ip' && x === 'gw') && !(f1 === 'gw' && x === 'ip'));
-    const P: Params = { desk, host: 20 + Math.floor(r() * 30), swPort: 13 + Math.floor(r() * 8), poolStart: 100 + 10 * Math.floor(r() * 4), dnsName: `${['server', 'jobsheet', 'elearning', 'ujian'][Math.floor(r() * 4)]}.praktik.lan`, faults: [f1, rest[Math.floor(r() * rest.length)]] };
+    const P: Params = { desk, host: 20 + Math.floor(r() * 30), swPort: 13 + Math.floor(r() * 8), poolStart: 100 + 10 * Math.floor(r() * 4), dnsName: `${['server', 'jobsheet', 'elearning', 'ujian'][Math.floor(r() * 4)]}.praktik.lan`, faults: [f1, rest[Math.floor(r() * rest.length)]], vl: vlsmCase(seed), guru: (desk % this.pcs.length) + 1 };
     const pc = this.pcs[desk - 1];
     this.reset();
-    this.run = { spec, code, name, pc: pc.name, label: `Meja ${desk}`, P, i: 0, t0: performance.now(), st0: performance.now(), res: [], ping: false, browse: [], best: [] };
+    this.run = { spec, code, name, pc: pc.name, label: `Meja ${desk}`, P, i: 0, t0: performance.now(), st0: performance.now(), res: [], ping: false, browse: [], best: [], rows: [], pings: new Map() };
     this.setup();
     this.noc.closeModal(); this.collapsed = false;
     this.noc.toast(`Praktik dimulai. Kamu di Meja ${desk}. Ikuti langkah di lembar jobsheet.`, 4200);
@@ -163,7 +192,8 @@ export class Praktik {
     sw.ports.forEach(p => { p.vlan = 70; p.shutdown = p.n > this.pcs.length; p.desc = p.n <= this.pcs.length ? `MEJA-${p.n}` : ''; });
     sw.panel.forEach((pp, i) => { pp.patch = pp.pc ? i + 1 : null; pp.hang = false; pp.label = pp.pc ? outletOf(pp.pc) || pp.label : ''; });
     sw.panel.forEach(pp => { if (pp.pc) pp.label = `LAB-${String(pp.n).padStart(2, '0')}`; });
-    repatch(sw);
+    sw.ports.forEach(p => { p.trunk = undefined; });
+    repatch(sw); resetLabRouter();
     env.dhcp = { start: '192.168.70.100', end: '192.168.70.150', gw: GW, dns: [GW], lease: 8 }; env.dnsSrv.records = []; env.leases.clear();
     for (const p of this.pcs) { this.noc.labSetCord(p.name, true); const a = adapterOf(p.name); Object.assign(a, { dhcp: true, dnsAuto: true, ip: '', mask: '', gw: '', dns1: '', dns2: '', broken: false, enabled: true, cable: true }); bounce(a); }
   }
@@ -175,6 +205,13 @@ export class Praktik {
     if (id === 'static') { a.dhcp = true; a.dnsAuto = true; bounce(a); }
     if (id === 'dhcp') { ENVS.prak.dhcp = null; ENVS.prak.leases.clear(); a.dhcp = true; a.dnsAuto = true; bounce(a); }
     if (id === 'vlan') { sw.vlans.delete(70); const p = portOf(R.pc)?.port; if (p) p.vlan = 1; sw.dirty = false; bounce(a); }
+    if (id === 'intervlan' || id === 'acl') {
+      resetLabRouter(); sw.vlans.delete(10); sw.vlans.delete(20); sw.dirty = false;
+      const g = adapterOf(this.pcs[P.guru - 1].name);
+      for (const x of [a, g]) { Object.assign(x, { dhcp: true, dnsAuto: true, ip: '', mask: '', gw: '', dns1: '', dns2: '', cable: true, broken: false, enabled: true }); bounce(x); }
+      sw.ports[P.desk - 1].vlan = 70; sw.ports[P.guru - 1].vlan = 70;
+      if (id === 'acl') this.solveInterVlan();
+    }
     if (id === 'dns') ENVS.prak.dnsSrv.records = ENVS.prak.dnsSrv.records.filter(r => r.name !== P.dnsName);
     if (id === 'trouble') for (const f of P.faults) {
       if (f === 'kabel') { a.cable = false; }
@@ -198,11 +235,54 @@ export class Praktik {
     if (id === 'dhcp') { const d = ENVS.prak.dhcp;
       return [{ label: 'DHCP server router aktif', ok: !!d }, { label: `Pool 192.168.70.${P.poolStart} – .${P.poolStart + 49}`, ok: !!d && d.start === `192.168.70.${P.poolStart}` && d.end === `192.168.70.${P.poolStart + 49}` }, { label: `Gateway & DNS di DHCP = ${GW}`, ok: !!d && d.gw === GW && d.dns[0] === GW }, { label: 'PC kembali ke DHCP dan dapat IP dari pool', ok: a.dhcp && inNet && +L.ip.split('.')[3] >= P.poolStart && +L.ip.split('.')[3] <= P.poolStart + 49 }, ping]; }
     if (id === 'vlan') return [{ label: 'VLAN 70 dibuat', ok: sw.vlans.has(70) }, { label: 'Nama VLAN 70 = PRAKTIK', ok: sw.vlans.get(70) === 'PRAKTIK' }, { label: 'Port meja access VLAN 70', ok: port?.vlan === 70 }, { label: 'Konfigurasi switch disimpan (write memory)', ok: !sw.dirty && sw.vlans.has(70) && port?.vlan === 70 }, ping];
+    if (id === 'vlsm') { const v = vlsmCheck(P.vl, R.rows);
+      return v.flatMap(c => [{ label: `${c.name}: network & prefix${c.netOk ? '' : ` (${c.why})`}`, ok: c.netOk }, { label: `${c.name}: gateway & broadcast`, ok: c.hostsOk }]); }
+    if (id === 'intervlan' || id === 'acl') {
+      const A = ivPlan(R), gPc = this.pcs[P.guru - 1].name, ga = adapterOf(gPc), gl = live(ga);
+      const s20 = LABR.subs.get(20), s10 = LABR.subs.get(10), up = sw.ports[23];
+      const subOk = (f: typeof s10, v: number, r: { gw: string; prefix: number }) => !!f && f.vlan === v && f.ip === r.gw && f.mask === maskStr(r.prefix) && !f.shut;
+      const pingSim = (to: string) => netPing(a, envOf(R.pc), to, true).kind === 'reply';
+      const other = this.pcs.find((_, i) => i + 1 !== P.desk && i + 1 !== P.guru)!.name;
+      if (id === 'intervlan') return [
+        { label: 'VLAN 10 GURU dan VLAN 20 SISWA dibuat', ok: sw.vlans.get(10) === 'GURU' && sw.vlans.get(20) === 'SISWA' },
+        { label: `Port Meja ${P.desk} access VLAN 20, Meja ${P.guru} access VLAN 10`, ok: port?.vlan === 20 && sw.ports[P.guru - 1].vlan === 10 && !port?.trunk },
+        { label: 'Gi1/0/24 trunk membawa VLAN 10 & 20', ok: !!up.trunk && (!up.trunk.allowed || (up.trunk.allowed.includes(10) && up.trunk.allowed.includes(20))) && !up.shutdown },
+        { label: `R-LAB Gi0/0.10 dot1Q 10, ${A.g.gw}/${A.g.prefix}`, ok: subOk(s10, 10, A.g) },
+        { label: `R-LAB Gi0/0.20 dot1Q 20, ${A.s.gw}/${A.s.prefix}`, ok: subOk(s20, 20, A.s) },
+        { label: `PC Meja ${P.desk}: ${A.sIp}/${A.s.prefix} gw ${A.s.gw}`, ok: !a.dhcp && L.ip === A.sIp && L.prefix === A.s.prefix && L.gw === A.s.gw },
+        { label: `PC Meja ${P.guru}: ${A.gIp}/${A.g.prefix} gw ${A.g.gw}`, ok: !ga.dhcp && gl.ip === A.gIp && gl.prefix === A.g.prefix && gl.gw === A.g.gw },
+        { label: 'Meja lain tetap terhubung di VLAN 70', ok: envOf(other) === ENVS.prak },
+        { label: `Uji dari PC: ping ${A.gIp} (lintas VLAN) berhasil`, ok: !!R.pings.get(A.gIp) && pingSim(A.gIp) },
+        { label: 'Konfigurasi switch & router disimpan (write memory)', ok: !sw.dirty && !LABR.dirty && !!s10 },
+      ];
+      const nIn = s20?.aclIn ?? null;
+      return [
+        { label: 'ACL extended dipasang masuk (in) di Gi0/0.20', ok: nIn !== null && nIn >= 100 && (LABR.acl.get(nIn)?.length ?? 0) > 0 },
+        { label: 'SISWA → GURU diblok', ok: !labPermits(envOf(R.pc), A.sIp, A.gIp) && !pingSim(A.gIp) },
+        { label: 'SISWA → server lab 192.168.70.10 tetap bisa', ok: pingSim(SRV) },
+        { label: `Uji dari PC: ping ${A.gIp} gagal & http://${SRV} terbuka`, ok: R.pings.get(A.gIp) === false && R.browse.some(u => u.includes(SRV)) && pingSim(SRV) && !pingSim(A.gIp) },
+        { label: 'Konfigurasi router disimpan (write memory)', ok: !LABR.dirty && nIn !== null },
+      ];
+    }
     if (id === 'dns') { const rec = ENVS.prak.dnsSrv.records.find(r => r.name === P.dnsName);
       return [{ label: `Record A ${P.dnsName} → ${SRV}`, ok: rec?.ip === SRV }, { label: `DNS PC ${GW}`, ok: L.dns.includes(GW) }, { label: `http://${P.dnsName} terbuka di browser PC`, ok: !!rec && rec.ip === SRV && L.dns.includes(GW) && R.browse.some(u => u.includes(P.dnsName)) }]; }
     const fx: Check[] = P.faults.map(f => f === 'kabel' ? { label: 'Gangguan fisik di meja diperbaiki', ok: a.cable } : f === 'port' ? { label: 'Port switch meja aktif lagi', ok: !port?.shutdown } : f === 'ip' ? { label: 'Alamat IP kembali di jaringan 192.168.70.0/24', ok: inNet } : f === 'gw' ? { label: `Gateway kembali ${GW}`, ok: L.gw === GW } : { label: `DNS kembali ${GW}`, ok: L.dns.includes(GW) });
     return [...fx, { label: 'Uji: http://192.168.70.10 terbuka dari PC', ok: fx.every(c => c.ok) && R.browse.some(u => u.includes(SRV)) }];
   }
+  /** the inter-VLAN state as a finished intervlan step leaves it (used when the sheet starts at the ACL step) */
+  private solveInterVlan() {
+    const R = this.run!, P = R.P, sw = this.sw(), A = ivPlan(R);
+    sw.vlans.set(10, 'GURU'); sw.vlans.set(20, 'SISWA');
+    sw.ports[P.desk - 1].vlan = 20; sw.ports[P.guru - 1].vlan = 10;
+    sw.ports[23].trunk = { allowed: null, native: 70 }; sw.dirty = false;
+    LABR.subs.set(10, { name: 'GigabitEthernet0/0.10', vlan: 10, ip: A.g.gw, mask: maskStr(A.g.prefix), shut: false, aclIn: null, aclOut: null, desc: 'GURU' });
+    LABR.subs.set(20, { name: 'GigabitEthernet0/0.20', vlan: 20, ip: A.s.gw, mask: maskStr(A.s.prefix), shut: false, aclIn: null, aclOut: null, desc: 'SISWA' });
+    LABR.dirty = false;
+    const set = (pc: string, ip: string, r: { prefix: number; gw: string }) => { const x = adapterOf(pc); Object.assign(x, { dhcp: false, ip, mask: maskStr(r.prefix), gw: r.gw, dnsAuto: false, dns1: r.gw, dns2: '' }); bounce(x); };
+    set(R.pc, A.sIp, A.s); set(this.pcs[P.guru - 1].name, A.gIp, A.g);
+  }
+  /** the student's VLSM table, typed in the jobsheet */
+  setRow(i: number, k: keyof Row, v: string) { const R = this.run; if (!R) return; (R.rows[i] ??= {} as Partial<Row>); (R.rows[i] as Record<string, unknown>)[k] = k === 'prefix' ? Number(v.replace('/', '')) : v.trim(); this.tick(); }
   tick() {
     const R = this.run; if (!R) return;
     const cs = this.checks();
@@ -267,14 +347,19 @@ export class Praktik {
   private render() {
     const R = this.run; if (!R) { this.panel.style.display = 'none'; return; }
     const id = R.spec.steps[R.i], S = SHEET[id], cs = R.best.length ? R.best : this.checks();
+    // typing in the VLSM table: refresh only the checklist so the field keeps its focus and caret
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && this.panel.contains(ae) && ae.tagName === 'INPUT') { const ul = this.panel.querySelector('.js-c'); if (ul) ul.innerHTML = cs.map(c => `<li class="${c.ok ? 'ok' : ''}"><i></i>${esc(c.label)}</li>`).join(''); return; }
     const el = performance.now() - R.t0, mm = `${Math.floor(el / 60000)}:${String(Math.floor(el / 1000) % 60).padStart(2, '0')}`;
     this.panel.style.display = '';
     this.panel.classList.toggle('min', this.collapsed);
     this.panel.innerHTML = `<div class="js-h"><b>JOBSHEET</b><span class="mono">${esc(R.code)} · ${esc(R.label)} · ${mm}${R.spec.minutes ? ` / ${R.spec.minutes}:00` : ''}</span><button class="js-t" name="js-toggle">${this.collapsed ? 'Buka' : 'Kecilkan'}</button></div>
       <div class="js-b"><div class="js-step">Langkah ${R.i + 1}/${R.spec.steps.length} · <b>${LAB_STEPS.find(x => x.id === id)!.name}</b>${R.ready ? '<br><b>Tuntas · minta paraf guru di meja guru [F]</b>' : ''}</div>
       <ul class="js-c">${cs.map(c => `<li class="${c.ok ? 'ok' : ''}"><i></i>${esc(c.label)}</li>`).join('')}</ul>
+      ${id === 'vlsm' ? `<div class="js-vlsm">${R.P.vl.needs.map((n, i) => { const r = R.rows[i] ?? {}; const f = (k: string, ph: string, v: unknown) => `<input name="vlsm-${i}-${k}" class="mono f-${k}" placeholder="${ph}" aria-label="${n.name} ${ph}" inputmode="decimal" autocomplete="off" spellcheck="false" value="${esc(v === undefined || (k === 'prefix' && !v) ? '' : String(v))}">`; return `<fieldset><legend>${n.name} · ${n.hosts} host</legend>${f('net', 'network', r.net)}<span>/</span>${f('prefix', 'prefix', r.prefix)}${f('gw', 'gateway', r.gw)}${f('bc', 'broadcast', r.bc)}</fieldset>`; }).join('')}</div>` : ''}
       <dl><dt>Tujuan</dt><dd>${S.tujuan}</dd><dt>Alat &amp; bahan</dt><dd>${S.alat}</dd><dt>K3</dt><dd>${S.k3}</dd></dl>
       <div class="js-lt">Langkah kerja</div><ol class="js-l">${S.langkah(R.P, R).map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`;
+    this.panel.querySelectorAll<HTMLInputElement>('.js-vlsm input').forEach(inp => { const [, i, k] = inp.name.split('-'); inp.addEventListener('input', () => this.setRow(+i, k as keyof Row, inp.value)); inp.addEventListener('keydown', e => e.stopPropagation()); inp.addEventListener('keyup', e => e.stopPropagation()); });
     (this.panel.querySelector('.js-t') as HTMLButtonElement).onclick = () => { this.collapsed = !this.collapsed; this.render(); };
   }
   private board() {
