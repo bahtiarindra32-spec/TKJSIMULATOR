@@ -12,7 +12,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 | Bagian | Yang dipakai |
 |---|---|
-| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 41 unit test vitest) |
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 44 unit test vitest) |
 | Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
 | Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
 | Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
@@ -156,6 +156,7 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - **VLSM**: blok 192.168.x.0/24 dengan empat kebutuhan host (GURU, SISWA, SERVER, link router). Siswa mengisi network, prefix, gateway, dan broadcast di jobsheet. Desain apa pun yang benar diterima (prefix terkecil yang cukup, mulai di batas blok, tidak tumpang tindih), bukan hanya urutan buku.
 - **Routing antar-VLAN (router-on-a-stick)**: router lab **R-LAB** di rak lab, console bergaya Cisco IOS (`interface g0/0.N`, `encapsulation dot1Q N`, `ip address`, `show ip interface brief`, `show vlans`, `show running-config`, `write memory`). Kabel Gi0/0 ke SW-LAB Gi1/0/24, yang harus dijadikan trunk (`switchport mode trunk`, `switchport trunk native vlan 70` agar meja lain tetap di VLAN 70, `switchport trunk allowed vlan`). Alamat memakai tabel VLSM siswa bila benar. PC GURU dan SISWA saling ping lewat router; gateway salah di salah satu PC membuat balasan tidak kembali.
 - **Firewall antar-VLAN**: ACL extended bernomor di R-LAB (`access-list 110 deny ip … …`, `permit ip any any`, `ip access-group 110 in|out`, `show access-lists`). Dicek dari simulator: SISWA tidak bisa ke GURU, tapi server lab 192.168.70.10 tetap terbuka.
+- **Rekap kelas tanpa server**: lembar hasil memberi *kode hasil* satu baris (`KN1.…`). Siswa mengirimnya ke guru (chat grup, LMS). Di meja guru, *Guru: rekap kelas* menerima tempelan teks apa pun, mengambil semua kode, menolak kode yang rusak/diubah (checksum), memakai percobaan terbaru per nama, lalu menampilkan tabel (nilai, predikat, langkah tuntas, durasi, rata-rata) dan *Unduh CSV*. Checksum bukan tanda tangan digital: untuk ujian, guru tetap mengamati langsung.
 - Paraf guru: langkah yang checkpoint-nya terpenuhi harus diparaf di meja guru (dicek ulang langsung dari simulator) sebelum lanjut.
 - Lembar hasil: checkpoint terpenuhi ÷ seluruh checkpoint × 100, waktu per langkah, checkpoint yang gagal. Batasan: tanpa server, lembar hasil bisa dipalsukan, jadi guru sebaiknya melihat langsung.
 

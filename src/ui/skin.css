@@ -318,3 +318,11 @@ body.cb .jobsheet .js-c li.ok i { background: #3b82f6; border-color: #1d4ed8; }
 .jobsheet .js-vlsm .f-net { grid-area: n; } .jobsheet .js-vlsm span { grid-area: s; } .jobsheet .js-vlsm .f-prefix { grid-area: p; }
 .jobsheet .js-vlsm .f-gw { grid-area: g; } .jobsheet .js-vlsm .f-bc { grid-area: b; }
 @media (min-width: 900px) { .jobsheet .js-vlsm fieldset { grid-template-areas: 'n s p' 'g b b'; grid-template-columns: 1fr auto 1fr; } }
+
+.noc-box .lab-rcode { margin: 10px 0 4px; padding: 8px 10px; border: 1px dashed #8a8475; border-radius: 4px; }
+.noc-box .lab-rcode small { display: block; font-size: 11px; opacity: .8; margin-bottom: 3px; }
+.noc-box .lab-rcode code { display: block; word-break: break-all; font-size: 12px; user-select: all; -webkit-user-select: all; }
+.noc-box.labrecap textarea, .noc-box.labrecap input { width: 100%; box-sizing: border-box; margin: 4px 0; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; padding: 6px 8px; }
+.noc-box.labrecap .lab-tab { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.noc-box.labrecap .lab-tab th, .noc-box.labrecap .lab-tab td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--k-line, #2a2d33); }
+.noc-box.labrecap .lab-tab th { font: 600 11px/1.2 var(--k-mono, ui-monospace, monospace); letter-spacing: .06em; text-transform: uppercase; opacity: .75; }

@@ -7,6 +7,7 @@ import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstr
 import { judge } from './crimp';
 import { ENVS, SWITCHES, adapterOf, bounce, live, linkUp, panelOf, portOf, portName, outletOf, repatch, envOf, ping as netPing, parseIp, ipStr, maskStr, type Switch } from '../pcos/net';
 import { LABR, resetLabRouter, labPermits } from '../pcos/labrouter';
+import { encodeResult, readRecap, recapCsv, mmss as mmssR, type ResultData } from './recap';
 import { vlsmCase, vlsmKey, vlsmCheck, type Plan, type Row } from './vlsm';
 import { aiReady, chat } from '../ai/nusa';
 import { ukkGrade, ukkCsv, isCore, type UkkStep } from './ukk';
@@ -72,7 +73,7 @@ function ivPlan(R: Run) {
 }
 export class Praktik {
   run: Run | null = null;
-  last: { score: number; txt: string; predikat?: string; csv?: string } | null = null;
+  last: { score: number; txt: string; predikat?: string; csv?: string; code?: string } | null = null;
   private panel = h('div', 'jobsheet');
   private timer = 0;
   private collapsed = false;
@@ -97,7 +98,7 @@ export class Praktik {
       const rw = h('div', 'row'); if (this.run.ready) rw.append(btn('Minta paraf guru', () => { const m = this.paraf(); if (this.run) { this.openDesk(); this.noc.toast(m, 4200); } }, 'btn pri', 'lab-paraf')); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
     } else {
       box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk. Penilaian dari rubrik simulator, bukan AI.'));
-      const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); box.append(rw);
+      const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); rw.append(btn('Guru: rekap kelas', () => this.openRecap(), 'btn', 'lab-recap')); box.append(rw);
       if (this.last) box.append(h('p', 'msg', `Hasil terakhir: ${this.last.predikat ?? ""} nilai ${this.last.score}.`));
     }
     this.noc.present(box);
@@ -145,6 +146,31 @@ export class Praktik {
     };
     upd();
     const rw = h('div', 'row'); rw.append(btn('Coba sebagai siswa', () => this.openStudent(encodeLab(spec)), 'btn', 'lab-try')); rw.append(btn('Kembali', () => this.openDesk())); box.append(rw);
+    this.noc.present(box);
+  }
+  /** teacher: paste every student's result code, get one table + CSV (no server) */
+  openRecap(text = '', sheet = '') {
+    const box = h('div', 'noc-box wide labrecap');
+    box.append(h('h2', '', 'Rekap kelas · Lab Praktik TKJ'));
+    box.append(h('p', 'how', 'Tempel semua kode hasil siswa (boleh langsung dari chat grup; teks lain diabaikan). Satu baris per nama; kalau ada dua percobaan, yang terbaru dipakai.'));
+    const ta = h('textarea', 'lab-paste') as HTMLTextAreaElement; ta.name = 'lab-paste'; ta.rows = 6; ta.value = text; ta.placeholder = 'KN1.XXXXXX....';
+    ta.addEventListener('keydown', e => e.stopPropagation());
+    const fi = h('input') as HTMLInputElement; fi.name = 'lab-recap-sheet'; fi.placeholder = 'Filter kode jobsheet (opsional)'; fi.value = sheet; fi.className = 'mono'; fi.addEventListener('keydown', e => e.stopPropagation());
+    box.append(ta, fi);
+    const rc = readRecap(text, sheet.trim().toUpperCase());
+    if (text.trim()) {
+      box.append(h('p', 'msg', `${rc.rows.length} siswa${rc.bad ? ` · ${rc.bad} kode rusak/diubah (ditolak)` : ''}${rc.dup ? ` · ${rc.dup} percobaan ganda` : ''}${rc.sheets.length > 1 ? ` · ${rc.sheets.length} kode jobsheet berbeda: ${rc.sheets.join(', ')}` : ''}`));
+      if (rc.rows.length) {
+        const avg = Math.round(rc.rows.reduce((a, r) => a + r.nilai, 0) / rc.rows.length), komp = rc.rows.filter(r => r.predikat !== 'Belum Kompeten').length;
+        box.append(h('table', 'lab-tab', `<tr><th>No</th><th>Nama</th><th>Meja</th><th>Nilai</th><th>Predikat</th><th>Langkah tuntas</th><th>Durasi</th></tr>${rc.rows.map((r: ResultData, i) => `<tr><td class="mono">${i + 1}</td><td>${esc(r.name)}</td><td class="mono">${r.desk}</td><td class="mono">${r.nilai}</td><td>${r.predikat}</td><td class="mono">${r.steps.filter(s => s.done).length}/${r.steps.length}</td><td class="mono">${mmssR(r.durSec)}${r.overtime ? ' · lewat' : ''}</td></tr>`).join('')}`));
+        box.append(h('p', 'how', `Rata-rata nilai ${avg} · kompeten ${komp}/${rc.rows.length}. Kode hasil dibuat di browser siswa: checksum menolak salah ketik dan ubahan biasa, tapi bukan tanda tangan digital. Untuk ujian, guru tetap mengamati langsung.`));
+      }
+    }
+    const rw = h('div', 'row');
+    rw.append(btn('Buat rekap', () => this.openRecap(ta.value, fi.value), 'btn pri', 'lab-recap-make'));
+    if (rc.rows.length) rw.append(btn('Unduh CSV', () => this.download(recapCsv(rc), `rekap-lab-${new Date().toISOString().slice(0, 10)}.csv`), 'btn', 'lab-recap-csv'));
+    rw.append(btn('Kembali', () => this.openDesk()));
+    box.append(rw);
     this.noc.present(box);
   }
   openStudent(code = '', msg = '') {
@@ -323,8 +349,11 @@ export class Praktik {
     box.append(h('p', 'how', 'Format mengikuti lembar penilaian UKK: kriteria utama (jaringan berfungsi & teruji) dan pendukung (label, nama VLAN, simpan konfigurasi). Ada kriteria utama yang gagal = Belum Kompeten. Posisi nilai di dalam rentang predikat memakai aturan simulator (porsi pendukung, efisiensi waktu); guru tetap berhak mengoreksi. Semua kriteria dibaca dari simulator jaringan, tidak dinilai AI. Tanpa server, lembar ini bisa dipalsukan; guru sebaiknya melihat langsung.'));
     const txt = `Lab Praktik TKJ ${R.code} · ${R.name} · Meja ${R.P.desk} · ${when}\n${G.predikat} · nilai ${score} (utama ${G.coreOk}/${G.coreOf}, pendukung ${G.supOk}/${G.supOf}) · durasi ${mm(total)}${over ? ' (lewat batas)' : ''}\n${R.res.map(r => `- ${LAB_STEPS.find(x => x.id === r.step)!.name}: ${r.checks.length ? `${r.got}/${r.of}` : `tidak dikerjakan (0/${r.of})`}${r.done ? `, ${mm(r.ms)}` : ''}`).join('\n')}`;
     const csv = ukkCsv({ kode: R.code, nama: R.name, meja: R.P.desk, tanggal: when, durasi: mm(total) }, steps, G);
-    this.last = { score, txt, predikat: G.predikat, csv };
-    const rw = h('div', 'row'); rw.append(btn('Salin hasil', () => { void navigator.clipboard?.writeText(txt).catch(() => {}); this.noc.toast('Hasil disalin.'); }, 'btn', 'lab-copyres')); rw.append(btn('Unduh CSV', () => this.download(csv, `praktik-${R.code}-${R.name.replace(/[^\w]+/g, '_')}.csv`), 'btn', 'lab-csv'));
+    const rcode = encodeResult({ sheet: R.code, name: R.name, desk: R.P.desk, nilai: score, predikat: G.predikat, durSec: Math.round(total / 1000), overtime: over, when: Date.now(), steps: R.res.map(r => ({ step: r.step, got: r.got, of: r.of, done: r.done })) });
+    const rc = h('div', 'lab-rcode'); rc.append(h('small', '', 'Kode hasil · kirim ke guru untuk rekap kelas'), h('code', 'mono', esc(rcode)));
+    box.append(rc);
+    this.last = { score, txt: `${txt}\nKode hasil: ${rcode}`, predikat: G.predikat, csv, code: rcode };
+    const rw = h('div', 'row'); rw.append(btn('Salin kode hasil', () => { void navigator.clipboard?.writeText(rcode).catch(() => {}); this.noc.toast('Kode hasil disalin. Kirim ke guru.'); }, 'btn pri', 'lab-copycode')); rw.append(btn('Salin hasil', () => { void navigator.clipboard?.writeText(txt).catch(() => {}); this.noc.toast('Hasil disalin.'); }, 'btn', 'lab-copyres')); rw.append(btn('Unduh CSV', () => this.download(csv, `praktik-${R.code}-${R.name.replace(/[^\w]+/g, '_')}.csv`), 'btn', 'lab-csv'));
     rw.append(btn('Cetak A4', () => this.print(box, R.name), 'btn', 'lab-print'));
     rw.append(btn('Tutup', () => this.noc.closeModal(), 'btn pri', 'lab-done'));
     box.append(rw);
