@@ -4,9 +4,11 @@ import './menu.css';
 import { aiCfg, saveAiCfg, DEFAULT_MODEL, chat, aiStats } from '../ai/nusa';
 
 export type QChoice = 'otomatis' | 'tinggi' | 'sedang' | 'rendah' | 'hemat';
-export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean; textSize: 'm' | 'l' | 'xl'; colorBlind: boolean }
+export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean; textSize: 'm' | 'l' | 'xl'; colorBlind: boolean;
+  /** the player's name for work orders, the berita acara and the lab jobsheet ('' = use the rank) */
+  name: string }
 const KEY = 'kotaNusantara.settings.v1';
-export const settings: Settings = { quality: 'otomatis', sens: 1, volume: 70, invertY: false, third: false, autoTime: true, textSize: 'm', colorBlind: false };
+export const settings: Settings = { quality: 'otomatis', sens: 1, volume: 70, invertY: false, third: false, autoTime: true, textSize: 'm', colorBlind: false, name: '' };
 /** accessibility classes on <body> (text size of work panels/HUD, colour-blind safe status colours) */
 export function applyA11y() { const b = document.body; b.classList.toggle('txt-l', settings.textSize === 'l'); b.classList.toggle('txt-xl', settings.textSize === 'xl'); b.classList.toggle('cb', !!settings.colorBlind); }
 try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY) ?? '{}')); } catch { /* ignore */ }
@@ -51,7 +53,7 @@ export class Menu {
         <p class="mn-sub">Simulator Teknik Komputer &amp; Jaringan</p>
         <p class="mn-desc">Magang jadi teknisi jaringan di kota bergaya Jakarta: crimping kabel, setel switch dan router, tangani tiket gangguan, lalu buktikan hasilnya dari perangkat itu sendiri.</p>
         <nav class="mn-list" aria-label="Menu utama"></nav></main>
-      <footer class="mn-foot"><span>Versi ${h.build}</span><span>${h.touch ? 'Ketuk untuk memilih' : '↑ ↓ pilih · Enter mulai'}</span></footer>`;
+      <footer class="mn-foot"><span>Edisi SMK · Fase E/F TKJ</span><span>${h.touch ? 'Ketuk untuk memilih' : '↑ ↓ pilih · Enter mulai'}</span></footer>`;
     const list = this.root.querySelector('.mn-list')!;
     this.startBtn = btn('Mulai', 'enter', 'mn-btn primary'); this.startBtn.innerHTML = '<span>Mulai</span><i>›</i>';
     this.newBtn = btn('Mulai dari Awal', 'mnNew'); this.newBtn.hidden = true;
@@ -130,6 +132,9 @@ export class Menu {
       row('Balik sumbu Y', seg([['0', 'Normal'], ['1', 'Terbalik']], () => (S.invertY ? '1' : '0'), v => { S.invertY = v === '1'; h.applySettings(); }, 'inv'));
       row('Kamera awal', seg([['0', 'Orang pertama'], ['1', 'Orang ketiga']], () => (S.third ? '1' : '0'), v => { S.third = v === '1'; h.applySettings(); }, 'cam'), 'V mengganti kamera kapan saja');
       row('Siklus siang-malam', seg([['1', 'Otomatis'], ['0', 'Berhenti']], () => (S.autoTime ? '1' : '0'), v => { S.autoTime = v === '1'; h.applySettings(); }, 'auto'), '1 hari = 24 menit · N untuk lompat waktu');
+      { const i = el('input', 'pn-text') as HTMLInputElement; i.type = 'text'; i.name = 'playerName'; i.maxLength = 40; i.placeholder = 'mis. Rizky Pratama'; i.value = S.name; i.autocomplete = 'off'; i.spellcheck = false;
+        i.addEventListener('keydown', e => e.stopPropagation()); i.addEventListener('input', () => { S.name = i.value.trim(); saveSettings(); });
+        row('Nama kamu', i, 'Dipakai di surat kerja, berita acara, dan form jobsheet'); }
       body.appendChild(el('h4', '', 'Aksesibilitas'));
       row('Ukuran teks panel kerja', seg([['m', 'Normal'], ['l', 'Besar'], ['xl', 'Sangat besar']], () => S.textSize, v => { S.textSize = v as Settings['textSize']; applyA11y(); }, 'txt'), 'Papan kerja, surat kerja, laporan, HUD tiket');
       row('Mode buta warna', seg([['0', 'Mati'], ['1', 'Aktif']], () => (S.colorBlind ? '1' : '0'), v => { S.colorBlind = v === '1'; applyA11y(); }, 'cb'), 'Lampu link & status hijau/merah jadi biru/oranye')

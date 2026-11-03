@@ -89,6 +89,12 @@ export class Praktik {
       this.tick();
     };
     document.body.append(this.panel); this.panel.style.display = 'none';
+    noc.labNeeds = () => {
+      const R = this.run; if (!R) return [];
+      const id = R.spec.steps[R.i], v = noc.inv;
+      const want: ('tester' | 'console' | 'laptop' | 'toner' | 'patch')[] = id === 'crimp' ? ['tester'] : id === 'desk' ? ['toner', 'console', 'laptop', 'patch'] : id === 'vlan' || id === 'intervlan' || id === 'acl' ? ['console', 'laptop'] : id === 'trouble' ? ['tester', 'console', 'laptop'] : [];
+      return want.filter(t => (t === 'patch' ? v.patch < 1 : !v[t]));
+    };
   }
   sw(): Switch { return SWITCHES.find(s => s.name === 'SW-LAB')!; }
 
@@ -103,7 +109,7 @@ export class Praktik {
       if (this.run.ready && this.needsPin()) { pinIn = h('input') as HTMLInputElement; pinIn.type = 'password'; pinIn.inputMode = 'numeric'; pinIn.name = 'lab-paraf-pin'; pinIn.placeholder = 'PIN guru'; pinIn.maxLength = 6; pinIn.autocomplete = 'off'; pinIn.addEventListener('keydown', e => e.stopPropagation()); rw.append(pinIn); }
       if (this.run.ready) rw.append(btn(this.needsPin() ? 'Paraf (guru)' : 'Minta paraf guru', () => { const m = this.paraf(pinIn?.value ?? ''); if (this.run) { this.openDesk(); this.noc.toast(m, 4200); } }, 'btn pri', 'lab-paraf')); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
     } else {
-      box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk. Penilaian dari rubrik simulator, bukan AI.'));
+      box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk.'));
       const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); rw.append(btn('Guru: rekap kelas', () => this.openRecap(), 'btn', 'lab-recap')); box.append(rw);
       if (this.last) box.append(h('p', 'msg', `Hasil terakhir: ${this.last.predikat ?? ""} nilai ${this.last.score}.`));
     }
@@ -187,7 +193,7 @@ export class Praktik {
     const box = h('div', 'noc-box labs');
     box.append(h('h2', '', 'Mulai Praktik'));
     const ci = h('input', 'mono') as HTMLInputElement; ci.name = 'lab-code'; ci.maxLength = 7; ci.placeholder = 'KODE6'; ci.value = code;
-    const ni = h('input') as HTMLInputElement; ni.name = 'lab-name'; ni.maxLength = 40; ni.placeholder = 'Nama lengkap · kelas';
+    const ni = h('input') as HTMLInputElement; ni.name = 'lab-name'; ni.maxLength = 40; ni.placeholder = 'Nama lengkap · kelas'; if (!ni.value) ni.value = this.noc.playerName();
     for (const x of [ci, ni]) x.addEventListener('keydown', e => e.stopPropagation());
     const f = h('div', 'lab-form'); f.append(h('label', '', 'Kode dari guru'), ci, h('label', '', 'Nama'), ni); box.append(f);
     if (msg) box.append(h('p', 'msg warn', esc(msg)));

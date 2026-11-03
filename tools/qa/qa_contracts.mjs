@@ -22,7 +22,7 @@ for (const ph of phases) {
       for (const w of B) await mclick(`wire-${w}`); await mclick('crimp-do'); for (const w of B) await mclick(`wire-${w}`); await mclick('crimp-do'); await mclick('crimp-test');
       const t2 = await K(() => document.querySelector('.noc-modal .tester-out')?.innerText); console.log('  tester B-B:', t2?.replace(/\n+/g, ' ').slice(0, 120)); await shot('c_crimp_ok');
       await mclick('crimp-keep'); await press('Escape');
-      await goPc(pc); await press('c'); await mclick('phys-install'); await press('Escape');
+      await goPc(pc); await press('c'); await mclick('phys-install'); await p.waitForTimeout(800); await press('Escape');
       await openPc(pc); await openCmd(); await cmd('ipconfig /renew', 2500); console.log('  focus0', await K(() => document.activeElement?.tagName + '.' + document.activeElement?.className)); await cmd('ipconfig', 900);
       const gw = await K(n => window.__kota.noc.jobs[0] && (window.__kota.pcos ? null : null), pc); void gw;
       console.log('  focus', await K(() => document.activeElement?.tagName + '.' + document.activeElement?.className + ' modal=' + !!document.querySelector('.noc-modal') + ' open=' + window.__kota.pcos.isOpen() + ' cmd=' + !!document.querySelector('#pcos .cmd'))); await p.click('#pcos .cmd').catch(e => console.log('clickfail', e.message.slice(0,120))); await cmd('ping 192.168.10.1', 4500); await shot('c_crimp_cmd'); console.log('  cmd', (await cmdText()).slice(-200).replace(/\n+/g, ' '));

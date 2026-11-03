@@ -121,3 +121,14 @@ body.cb .noc-box .pl.up { background: #1b5fb8; color: #e6f0ff; }
 body.cb #noc-hud .ok, body.cb .note-fb .chip.ok { color: #8ec5ff; } body.cb #noc-hud .bad { color: #ffb15c; }
 body.cb .note-fb .chip.ok { background: #1b4a8a; color: #fff; } body.cb .note-fb .chip.no { background: #7a4a12; }
 body.cb .nusa-log .me { background: #1b4a8a; }
+
+/* patch cord going in: cord slides to the NIC, LED amber (negotiating) then green */
+.phys.plug .cord { animation: cordIn .45s ease-out both; }
+.phys.plug .nic .jack::after { content: ''; position: absolute; left: 10px; right: 10px; top: 6px; bottom: 8px; background: #cfd8e3; border-radius: 3px; animation: plugIn .45s ease-out both; }
+.phys.plug .led.l1 { animation: ledUp .65s steps(1, end) both; }
+@keyframes cordIn { from { transform: scaleX(.15); transform-origin: right; } to { transform: scaleX(1); transform-origin: right; } }
+@keyframes plugIn { from { transform: translateX(26px); opacity: .2; } 70% { transform: translateX(2px); opacity: 1; } to { transform: none; } }
+@keyframes ledUp { 0% { background: #333; } 50% { background: #f0a020; box-shadow: 0 0 8px #f0a020; } 100% { background: #39e36b; box-shadow: 0 0 8px #39e36b; } }
+.inv-row.need { border-left: 3px solid var(--k-acc, #f2c230); padding-left: 8px; }
+.inv-row .badge { font-style: normal; font: 600 10px/1 var(--k-mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase; color: #111; background: var(--k-acc, #f2c230); padding: 2px 5px; border-radius: 3px; margin-left: 6px; }
+@media (prefers-reduced-motion: reduce) { .phys.plug .cord, .phys.plug .nic .jack::after, .phys.plug .led.l1 { animation-duration: .01s; } }

@@ -148,6 +148,11 @@ Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai 
 - Pemain baru langsung mendapat surat kerja **Hari Pertama: Sambungkan PC Workshop** (juga ada di papan kerja sampai selesai): ambil LAN tester + patch cord di Lemari Alat, pasang patch cord dan tes kabel (C / tombol Cek), nyalakan PC (F / tombol Aksi), `ipconfig`, lalu `ping` Default Gateway.
 - Langkah dicatat dari aksi nyata. Petunjuk Kak Rani hanya muncul saat pemain tampak macet: diam ±8 detik tanpa kemajuan setelah ±22 detik, langkah salah (membuka PC sebelum kabel beres, mengetik perintah lain), atau terlalu lama. Petunjuk naik dari arahan singkat ke langkah rinci dan hilang begitu ada kemajuan. Teks menyesuaikan kontrol sentuh.
 
+### Kenyamanan bermain
+- Lemari alat menaruh alat yang dibutuhkan pekerjaan/langkah lab di atas dengan tanda **Diperlukan**, plus tombol *Ambil yang diperlukan*.
+- Memasang patch cord: kabel masuk, bunyi klik RJ45, LED link kuning lalu hijau (±0,65 detik).
+- *Pengaturan › Nama kamu* dipakai di tanda tangan surat kerja dan form jobsheet.
+
 ### Mode Juri (tur 5 menit) — `src/game/demo.ts`
 - Tombol **Mode Juri** di menu utama atau tautan `?juri`. Enam pemberhentian, masing-masing langsung ke keadaan siap dicoba: surat kerja Pasang IP Statis di depan PC-nya, rak IDF dengan console switch, shift helpdesk dengan tiket gangguan, Lab Praktik VLSM → router-on-a-stick → ACL di rak lab, Pak Nusa, dan rekap kelas berisi contoh tiga siswa fiktif.
 - Tidak ada yang diskenariokan berhasil: pemain tetap mengerjakan sendiri. Save pemain disimpan dulu dan dikembalikan saat keluar (juga bila tab ditutup atau dimuat ulang di tengah tur).

@@ -853,14 +853,21 @@ export class Noc {
     return null;
   }
 
+  /** tools the current Lab Praktik step needs and the player is not carrying (set by praktik.ts) */
+  labNeeds: () => Item[] = () => [];
+  /** the name the player gave in Settings ('' = none yet) */
+  playerName: () => string = () => '';
   openCabinet(lab = false) {
     this.cabLab = lab;
     const box = h('div', 'noc-box');
     box.append(h('h2', '', lab ? 'Lemari Alat · Lab Praktik TKJ' : 'Lemari Alat · Workshop TKJ'));
     box.append(h('p', 'how', lab ? 'Alat praktik milik sekolah. Kembalikan setelah selesai.' : 'Ambil alat yang dibutuhkan pekerjaan. Patch cord habis pakai (diganti stoknya tiap pekerjaan baru).'));
     const list = h('div', 'inv');
+    // what the running work still needs (internship job or the lab step) goes first with a badge
+    const tj = lab ? null : this.tracked();
+    const need = new Set<Item>(lab ? this.labNeeds() : tj ? this.needs(tj) : []);
     const row = (it: Item, have: boolean | number, take: () => void, put: () => void, extra = '') => {
-      const r = h('div', 'inv-row', `<span><b>${ITEM_NAME[it]}</b> ${extra}</span>`);
+      const r = h('div', `inv-row${need.has(it) ? ' need' : ''}`, `<span><b>${ITEM_NAME[it]}</b>${need.has(it) ? ' <em class="badge">Diperlukan</em>' : ''} ${extra}</span>`);
       r.append(btn(it === 'patch' || it === 'ap' ? 'Ambil 1' : have ? 'Kembalikan' : 'Ambil', () => { if (it !== 'patch' && it !== 'ap' && have) put(); else take(); this.openCabinet(this.cabLab); }, 'btn', `take-${it}`));
       list.append(r);
     };
@@ -874,7 +881,9 @@ export class Noc {
     box.append(list);
     const cr = h('div', 'inv-row', `<span><b>Meja crimping</b> · kabel UTP Cat6, konektor RJ45, tang crimping${this.cables.length ? ` · ${this.cables.length} kabel buatanmu di tas` : ''}</span>`);
     cr.append(btn('Crimping', () => this.openCrimpBench(), this.jobs.some(x => x.status !== 'closed' && x.tpl === 'crimp') ? 'btn pri' : 'btn', 'crimp-open')); list.append(cr);
-    const j = lab ? null : this.tracked();
+    list.querySelectorAll('.inv-row.need').forEach(r => list.prepend(r));
+    if (need.size) { const nr = h('div', 'row left'); nr.append(btn(`Ambil yang diperlukan (${need.size})`, () => { for (const it of need) { if (it === 'patch' || it === 'ap') { if (it === 'patch' && (lab || this.patchStock > 0)) { if (!lab) this.patchStock--; this.inv.patch++; } if (it === 'ap' && this.inv.ap < 1) this.inv.ap++; } else (this.inv as Record<string, unknown>)[it] = true; } this.openCabinet(lab); }, 'btn pri', 'take-needed')); box.append(nr); }
+    const j = tj;
     if (j) { const n = this.needs(j); box.append(h('p', n.length ? 'msg warn' : 'msg', n.length ? `Untuk ${j.id} masih perlu: ${n.map(i => ITEM_NAME[i]).join(', ')}` : `Alat untuk ${j.id} sudah lengkap.`)); }
     const rw = h('div', 'row'); rw.append(btn('Tutup [Esc]', () => this.closeModal())); box.append(rw);
     this.show(box);
@@ -953,8 +962,14 @@ export class Noc {
     const job = this.openJobs().find(j => j.targets.some(t => t.pc.name === pc));
     if (!cord) acts.append(btn('Pasang patch cord', () => {
       if (this.inv.patch < 1) { out.innerHTML = '<p class="msg warn">Kamu tidak membawa patch cord. Ambil di Lemari Alat (Workshop TKJ).</p>'; return; }
-      this.inv.patch--; this.noCord.delete(pc); a.cable = true; a.broken = false; this.useCord(pc); bounce(a);
-      this.logAll(`${this.pcLabel(pc)}: patch cord dipasang outlet ${outletOf(pc)} → PC`, pc); this.openPhysical(pc);
+      this.inv.patch--;
+      // a short physical beat: the cord goes in, the RJ45 clicks, the link LED goes amber then green (auto-negotiation)
+      pic.classList.add('plug'); acts.querySelectorAll('button').forEach(b => ((b as HTMLButtonElement).disabled = true)); this.click();
+      setTimeout(() => {
+        this.noCord.delete(pc); a.cable = true; a.broken = false; this.useCord(pc); bounce(a);
+        this.logAll(`${this.pcLabel(pc)}: patch cord dipasang outlet ${outletOf(pc)} → PC`, pc);
+        if (this.modal?.contains(pic)) this.openPhysical(pc);
+      }, 650);
     }, 'btn pri', 'phys-install'));
     if (cord) acts.append(btn('Cabut & colok ulang konektor', () => {
       const was = a.cable; a.cable = true; bounce(a);
@@ -1011,6 +1026,15 @@ export class Noc {
     const pp = sw.panel[n - 1];
     if (d === 0 && pp.patch && !sw.ports[pp.patch - 1].shutdown) v *= 0.55;
     return v;
+  }
+  /** the RJ45 latch: a short dry click */
+  private click() {
+    try {
+      this.audio ??= new AudioContext();
+      const t = this.audio.currentTime, n = this.audio.createBufferSource(), b = this.audio.createBuffer(1, 2205, 44100), d = b.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / 180);
+      const g = this.audio.createGain(); g.gain.setValueAtTime(0.35, t); n.buffer = b; n.connect(g).connect(this.audio.destination); n.start(t + 0.32);
+    } catch { /* no audio */ }
   }
   private beep(v: number) {
     try {
@@ -1591,7 +1615,7 @@ export class Noc {
     box.append(h('table', 'pp-fields', `<tr><th>Prioritas</th><td><span class="pr p-${j.prio}">${j.prio}</span></td><th>Batas waktu (SLA)</th><td class="mono">${mmss(j.sla)}</td></tr><tr><th>Kompetensi</th><td colspan="3">${esc(cp)}</td></tr>`));
     if (rest.length) box.append(h('div', 'pp-sec', `<small>RINCIAN PEKERJAAN</small>${rest.map(x => `<div class="pp-line">${esc(x)}</div>`).join('')}`));
     if (comp.length) box.append(h('div', 'pp-sec', `<small>KELUHAN PELAPOR</small>${comp.map(x => `<blockquote>${esc(x.slice(9))}${j.aiVoice ? ' <i class="ai-tag" title="Kalimat keluhan ditulis AI dari gejala aslinya">AI</i>' : ''}</blockquote>`).join('')}`));
-    box.append(h('div', 'pp-sign', `<div><small>Diterbitkan oleh</small><b>Kak Rani</b><span>Supervisor NOC</span></div><div><small>Teknisi pelaksana</small><b>${esc(this.rank())}</b><span>${j.status === 'closed' ? 'sudah dikerjakan' : 'tanda tangan setelah selesai'}</span></div><i class="stamp ${j.status === 'closed' ? 'done' : ''}">${j.status === 'closed' ? 'SELESAI' : 'DITERIMA'}</i>`));
+    box.append(h('div', 'pp-sign', `<div><small>Diterbitkan oleh</small><b>Kak Rani</b><span>Supervisor NOC</span></div><div><small>Teknisi pelaksana</small><b>${esc(this.playerName() || this.rank())}</b><span>${this.playerName() ? `${esc(this.rank())} · ` : ''}${j.status === 'closed' ? 'sudah dikerjakan' : 'tanda tangan setelah selesai'}</span></div><i class="stamp ${j.status === 'closed' ? 'done' : ''}">${j.status === 'closed' ? 'SELESAI' : 'DITERIMA'}</i>`));
     const rw = h('div', 'row');
     if (spk) rw.append(btn('Briefing', () => this.openBrief(j)));
     if (j.status === 'open' && j.docReady) {

@@ -19,7 +19,7 @@ await closePc();
 // tools from the cabinet
 console.log('  cab', await goAnchor('CABINET')); await press('f'); await mclick('take-tester'); await mclick('take-patch'); console.log('  cabinet', (await modalText())?.slice(-120)); await press('Escape');
 s = await ts(); out.hintGoneOnProgress = s.lvl === 0; console.log('  after tools', s.stage);
-await goPc(s.pc); await press('c'); await mclick('phys-install'); await mclick('phys-test'); console.log('  phys', (await modalText())?.slice(0, 200)); await press('Escape');
+await goPc(s.pc); await press('c'); await mclick('phys-install'); await p.waitForTimeout(800); await mclick('phys-test'); console.log('  phys', (await modalText())?.slice(0, 200)); await press('Escape');
 s = await ts(); console.log('  after cable', JSON.stringify(s.tut), s.stage);
 await openPc(s.pc); await openCmd(); await cmd('ipconfig'); s = await ts(); console.log('  after ipconfig', JSON.stringify(s?.tut));
 const gw = s.tut.gw; await cmd(`ping ${gw}`, 4500); console.log('  ping out', (await cmdText())?.slice(-260));

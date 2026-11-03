@@ -38,3 +38,13 @@ real-world standard it follows, and what is deliberately not simulated. Full his
 ## Class recap (Nov 2026)
 - Result code `KN1.<sheet>.<base64url payload>.<checksum>`; teacher pastes any text, codes are extracted,
   newest attempt per name wins. Checksum = typo/edit guard only, stated on the sheet (no server, no signature).
+
+## Copy, language and first minutes (Nov 2026)
+- Register: game UI, documents (SPK, berita acara, jobsheet) and NPC speech are Indonesian. The simulated PC
+  ("Jendela 11") keeps English Windows strings (ipconfig, Network Connections, "This PC"), because school lab PCs
+  run English Windows and students must recognise those screens. Fictional brand names avoid real trademarks.
+- Version number lives only in Tentang; the title footer says the edition (SMK · Fase E/F TKJ).
+- The player's name (Settings) signs work orders and pre-fills the jobsheet form; without it the rank is shown.
+- Fresh start faces the lobby doors turned toward the Workshop side, so the first W makes progress.
+- Cabinet: items the running job or lab step needs come first with a "Diperlukan" badge + one "Ambil yang
+  diperlukan" button. Installing a patch cord is a 0.65 s beat (cord slides in, RJ45 click, LED amber → green).

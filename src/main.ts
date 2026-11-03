@@ -141,6 +141,7 @@ const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x
 (noc.RACKS as Record<string, unknown>).LAB = { name: 'LAB', label: 'Rak Lab Praktik TKJ · SMK Nusantara', x: labB.spots.rack.x, y: 0, z: labB.spots.rack.z, level: 1 };
 const labBoard = (() => { const c = document.createElement('canvas'); c.width = 1024; c.height = 400; const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; (labB.spots.board.material as THREE.MeshStandardMaterial).map = t; (labB.spots.board.material as THREE.MeshStandardMaterial).needsUpdate = true; return { c, t }; })();
 const drawLabBoard = (lines: string[]) => { const g = labBoard.c.getContext('2d')!; g.fillStyle = '#f4f4f0'; g.fillRect(0, 0, 1024, 400); g.fillStyle = '#2bd46b'; g.fillRect(0, 0, 1024, 10); g.fillStyle = '#13202b'; lines.forEach((l, k) => { g.font = k === 0 ? 'bold 46px sans-serif' : '30px sans-serif'; g.fillText(l.slice(0, 60), 30, 64 + (k === 0 ? 0 : 20) + k * 40); }); labBoard.t.needsUpdate = true; };
+noc.playerName = () => settings.name;
 const praktik = new Praktik(noc, pcos, labB.pcs.map(c => ({ name: c.name, label: c.label })), drawLabBoard);
 drawLabBoard(['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode']);
 DEVICES.push(
@@ -299,7 +300,7 @@ function enterWalk(fresh = !started) {
   mode = 'walk'; document.body.classList.add('entered'); document.body.classList.remove('viewing'); setCutaway(false); controls.enabled = false; tween = null;
   if (fresh) {
     if (riding) forceDismount();
-    player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI; player.pitch = -0.02; player.level = 1; player.vy = 0; player.ground = true; vel.set(0, 0);
+    player.pos.set(wx(SPAWN[0]), 0.15, wz(SPAWN[1])); player.yaw = Math.PI + 0.3; player.pitch = -0.02;   // face the lobby doors, turned toward the Workshop side (the first goal) instead of straight at the reception desk player.level = 1; player.vy = 0; player.ground = true; vel.set(0, 0);
     crouch.on = false; crouch.k = 0; document.body.classList.remove('riding', 'crouching'); thirdPerson = settings.third;
     $('hints').textContent = WALK_HINTS;
   } else {
@@ -354,7 +355,7 @@ const demo = new DemoTour([
     go: () => { demoReset(); const j = noc.acceptContract('vlan', 4242); const sw = j?.sw ? SWITCHES.find(x => x.name === j.sw) : null; const r = sw ? noc.RACKS[sw.rack] : null; if (r) { placeAt(r.x, r.z + 1.0, r.level, 0); noc.openRack(sw!.rack); } } },
   { title: 'Shift helpdesk: tiket gangguan', text: 'Tiket dengan SLA dari karyawan hotel. Penyebabnya disuntikkan ke simulator (kabel, port, VLAN, DNS, DHCP, ISP). Diagnosis urut lapisan OSI: lampu link, ipconfig, ping, nslookup.',
     go: () => { demoReset(); noc.startShift(); noc.openBoard(); } },
-  { title: 'Lab Praktik: VLSM → router-on-a-stick → ACL', text: 'Mode guru-siswa di gedung lab SMK. Isi tabel VLSM di jobsheet, lalu konfigurasi R-LAB (subinterface dot1Q) dan trunk SW-LAB, lalu ACL antar-VLAN. Checkpoint dicek dari simulator, bukan AI.',
+  { title: 'Lab Praktik: VLSM → router-on-a-stick → ACL', text: 'Mode guru-siswa di gedung lab SMK. Isi tabel VLSM di jobsheet, lalu konfigurasi R-LAB (subinterface dot1Q) dan trunk SW-LAB, lalu ACL antar-VLAN. Checkpoint dibaca langsung dari simulator jaringan.',
     go: () => { demoReset(); praktik.start({ steps: ['vlsm', 'intervlan', 'acl'], minutes: 0, perStudent: false, seed: 2026 }, 'JURI26', 'Juri LOGICODIX'); placeAt(labB.spots.rack.x, labB.spots.rack.z + 1.2, 1, 0); } },
   { title: 'Pak Nusa: mentor AI', text: 'Tanya apa saja soal pekerjaan yang sedang jalan. Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban. Tanpa API key, ia memakai mode offline. AI tidak pernah menilai.',
     go: () => { demoReset(); noc.openNusa(); } },

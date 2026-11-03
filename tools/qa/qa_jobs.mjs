@@ -59,7 +59,7 @@ for (const ph of phases) {
     if (ph === 'desk') {
       const j = await accept('desk', 777);
       await getTools();
-      for (const t of j.targets) { await goPc(t.pc); await press('c'); console.log('  phys:', (await modalText())?.slice(0, 220)); await mclick('phys-install'); await shot('jobs_desk_phys'); await K(() => window.__kota.noc.closeModal()); }
+      for (const t of j.targets) { await goPc(t.pc); await press('c'); console.log('  phys:', (await modalText())?.slice(0, 220)); await mclick('phys-install'); await p.waitForTimeout(800); await shot('jobs_desk_phys'); await K(() => window.__kota.noc.closeModal()); }
       const ports = await K(names => names.map(n => window.__kota.noc.jobs[0].order.find(o => o.includes(window.__kota.pcs().find(c => c.name === n) ? '' : ''))), j.targets.map(t => t.pc));
       const pn = await K(names => names.map(n => { const sw = window.__kota.noc.jobs[0].sw; return window.__kota.noc.jobs[0].order.find(o => o.includes('outlet'))?.match(/Gi1\/0\/(\d+)/g); }), j.targets.map(t => t.pc));
       const lines = ['enable', 'show interfaces status'];

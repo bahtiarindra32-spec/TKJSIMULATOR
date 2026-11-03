@@ -53,7 +53,7 @@ for (const ph0 of phases) {
       for (const t of j.targets) {
         await goPc(t.pc); await press('c');
         console.log('  phys:', (await modalText())?.slice(0, 260));
-        await mclick('phys-install'); await mclick('phys-tone'); await shot('cab_phys_tone');
+        await mclick('phys-install'); await p.waitForTimeout(800); await mclick('phys-tone'); await shot('cab_phys_tone');
         console.log('  phys after:', (await modalText())?.slice(0, 260)); await close();
         console.log('  hud:', await K(() => document.getElementById('noc-hud').innerText.replace(/\n+/g, ' | ')));
         const rk = rackOfSw(j.sw); console.log('  rack:', (await goRack(rk))?.slice(0, 200));

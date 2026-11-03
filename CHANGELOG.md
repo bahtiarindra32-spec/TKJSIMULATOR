@@ -6,6 +6,7 @@ Ringkasan per hari. Detail lengkap ada di riwayat git.
 - Review berlapis (juri, guru TKJ, playtester). AI bawaan pindah ke `openrouter/free` dengan fallback dan tombol Tes koneksi AI.
 - Spanning tree di switch: kabel loop hanya menimbulkan broadcast storm kalau STP dimatikan.
 - Uji kenaikan pangkat (XP saja tidak cukup), berita acara sebelum pekerjaan ditutup, tahapan Survei → Kerja → Uji → Dokumentasi, stok konektor RJ45, paraf guru per langkah di Lab Praktik.
+- Polesan: lemari alat menandai alat yang diperlukan + tombol ambil sekaligus, animasi pasang patch cord (klik RJ45, LED kuning → hijau), nama pemain di Pengaturan untuk surat kerja & jobsheet, posisi awal menghadap pintu lobi ke arah Workshop, versi hanya di Tentang, kalimat defensif dihapus, keputusan bahasa dicatat di DESIGN.md.
 - PIN paraf guru (kode 8 karakter, cek 7-bit, kunci 1 menit setelah 3 salah), checkpoint K3 alat dikembalikan di langkah terakhir, izin kirim data ke OpenRouter (default belum) dan opsi API key hanya untuk sesi ini. 2 unit test baru (46), playtest qa_pin.
 - Mode Juri (menu utama atau ?juri): tur 6 pemberhentian ke fitur unggulan, save pemain dicadangkan dan dikembalikan (juga setelah reload). Playtest qa_demo.
 - Rekap kelas tanpa server: kode hasil di lembar hasil (salin), meja guru → Guru: rekap kelas (tempel chat, tolak kode rusak, percobaan terbaru per nama, tabel + CSV). 3 unit test baru (44), playtest qa_recap.
