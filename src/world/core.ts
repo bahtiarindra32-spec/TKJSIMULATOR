@@ -208,8 +208,8 @@ export interface BakeDetail { max: number; tier: 'in' | 'out'; keep?: RegExp }
 const _bb = new THREE.Box3(), _sz = new THREE.Vector3();
 export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Object3D) => boolean = () => false, detail?: BakeDetail) {
   src.updateMatrixWorld(true);
-  const buckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
-  const dBuckets = new Map<THREE.Material, { geos: THREE.BufferGeometry[]; cast: boolean }>();
+  const buckets = new Map<THREE.Material | string, { geos: THREE.BufferGeometry[]; cast: boolean }>();
+  const dBuckets = new Map<THREE.Material | string, { geos: THREE.BufferGeometry[]; cast: boolean }>();
   const visit = (o: THREE.Object3D, kept: boolean) => {
     if (skip(o) || !o.visible) return;   // hidden subtrees (car LOD stand-ins, already-baked originals) are not baked
     kept ||= !!(detail?.keep && detail.keep.test(o.name));
@@ -223,8 +223,13 @@ export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Ob
       let small = false;
       if (detail && !kept) { g.computeBoundingBox(); _bb.copy(g.boundingBox!).getSize(_sz); small = Math.max(_sz.x, _sz.y, _sz.z) < detail.max; }
       const B = small ? dBuckets : buckets;
-      const b = B.get(m.material) ?? { geos: [], cast: false };
-      b.geos.push(g); b.cast ||= m.castShadow; B.set(m.material, b);
+      // plain coloured surfaces (no texture, no glow, opaque) share one material per finish; the colour moves into the
+      // vertices. Cuts a hotel floor from ~190 draw calls to ~80 with the same look.
+      const key = plainKey(m.material);
+      let mat: THREE.Material | string = m.material;
+      if (key) { const c = (m.material as THREE.MeshStandardMaterial).color; const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.Float32BufferAttribute(a, 3)); mat = key; }
+      const b = B.get(mat) ?? { geos: [], cast: false };
+      b.geos.push(g); b.cast ||= m.castShadow; B.set(mat, b);
       m.visible = false; m.userData.baked = true;
     }
     for (const c of o.children) visit(c, kept);
@@ -234,12 +239,26 @@ export function bakeStatic(src: THREE.Object3D, name: string, skip: (o: THREE.Ob
     for (const [material, b] of B) {
       const merged = b.geos.length === 1 ? b.geos[0] : mergeGeometries(b.geos);
       if (!merged) continue;
-      const mesh = new THREE.Mesh(merged, material); mesh.castShadow = b.cast; mesh.receiveShadow = true; out.add(mesh);
+      const mesh = new THREE.Mesh(merged, typeof material === 'string' ? vcMaterial(material) : material); mesh.castShadow = b.cast; mesh.receiveShadow = true; out.add(mesh);
     }
   };
   const out = new THREE.Group(); out.name = name; emit(buckets, out);
   if (detail && dBuckets.size) { const d = new THREE.Group(); d.name = 'DETAIL'; d.userData.tier = detail.tier; emit(dBuckets, d); out.add(d); }
   return out;
+}
+const _vc = new Map<string, THREE.MeshStandardMaterial>();
+/** key for a material whose only per-object difference is its colour; '' when it must stay its own draw call
+ *  (textures, glow, transparency, or anything a script may recolour at runtime: userData.live) */
+function plainKey(m: THREE.Material): string {
+  const s = m as THREE.MeshStandardMaterial;
+  if (s.type !== 'MeshStandardMaterial' || s.map || s.normalMap || s.roughnessMap || s.emissiveMap || s.alphaMap || s.aoMap || s.vertexColors || s.transparent || s.alphaTest > 0 || m.userData.live || s.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) return '';
+  if (s.emissive.r + s.emissive.g + s.emissive.b > 0) return '';
+  return `vc|${s.roughness.toFixed(2)}|${s.metalness.toFixed(2)}|${s.side}|${s.flatShading ? 1 : 0}|${s.envMapIntensity.toFixed(2)}`;
+}
+function vcMaterial(key: string) {
+  let m = _vc.get(key);
+  if (!m) { const [, r, mt, side, flat, env] = key.split('|'); m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: +r, metalness: +mt, side: +side as THREE.Side, flatShading: flat === '1', envMapIntensity: +env }); m.name = 'BAKED_VC_' + key; _vc.set(key, m); }
+  return m;
 }
 /** make baked originals visible again (for GLB export) */
 export function setBakedVisible(root: THREE.Object3D, v: boolean) { root.traverse(o => { if (o.userData.baked) o.visible = v; }); }

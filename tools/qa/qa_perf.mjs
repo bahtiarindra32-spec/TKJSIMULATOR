@@ -1,29 +1,13 @@
-// Mobile performance probe: touch viewport, CPU throttle, real rAF frames for a few seconds at fixed spots.
-import { chromium } from 'playwright';
-const tag = process.argv[2] ?? 'run'; const query = process.env.QUERY ?? ''; const secs = +(process.env.SECS ?? 6); const rate = +(process.env.THROTTLE ?? 4);
-const spots = (process.env.SPOTS ?? 'street,lobby').split(',');
-const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
-const ctx = await b.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: 'Mozilla/5.0 (Linux; Android 11; SM-A125F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36' });
-const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message.slice(0, 200)));
-const cdp = await ctx.newCDPSession(p); await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-const t0 = Date.now();
-await p.goto('http://127.0.0.1:8787/?qa' + query, { waitUntil: 'commit', timeout: 60000 });
-await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 });
-const boot = Date.now() - t0; console.log('  boot', boot);
-const K = (f, a) => p.evaluate(f, a);
-await K(() => document.getElementById('enter').click()); await p.waitForTimeout(300); if ((await K(() => window.__kota.state().mode)) !== 'walk') await K(() => document.getElementById('enter').click()); await K(() => window.__kota.pause(true));
-const SP = { south: [150, 334.5, 1, Math.PI], kampung: [28, 400, 1, Math.PI], street: [226, 162.5, 1, Math.PI], lobby: [228, 175, 1, 0], office: [232, 172, 2, Math.PI], hotel: [235, 179, 6, 0] };
-const res = { tag, query, boot, throttle: rate, dpr: 2 };
-for (const s of spots) {
-  const [x, z, lv, yaw] = SP[s];
-  await K(([x, z, lv, yaw]) => { window.__kota.teleport(x, z, lv, yaw); window.__kota.step(2); }, [x, z, lv, yaw]);
-  const tw = Date.now(); await K(() => window.__kota.step(1)); const warm = Date.now() - tw; console.log('  warm', s, warm);   // first frame (shader compile)
-  const info = await K(() => window.__kota.stats());
-  const f0 = await K(() => window.__kota.perf().frames); await K(() => window.__kota.pause(false));
-  await p.waitForTimeout(secs * 1000);
-  await K(() => window.__kota.pause(true)); const f1 = await K(() => window.__kota.perf().frames);
-  console.log('  spot', s, 'done');
-  res[s] = { fps: +((f1 - f0) / secs).toFixed(2), warmMs: warm, calls: info.calls, tris: info.tris, q: await K(() => window.__kota.perf().quality) };
-}
-console.log('PERF', JSON.stringify(res), 'errs', JSON.stringify(errs.slice(0, 3)));
-await b.close();
+// Draw calls at the default ('tinggi') look: spawn, a street, hotel L3, lab. Breakdown of visible meshes by top-level group.
+import { boot } from './qa_lib.mjs';
+const Q = await boot(null, { query: process.env.T ? '&t=' + process.env.T : '', viewport: { width: 1280, height: 720 } });
+const { p, K, go } = Q; const out = {};
+const brk = () => K(() => { const sc = window.__kota.scene; const c = {}; const cam = window.__kota.camera ?? null;
+  sc.traverseVisible(o => { if (!o.isMesh && !o.isInstancedMesh) return; let t = o; const path = []; while (t.parent && t.parent !== sc) { path.unshift(t.parent.name || t.parent.type); t = t.parent; } const k = (t.name || t.type) + (path[1] ? '/' + path[1] : ''); c[k] = (c[k] || 0) + 1; });
+  return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 14); });
+const at = async (n, x, z, lv, yaw) => { await go(x, z, lv, yaw); await K(() => window.__kota.step(4, 1 / 30, true)); out[n] = await K(() => window.__kota.stats()); if (process.env.SHOT) await p.screenshot({ path: '/workspace/work/shots/perf_' + process.env.SHOT + '_' + n + '.png' }); out[n + '_b'] = await brk(); };
+try {
+  const sp = await K(() => window.__kota.state()); await at('spawn', sp.x, sp.z, sp.lv, Math.PI); await at('street', 200, 300, 1, 0); await at('hotelL3', sp.x, sp.z, 3, 0);
+  await at('lab', 240, 497, 1, Math.PI);
+} catch (e) { console.log('!!', e.message.slice(0, 300)); }
+console.log('RESULT', JSON.stringify(out, null, 0)); await Q.b.close();

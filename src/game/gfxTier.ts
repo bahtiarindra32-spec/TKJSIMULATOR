@@ -13,6 +13,7 @@ const THIN_RE = /^(PROP_TREE|PROP_PALM)/;
 
 interface Thin { im: THREE.InstancedMesh; orig: Float32Array }
 type Std = THREE.MeshStandardMaterial;
+const _cp = new THREE.Vector3();
 
 export class GfxTier {
   private thin: Thin[] = [];
@@ -57,7 +58,8 @@ export class GfxTier {
     // extra detail layer (facades, street furniture, desk clutter) and car level-of-detail
     const rich = t === 'tinggi' || t === 'sedang';
     for (const o of this.hd) o.visible = rich;
-    for (const car of CAR_LODS) { const lo = car.userData.lowLod as THREE.Object3D; for (const c of car.children) c.visible = c === lo ? !rich : rich; }
+    // baked parked cars: their originals stay hidden (showing them again drew every parked car twice)
+    for (const car of CAR_LODS) { const lo = car.userData.lowLod as THREE.Object3D; for (const c of car.children) if (!c.userData.baked) c.visible = c === lo ? !rich : rich; car.userData.far = !rich; }
     for (const d of this.detail) d.visible = t === 'tinggi' || t === 'sedang' || (t === 'rendah' && d.userData.tier === 'in');
     // materials
     const wantL = t === 'hemat';
@@ -83,6 +85,22 @@ export class GfxTier {
   }
 
   /** day/night and gameplay change colours/emissive on the original materials: mirror them onto the Lambert copies */
+  /** distance level of detail for moving cars: past ~70 m a car draws as its 2-mesh stand-in instead of ~8 parts.
+   *  Same model at every quality setting; only how far away it is changes the mesh. Hysteresis stops flicker at the edge. */
+  private lodT = 0;
+  lod(cam: THREE.Vector3, dt: number) {
+    if (this.tier !== 'tinggi' && this.tier !== 'sedang') return;
+    this.lodT -= dt; if (this.lodT > 0) return; this.lodT = 0.25;
+    for (const car of CAR_LODS) {
+      const lo = car.userData.lowLod as THREE.Object3D; if (!lo || !car.parent || lo.userData.baked) continue;
+      car.getWorldPosition(_cp); const d2 = _cp.distanceToSquared(cam);
+      const far = car.userData.far ? d2 > 62 * 62 : d2 > 72 * 72;
+      if (far === !!car.userData.far) continue;
+      car.userData.far = far;
+      for (const c of car.children) if (!c.userData.baked) c.visible = c === lo ? far : !far;
+    }
+  }
+
   update(dt: number) {
     if (this.tier !== 'hemat') return;
     this.syncT -= dt; if (this.syncT > 0) return; this.syncT = 0.3;

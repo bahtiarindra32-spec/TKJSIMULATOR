@@ -13,7 +13,7 @@ export type PresetId = typeof PRESETS[number]['id'];
 
 /** materials whose emissiveIntensity follows the night factor: max at full night */
 export const nightMats: { m: THREE.MeshStandardMaterial; day: number; night: number }[] = [];
-export function addNightMat(m: THREE.MeshStandardMaterial, day: number, night: number) { nightMats.push({ m, day, night }); m.emissiveIntensity = day; return m; }
+export function addNightMat(m: THREE.MeshStandardMaterial, day: number, night: number) { m.userData.live = true; nightMats.push({ m, day, night }); m.emissiveIntensity = day; return m; }
 
 /** street lamp heads (separate from the hotel's interior ceiling lamps, which stay lit) */
 export const STREET_LAMP = new THREE.MeshStandardMaterial({ color: '#fff4d6', emissive: '#ffd08a', emissiveIntensity: 0.15, roughness: 0.5 });

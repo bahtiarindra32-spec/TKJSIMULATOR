@@ -207,6 +207,9 @@ batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_
 // south district: two halves so looking north (or from the old district) frustum-culls them
 batches.add(bakeStatic(south.west, 'BATCH_SELATAN_BARAT', undefined, OUT_DETAIL)); batches.add(bakeStatic(south.east, 'BATCH_SELATAN_TIMUR', undefined, OUT_DETAIL));
 batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SELATAN_LAIN', undefined, OUT_DETAIL));
+// the practice lab and the street-name signs were drawn object by object (~590 draw calls): batch them like the hotel
+batches.add(bakeStatic(labB.group, 'BATCH_LAB_TKJ', o => /^DOOR_/.test(o.name), { max: 0.35, tier: 'in', keep: GEAR_RE }));
+batches.add(bakeStatic(world.getObjectByName('WAYFINDING')!, 'BATCH_WAYFINDING'));
 const upperParts = ['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
 
 // ---------- views ----------
@@ -1085,7 +1088,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
-  gfx.update(dt || 0.016);
+  gfx.update(dt || 0.016); gfx.lod(camera.position, dt || 0.016);
   dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', mode === 'walk' && !inside && Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + 15), player.pos.z - wz(HOTEL_ORIGIN[1] + 10)) < 70, player.level, seat?.pc.name ?? null, player.pos); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
