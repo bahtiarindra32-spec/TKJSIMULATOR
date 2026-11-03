@@ -65,6 +65,8 @@ try {
     }
     // 6 dns: record via sim, real browser
     if (s.step === 'dns') { const nm = s.P.dnsName; await K(nm => { window.__kota.prakEnv().dnsSrv.records.push({ name: nm, ip: '192.168.70.10' }); }, nm); await pcDo(pc, async () => { await browser(`http://${nm}`, 800); }); await tick(); s = await S(); console.log('  after dns', s?.step, s?.checks.map(c => +c.ok).join('')); }
+    // K3: the last step needs the borrowed tools back in the cabinet
+    await spot('tools'); await press('f'); for (const t of ['tester', 'console', 'laptop', 'toner']) if (await K(t => window.__kota.noc.inv[t], t)) await mclick(`take-${t}`); await press('Escape');
     // 7 trouble: inspect, fix through sim per fault, real browser test
     if (s.step === 'trouble') { console.log('  faults', s.P.faults); await K(() => { const k = window.__kota, st = k.praktik.state(), a = k.adapter(st.pc); const pt = k.rawPort(st.pc); for (const f of st.P.faults) { if (f === 'kabel') a.cable = true; if (f === 'port') pt.shutdown = false; if (f === 'ip' || f === 'gw') { a.dhcp = true; } if (f === 'dns') { a.dnsAuto = true; } } a.dnsAuto = true; });
       await pcDo(pc, async () => { await openCmd(); await cmd('ipconfig /renew', 2500); await browser('http://192.168.70.10', 800); }); await tick(); await step(2); }

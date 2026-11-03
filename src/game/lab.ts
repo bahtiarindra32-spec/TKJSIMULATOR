@@ -16,29 +16,40 @@ export const LAB_STEPS = [
 export type LabStepId = typeof LAB_STEPS[number]['id'];
 /** bit of each step inside the code: the first seven keep their old bits, so 6-character codes from before still open */
 const BIT: Record<LabStepId, number> = { crimp: 0, desk: 1, static: 2, dhcp: 3, vlan: 4, dns: 5, trouble: 6, vlsm: 7, intervlan: 8, acl: 9 };
-export interface LabSpec { steps: LabStepId[]; minutes: number; perStudent: boolean; seed: number }
+export interface LabSpec { steps: LabStepId[]; minutes: number; perStudent: boolean; seed: number;
+  /** 7-bit check of the teacher's paraf PIN (only the check travels in the code, never the PIN) */
+  pin?: number }
+/** the 7-bit check stored in the code for a teacher PIN */
+export function pinHash(pin: string, seed: number) { let h = 0x811c9dc5 ^ seed; for (const ch of `${pin.trim()}#paraf`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return (h >>> 0) % 128; }
 
 const ALPHA = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';   // Crockford base32: no I, L, O, U
 // 6 characters (30 bits): steps 7 · time 4 (×10 min, 0 = no limit) · per-student 1 · seed 16 · check 2
 // 7 characters (35 bits): steps 10 · time 4 · per-student 1 · seed 16 · check 2 · 2 spare. Used only when a newer step is on the sheet.
+// 8 characters (40 bits): as 7 + a 7-bit PIN check (teacher paraf PIN). 1 in 128 random PINs passes the check, so paraf locks for a minute after 3 wrong PINs.
 export function encodeLab(s: LabSpec): string {
   let mask = 0; s.steps.forEach(id => { mask |= 1 << BIT[id]; });
   const t = Math.max(0, Math.min(15, Math.round(s.minutes / 10)));
-  const long = mask >= 128;
-  const body = ((mask * 16 + t) * 2 + (s.perStudent ? 1 : 0)) * 65536 + (s.seed & 0xffff);
+  const pin = s.pin !== undefined;
+  const len = pin ? 8 : mask >= 128 ? 7 : 6;
+  let body = ((mask * 16 + t) * 2 + (s.perStudent ? 1 : 0)) * 65536 + (s.seed & 0xffff);
+  if (pin) body = body * 128 + (s.pin! & 127);
   let v = body * 4 + (popcount(body) & 3), out = '';
-  for (let i = 0; i < (long ? 7 : 6); i++) { out = ALPHA[v % 32] + out; v = Math.floor(v / 32); }
+  for (let i = 0; i < len; i++) { out = ALPHA[v % 32] + out; v = Math.floor(v / 32); }
   return out;
 }
 export function decodeLab(code: string): LabSpec | null {
   const c = code.trim().toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
-  if (c.length !== 6 && c.length !== 7) return null;
+  if (c.length < 6 || c.length > 8) return null;
   let v = 0; for (const ch of c) { const k = ALPHA.indexOf(ch); if (k < 0) return null; v = v * 32 + k; }
-  const chk = v % 4, body = Math.floor(v / 4);
+  const chk = v % 4; let body = Math.floor(v / 4);
   if ((popcount(body) & 3) !== chk) return null;
+  let pin: number | undefined;
+  if (c.length === 8) { pin = body % 128; body = Math.floor(body / 128); }
   const seed = body % 65536, rest = Math.floor(body / 65536), per = rest % 2, t = Math.floor(rest / 2) % 16, mask = Math.floor(rest / 32);
   if (!mask || mask >= 1024 || (c.length === 6 && mask >= 128) || (c.length === 7 && mask < 128)) return null;
-  return { steps: LAB_STEPS.filter(x => mask & (1 << BIT[x.id])).map(x => x.id), minutes: t * 10, perStudent: !!per, seed };
+  const out: LabSpec = { steps: LAB_STEPS.filter(x => mask & (1 << BIT[x.id])).map(x => x.id), minutes: t * 10, perStudent: !!per, seed };
+  if (pin !== undefined) out.pin = pin;
+  return out;
 }
 function popcount(n: number) { let c = 0; for (let x = n; x > 0; x = Math.floor(x / 2)) c += x % 2; return c; }
 /** the seed one student plays: the sheet's seed, mixed with the name when the teacher chose a different case per student */

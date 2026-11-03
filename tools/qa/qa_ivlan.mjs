@@ -54,6 +54,7 @@ try {
   await consoleType(['', 'enable', 'conf t', `access-list 110 deny ip ${Si.net} ${wild(Si.prefix)} ${G.net} ${wild(G.prefix)}`, 'access-list 110 permit ip any any', 'interface g0/0.20', 'ip access-group 110 in', 'end', 'write memory', 'show access-lists']);
   console.log('  acl', await termOut()); await K(() => { window.__kota.noc.closeModal(); if (window.__kota.menu.paused()) window.__kota.menu.resume(); }); await step(2);
   await pcDo(pc, async () => { await browser('http://192.168.70.10', 800); await closeWins(); await openCmd(); await cmd(`ping ${gIp}`, 9000); });
+  await spot('tools'); await press('f'); for (const t of ['console', 'laptop']) if (await K(t => window.__kota.noc.inv[t], t)) await mclick(`take-${t}`); await press('Escape');
   s = await S(); console.log('  acl', s?.checks.map(c => `${+c.ok}${c.label.slice(0, 22)}`).join(' | ')); await tick(); await step(2);
   const res = await modalText(); console.log('  result', res?.slice(0, 400));
   out.run = /Sangat Kompeten/.test(res ?? '') ? 'OK' : 'FAIL';

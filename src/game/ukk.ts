@@ -14,7 +14,7 @@ export type Predikat = 'Sangat Kompeten' | 'Kompeten' | 'Cukup Kompeten' | 'Belu
 export interface UkkResult { predikat: Predikat; nilai: number; coreOk: number; coreOf: number; supOk: number; supOf: number }
 
 /** supporting (pendukung) criteria: tidiness and documentation that do not stop the network from working */
-const PENDUKUNG = /^Label outlet|^Nama VLAN|disimpan|write memory|^Deskripsi port/i;
+const PENDUKUNG = /^Label outlet|^Nama VLAN|disimpan|write memory|^Deskripsi port|^K3: alat dikembalikan/i;
 export const isCore = (label: string) => !PENDUKUNG.test(label);
 
 export function ukkGrade(steps: UkkStep[], totalMs: number, minutes: number): UkkResult {

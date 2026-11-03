@@ -25,7 +25,7 @@ import { EdgeShell, EDGE, activeRoute } from '../pcos/edge';
 import { LabRouterShell, LABR } from '../pcos/labrouter';
 const EDGE_F = ['isp1', 'nat', 'acl'];
 import './noc.css';
-import { aiReady, aiCfg, aiStats, chat, mentorPrompt, offlineMentor, plain, offlineComplaint, aiComplaints, offlineNoteFeedback, aiNoteFeedback, type ChatMsg, type MentorCtx, type NoteCtx } from '../ai/nusa';
+import { aiReady, aiWhyOff, aiCfg, aiStats, chat, mentorPrompt, offlineMentor, plain, offlineComplaint, aiComplaints, offlineNoteFeedback, aiNoteFeedback, type ChatMsg, type MentorCtx, type NoteCtx } from '../ai/nusa';
 
 // ---------------------------------------------------------------- helpers
 const pick = <T,>(a: T[], r = Math.random) => a[Math.floor(r() * a.length)];
@@ -1260,7 +1260,7 @@ export class Noc {
   }
   openNusa() {
     const box = h('div', 'noc-box nusa');
-    const mode = aiReady() ? `AI aktif · ${esc(aiCfg.model)}` : 'Mode offline (tanpa AI) · isi API key OpenRouter di Pengaturan untuk mengaktifkan AI';
+    const mode = aiReady() ? `AI aktif · ${esc(aiCfg.model)}` : `Mode offline (tanpa AI) · ${aiWhyOff()}`;
     box.append(h('h2', '', 'Pak Nusa · Mentor Teknisi'));
     box.append(h('p', 'nusa-mode', `<span class="${aiReady() ? 'on' : 'off'}">●</span> ${mode}`));
     const log = h('div', 'nusa-log');

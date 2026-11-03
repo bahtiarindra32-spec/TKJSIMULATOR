@@ -27,7 +27,12 @@ describe('closing-note feedback (offline)', () => {
 });
 
 describe('AI client', () => {
-  beforeEach(() => { N.aiCfg.key = ''; N.aiCfg.enabled = true; });
+  beforeEach(() => { N.aiCfg.key = ''; N.aiCfg.enabled = true; N.aiCfg.consent = true; });
+  it('sends nothing without the player\'s consent, even with a key', async () => {
+    N.aiCfg.key = 'sk-or-v1-unit-test-key'; N.aiCfg.consent = false; let called = false;
+    N.aiTransport.fetch = async () => { called = true; return new Response('{}'); };
+    await expect(N.chat([{ role: 'user', content: 'x' }])).rejects.toThrow('offline'); expect(called).toBe(false); expect(N.aiWhyOff()).toMatch(/izin/);
+  });
   it('refuses to call the network without a key', async () => { await expect(N.chat([{ role: 'user', content: 'x' }])).rejects.toThrow('offline'); });
   it('sends the key only as a bearer header to OpenRouter and returns the reply', async () => {
     N.aiCfg.key = 'sk-or-v1-unit-test-key';

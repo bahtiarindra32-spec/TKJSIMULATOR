@@ -3,7 +3,7 @@
 // 6-character code (src/game/lab.ts); a student enters the code + name, is given one desk, and works the steps in
 // order. Each step has rubric checkpoints read live from netsim; the score is the share of checkpoints met.
 // AI may only turn the teacher's sentence into form ticks; it never grades.
-import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstruction, type LabSpec, type LabStepId } from './lab';
+import { LAB_STEPS, LAB_AI_PROMPT, encodeLab, decodeLab, studentSeed, parseInstruction, pinHash, type LabSpec, type LabStepId } from './lab';
 import { judge } from './crimp';
 import { ENVS, SWITCHES, adapterOf, bounce, live, linkUp, panelOf, portOf, portName, outletOf, repatch, envOf, ping as netPing, parseIp, ipStr, maskStr, type Switch } from '../pcos/net';
 import { LABR, resetLabRouter, labPermits } from '../pcos/labrouter';
@@ -20,6 +20,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;
 const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) >>> 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const GW = '192.168.70.1', SRV = '192.168.70.10';
 /** checkpoints per step (for steps never reached, so the score still counts them) */
+/** (+1 on the last step of a sheet: the K3 tools check) */
 const CHECKN: Record<LabStepId, number> = { crimp: 5, desk: 6, static: 6, dhcp: 5, vlan: 5, vlsm: 8, intervlan: 10, acl: 5, dns: 3, trouble: 3 };
 
 type Fault = 'kabel' | 'port' | 'ip' | 'gw' | 'dns';
@@ -28,7 +29,9 @@ interface Check { label: string; ok: boolean }
 interface StepRes { step: LabStepId; got: number; of: number; ms: number; done: boolean; checks: Check[] }
 interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[]; ready?: boolean;
   /** the student's VLSM table (same order as P.vl.needs) and the last ping result per target from the student's PC */
-  rows: Partial<Row>[]; pings: Map<string, boolean> }
+  rows: Partial<Row>[]; pings: Map<string, boolean>;
+  /** wrong teacher PINs in a row, and until when paraf is locked */
+  pinFails?: number; pinLock?: number }
 
 const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langkah: (P: Params, R: Run) => string[] }> = {
   crimp: { tujuan: 'Membuat kabel UTP straight-through standar T568B dan menyambungkan PC ke jaringan.', alat: 'Kabel UTP Cat6, 2 konektor RJ45, tang crimping, LAN tester (lemari alat & meja crimping).', k3: 'Potong dan kupas kabel menjauh dari badan. Sisa potongan kabel dibuang ke tempat sampah, bukan di lantai.',
@@ -95,7 +98,10 @@ export class Praktik {
     box.append(h('h2', '', 'Meja Guru · Lab Praktik TKJ'));
     if (this.run) {
       box.append(h('p', '', `Praktik berjalan: <b>${esc(this.run.name)}</b> di ${esc(this.run.label)}, langkah ${this.run.i + 1}/${this.run.spec.steps.length}.`));
-      const rw = h('div', 'row'); if (this.run.ready) rw.append(btn('Minta paraf guru', () => { const m = this.paraf(); if (this.run) { this.openDesk(); this.noc.toast(m, 4200); } }, 'btn pri', 'lab-paraf')); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
+      const rw = h('div', 'row');
+      let pinIn: HTMLInputElement | null = null;
+      if (this.run.ready && this.needsPin()) { pinIn = h('input') as HTMLInputElement; pinIn.type = 'password'; pinIn.inputMode = 'numeric'; pinIn.name = 'lab-paraf-pin'; pinIn.placeholder = 'PIN guru'; pinIn.maxLength = 6; pinIn.autocomplete = 'off'; pinIn.addEventListener('keydown', e => e.stopPropagation()); rw.append(pinIn); }
+      if (this.run.ready) rw.append(btn(this.needsPin() ? 'Paraf (guru)' : 'Minta paraf guru', () => { const m = this.paraf(pinIn?.value ?? ''); if (this.run) { this.openDesk(); this.noc.toast(m, 4200); } }, 'btn pri', 'lab-paraf')); rw.append(btn('Lihat jobsheet', () => { this.collapsed = false; this.render(); this.noc.closeModal(); }, 'btn', 'lab-show')); rw.append(btn('Akhiri praktik sekarang', () => this.finish(true), 'btn', 'lab-stop')); rw.append(btn('Tutup [Esc]', () => this.noc.closeModal())); box.append(rw);
     } else {
       box.append(h('p', 'how', 'Guru menyusun jobsheet dan membagikan kodenya. Siswa memasukkan kode di sini, lalu mengerjakan langkahnya di meja yang ditunjuk. Penilaian dari rubrik simulator, bukan AI.'));
       const rw = h('div', 'row left'); rw.append(btn('Guru: susun jobsheet', () => this.openTeacher(), 'btn', 'lab-teacher')); rw.append(btn('Siswa: masukkan kode', () => this.openStudent(), 'btn pri', 'lab-student')); rw.append(btn('Guru: rekap kelas', () => this.openRecap(), 'btn', 'lab-recap')); box.append(rw);
@@ -137,6 +143,10 @@ export class Praktik {
     const ps = h('label', 'lab-chk'); const pc = h('input') as HTMLInputElement; pc.type = 'checkbox'; pc.name = 'lab-per'; pc.checked = spec.perStudent; pc.addEventListener('change', () => { spec.perStudent = pc.checked; upd(); });
     ps.append(pc, h('span', '', 'Soal & meja beda tiap siswa (dari nama)'));
     opt.append(h('span', '', 'Waktu'), tm, ps); box.append(opt);
+    const pr = h('div', 'row left lab-pinrow'); const pi = h('input') as HTMLInputElement; pi.type = 'password'; pi.inputMode = 'numeric'; pi.name = 'lab-pin'; pi.maxLength = 6; pi.placeholder = 'PIN paraf (opsional)'; pi.autocomplete = 'off';
+    pi.addEventListener('keydown', e => e.stopPropagation());
+    pi.addEventListener('input', () => { const v = pi.value.trim(); spec.pin = /^\d{4,6}$/.test(v) ? pinHash(v, spec.seed) : undefined; upd(); });
+    pr.append(pi, h('small', '', 'Isi 4–6 angka agar setiap paraf butuh PIN guru. PIN tidak ikut di kode (hanya ceknya); kode jadi 8 karakter.')); box.append(pr);
     const res = h('div', 'lab-code'); box.append(res);
     const upd = () => {
       if (!spec.steps.length) { res.innerHTML = '<p class="msg warn">Centang minimal satu langkah.</p>'; return; }
@@ -250,8 +260,13 @@ export class Praktik {
     }
     if (id === 'trouble') bounce(a);
   }
-  /** rubric checkpoints of the current step, read from netsim */
+  /** rubric checkpoints of the current step, read from netsim; the last step also checks that borrowed tools are back (K3) */
   checks(): Check[] {
+    const R = this.run!; const cs = this.stepChecks();
+    if (R.i === R.spec.steps.length - 1) { const v = this.noc.inv; cs.push({ label: 'K3: alat dikembalikan ke lemari alat', ok: !v.tester && !v.console && !v.laptop && !v.toner && !v.analyzer }); }
+    return cs;
+  }
+  private stepChecks(): Check[] {
     const R = this.run!, P = R.P, id = R.spec.steps[R.i], a = adapterOf(R.pc), L = live(a), sw = this.sw(), q = panelOf(R.pc)!;
     const port = portOf(R.pc)?.port, inNet = /^192\.168\.70\.\d+$/.test(L.ip) && L.ok;
     const ping: Check = { label: 'Uji dari PC: ping 192.168.70.1 berhasil', ok: R.ping && linkUp(a) && inNet };
@@ -323,8 +338,15 @@ export class Praktik {
     this.render();
   }
   /** Teacher initials the current step at the desk: re-checks live state, then moves on. */
-  paraf(): string {
+  /** does this sheet need the teacher's PIN for each paraf? */
+  needsPin() { return this.run?.spec.pin !== undefined; }
+  paraf(pin = ''): string {
     const R = this.run; if (!R) return 'Tidak ada praktik berjalan.';
+    if (R.spec.pin !== undefined) {
+      if (R.pinLock && performance.now() < R.pinLock) return `Paraf dikunci ${Math.ceil((R.pinLock - performance.now()) / 1000)} detik setelah 3 PIN salah.`;
+      if (pinHash(pin, R.spec.seed) !== R.spec.pin) { R.pinFails = (R.pinFails ?? 0) + 1; if (R.pinFails >= 3) { R.pinFails = 0; R.pinLock = performance.now() + 60000; return 'PIN salah 3 kali. Paraf dikunci 1 menit.'; } return 'PIN guru salah.'; }
+      R.pinFails = 0;
+    }
     const cs = this.checks();
     if (!cs.every(c => c.ok)) { R.ready = false; this.render(); return `Belum bisa diparaf: ${cs.filter(c => !c.ok).map(c => c.label).join('; ')}.`; }
     R.res.push({ step: R.spec.steps[R.i], got: cs.length, of: cs.length, ms: performance.now() - R.st0, done: true, checks: cs });
@@ -336,7 +358,7 @@ export class Praktik {
   }
   finish(early: boolean) {
     const R = this.run; if (!R) return;
-    if (early) { const cs = this.checks(); R.res.push({ step: R.spec.steps[R.i], got: cs.filter(c => c.ok).length, of: cs.length, ms: performance.now() - R.st0, done: false, checks: cs }); for (let k = R.i + 1; k < R.spec.steps.length; k++) R.res.push({ step: R.spec.steps[k], got: 0, of: CHECKN[R.spec.steps[k]], ms: 0, done: false, checks: [] }); }
+    if (early) { const cs = this.checks(); R.res.push({ step: R.spec.steps[R.i], got: cs.filter(c => c.ok).length, of: cs.length, ms: performance.now() - R.st0, done: false, checks: cs }); for (let k = R.i + 1; k < R.spec.steps.length; k++) R.res.push({ step: R.spec.steps[k], got: 0, of: CHECKN[R.spec.steps[k]] + (k === R.spec.steps.length - 1 ? 1 : 0), ms: 0, done: false, checks: [] }); }
     this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board();
     const total = performance.now() - R.t0, over = R.spec.minutes > 0 && total > R.spec.minutes * 60000;
     const got = R.res.reduce((s, r) => s + r.got, 0), of = R.res.reduce((s, r) => s + r.of, 0);
@@ -389,7 +411,7 @@ export class Praktik {
       <ul class="js-c">${cs.map(c => `<li class="${c.ok ? 'ok' : ''}"><i></i>${esc(c.label)}</li>`).join('')}</ul>
       ${id === 'vlsm' ? `<div class="js-vlsm">${R.P.vl.needs.map((n, i) => { const r = R.rows[i] ?? {}; const f = (k: string, ph: string, v: unknown) => `<input name="vlsm-${i}-${k}" class="mono f-${k}" placeholder="${ph}" aria-label="${n.name} ${ph}" inputmode="decimal" autocomplete="off" spellcheck="false" value="${esc(v === undefined || (k === 'prefix' && !v) ? '' : String(v))}">`; return `<fieldset><legend>${n.name} · ${n.hosts} host</legend>${f('net', 'network', r.net)}<span>/</span>${f('prefix', 'prefix', r.prefix)}${f('gw', 'gateway', r.gw)}${f('bc', 'broadcast', r.bc)}</fieldset>`; }).join('')}</div>` : ''}
       <dl><dt>Tujuan</dt><dd>${S.tujuan}</dd><dt>Alat &amp; bahan</dt><dd>${S.alat}</dd><dt>K3</dt><dd>${S.k3}</dd></dl>
-      <div class="js-lt">Langkah kerja</div><ol class="js-l">${S.langkah(R.P, R).map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`;
+      <div class="js-lt">Langkah kerja</div><ol class="js-l">${[...S.langkah(R.P, R), ...(R.i === R.spec.steps.length - 1 ? ['Kembalikan semua alat ke lemari alat (K3), lalu minta paraf di meja guru.'] : [])].map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`;
     this.panel.querySelectorAll<HTMLInputElement>('.js-vlsm input').forEach(inp => { const [, i, k] = inp.name.split('-'); inp.addEventListener('input', () => this.setRow(+i, k as keyof Row, inp.value)); inp.addEventListener('keydown', e => e.stopPropagation()); inp.addEventListener('keyup', e => e.stopPropagation()); });
     (this.panel.querySelector('.js-t') as HTMLButtonElement).onclick = () => { this.collapsed = !this.collapsed; this.render(); };
   }

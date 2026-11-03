@@ -137,12 +137,15 @@ export class Menu {
       row('Aktifkan AI', seg([['1', 'Aktif'], ['0', 'Mati (offline)']], () => (aiCfg.enabled ? '1' : '0'), v => { aiCfg.enabled = v === '1'; saveAiCfg(); }, 'ai'), 'Tanpa AI, Pak Nusa menjawab dari petunjuk offline');
       const txt = (val: () => string, set: (v: string) => void, name: string, ph: string, secret = false) => { const i = el('input', 'pn-text') as HTMLInputElement; i.type = secret ? 'password' : 'text'; i.name = name; i.id = name; i.placeholder = ph; i.value = val(); i.autocomplete = 'off'; i.spellcheck = false; i.addEventListener('change', () => { set(i.value.trim()); saveAiCfg(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
       row('API key OpenRouter', txt(() => aiCfg.key, v => (aiCfg.key = v), 'aiKey', 'sk-or-v1-…', true), 'Disimpan hanya di browser ini, tidak ikut ke server mana pun selain OpenRouter');
+      row('Izin kirim data ke OpenRouter', seg([['0', 'Belum'], ['1', 'Setuju']], () => (aiCfg.consent ? '1' : '0'), v => { aiCfg.consent = v === '1'; saveAiCfg(); }, 'aiConsent'), 'Yang dikirim: pertanyaanmu, teks surat kerja/jobsheet, dan konfigurasi IP simulasi. Nama siswa dan nilai tidak dikirim. Tanpa izin, Pak Nusa memakai petunjuk offline.');
+      row('Simpan API key', seg([['1', 'Di perangkat ini'], ['0', 'Sesi ini saja']], () => (aiCfg.remember ? '1' : '0'), v => { aiCfg.remember = v === '1'; saveAiCfg(); }, 'aiRemember'), 'Komputer lab bersama: pilih “Sesi ini saja”, key hilang saat tab ditutup');
       row('Model', txt(() => aiCfg.model, v => (aiCfg.model = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'openrouter/free = OpenRouter memilih model gratis yang sedang tersedia');
       { const w = el('div', 'pn-seg pn-ai'); const b = el('button', 'seg on', 'Tes koneksi AI') as HTMLButtonElement; b.type = 'button'; b.name = 'aiTest'; const o = el('output', '', aiStats.last ? (aiStats.last === 'ok' ? 'Terakhir: tersambung' : `Terakhir gagal: ${aiStats.last.slice(0, 60)}`) : 'Belum dites');
         b.addEventListener('click', async () => {
           saveAiCfg();
           if (!aiCfg.enabled) { o.textContent = 'AI dimatikan: Pak Nusa memakai petunjuk offline.'; return; }
           if (aiCfg.key.trim().length < 10) { o.textContent = 'Isi API key OpenRouter dulu. Tanpa key, Pak Nusa tetap jalan dengan petunjuk offline.'; return; }
+          if (!aiCfg.consent) { o.textContent = 'Pilih “Setuju” di Izin kirim data dulu. Tanpa izin, tidak ada data yang dikirim.'; return; }
           b.disabled = true; o.textContent = 'Menghubungi OpenRouter…';
           try { const t = await chat([{ role: 'user', content: 'Jawab satu kata: siap' }], { maxTokens: 10, timeoutMs: 15000 }); o.textContent = `Tersambung (${aiStats.lastModel ?? aiCfg.model}): “${t.slice(0, 30)}”`; }
           catch (e) { o.textContent = `Gagal: ${String((e as Error).message ?? e).slice(0, 80)}. Pak Nusa memakai petunjuk offline.`; }

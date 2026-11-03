@@ -3,15 +3,28 @@
 // The API key lives only in this browser's localStorage, never in the build or the repository.
 // Every AI answer is labelled as AI in the UI; when there is no key / no internet the offline rule engine answers instead.
 
-export interface AiConfig { key: string; model: string; enabled: boolean }
+export interface AiConfig { key: string; model: string; enabled: boolean;
+  /** the player (or teacher) agreed that questions + simulated game state go to OpenRouter (off until they say yes) */
+  consent: boolean;
+  /** keep the key on this device; false = only for this browser session (sessionStorage) */
+  remember: boolean }
 const KEY = 'kotaNusantara.ai.v1';
 /** OpenRouter's free router picks whichever free model is up (single free model ids get retired often) */
 export const DEFAULT_MODEL = 'openrouter/free';
 const RETIRED = ['meta-llama/llama-3.3-70b-instruct:free'];
-export const aiCfg: AiConfig = { key: '', model: DEFAULT_MODEL, enabled: true };
+export const aiCfg: AiConfig = { key: '', model: DEFAULT_MODEL, enabled: true, consent: false, remember: true };
+const SKEY = 'kotaNusantara.ai.key';
 try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { if (typeof o.key === 'string') aiCfg.key = o.key; if (typeof o.model === 'string' && o.model.trim()) aiCfg.model = RETIRED.includes(o.model.trim()) ? DEFAULT_MODEL : o.model.trim(); if (typeof o.enabled === 'boolean') aiCfg.enabled = o.enabled; } } catch { /* ignore */ }
-export function saveAiCfg() { try { localStorage.setItem(KEY, JSON.stringify(aiCfg)); } catch { /* ignore */ } }
-export const aiReady = () => aiCfg.enabled && aiCfg.key.trim().length > 10 && navigator.onLine !== false;
+try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { aiCfg.consent = o.consent === true || (o.consent === undefined && typeof o.key === 'string' && o.key.length > 10); if (o.remember === false) aiCfg.remember = false; } const sk = sessionStorage.getItem(SKEY); if (!aiCfg.key && sk) aiCfg.key = sk; } catch { /* ignore */ }
+export function saveAiCfg() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(aiCfg.remember ? aiCfg : { ...aiCfg, key: '' }));
+    if (aiCfg.remember) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, aiCfg.key);
+  } catch { /* ignore */ }
+}
+export const aiReady = () => aiCfg.enabled && aiCfg.consent && aiCfg.key.trim().length > 10 && navigator.onLine !== false;
+/** why the AI is not used right now (for the status line), '' = ready */
+export const aiWhyOff = () => !aiCfg.enabled ? 'AI dimatikan' : aiCfg.key.trim().length <= 10 ? 'isi API key OpenRouter di Pengaturan untuk mengaktifkan AI' : !aiCfg.consent ? 'izin kirim data ke OpenRouter belum diberikan (Pengaturan)' : navigator.onLine === false ? 'tidak ada internet' : '';
 
 export interface ChatMsg { role: 'system' | 'user' | 'assistant'; content: string }
 export interface AiStats { calls: number; fails: number; tokens: number; last: string; lastModel?: string }

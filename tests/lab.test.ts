@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encodeLab, decodeLab, studentSeed, parseInstruction, type LabSpec } from '../src/game/lab';
+import { encodeLab, decodeLab, studentSeed, parseInstruction, pinHash, type LabSpec } from '../src/game/lab';
 
 describe('lab code', () => {
   it('round-trips every field in 6 characters', () => {
@@ -15,6 +15,11 @@ describe('lab code', () => {
     const old: LabSpec = { steps: ['crimp', 'vlan', 'trouble'], minutes: 30, perStudent: false, seed: 4321 };
     expect(encodeLab(old)).toHaveLength(6); expect(decodeLab(encodeLab(old))).toEqual(old);
     expect(parseInstruction('vlsm lalu routing antar vlan dan firewall acl').steps).toEqual(['vlsm', 'intervlan', 'acl']);
+  });
+  it('a teacher PIN makes an 8-character code that carries only a 7-bit check of the PIN', () => {
+    const s: LabSpec = { steps: ['vlan', 'acl'], minutes: 90, perStudent: false, seed: 777, pin: pinHash('4821', 777) };
+    const c = encodeLab(s); expect(c).toHaveLength(8); expect(decodeLab(c)).toEqual(s);
+    expect(c).not.toContain('4821'); expect(pinHash('4821', 777)).toBe(decodeLab(c)!.pin); expect(pinHash('1111', 777)).not.toBe(pinHash('4821', 777));
   });
   it('rejects most typos', () => {
     const c = encodeLab({ steps: ['crimp', 'static'], minutes: 60, perStudent: true, seed: 1234 });

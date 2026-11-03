@@ -12,7 +12,7 @@ README ini hanya mencatat apa yang **sudah dibuat dan sudah diuji** (status 30 O
 
 | Bagian | Yang dipakai |
 |---|---|
-| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 44 unit test vitest) |
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, 46 unit test vitest) |
 | Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
 | Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
 | Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
@@ -160,6 +160,8 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - **VLSM**: blok 192.168.x.0/24 dengan empat kebutuhan host (GURU, SISWA, SERVER, link router). Siswa mengisi network, prefix, gateway, dan broadcast di jobsheet. Desain apa pun yang benar diterima (prefix terkecil yang cukup, mulai di batas blok, tidak tumpang tindih), bukan hanya urutan buku.
 - **Routing antar-VLAN (router-on-a-stick)**: router lab **R-LAB** di rak lab, console bergaya Cisco IOS (`interface g0/0.N`, `encapsulation dot1Q N`, `ip address`, `show ip interface brief`, `show vlans`, `show running-config`, `write memory`). Kabel Gi0/0 ke SW-LAB Gi1/0/24, yang harus dijadikan trunk (`switchport mode trunk`, `switchport trunk native vlan 70` agar meja lain tetap di VLAN 70, `switchport trunk allowed vlan`). Alamat memakai tabel VLSM siswa bila benar. PC GURU dan SISWA saling ping lewat router; gateway salah di salah satu PC membuat balasan tidak kembali.
 - **Firewall antar-VLAN**: ACL extended bernomor di R-LAB (`access-list 110 deny ip … …`, `permit ip any any`, `ip access-group 110 in|out`, `show access-lists`). Dicek dari simulator: SISWA tidak bisa ke GURU, tapi server lab 192.168.70.10 tetap terbuka.
+- **PIN paraf guru**: guru boleh mengisi PIN 4–6 angka saat menyusun jobsheet. Kode jadi 8 karakter dan hanya membawa cek 7-bit dari PIN (bukan PIN-nya). Setiap paraf meminta PIN; 3 kali salah mengunci paraf 1 menit. Batasan jujur: cek 7-bit bisa ditebak dengan banyak percobaan, jadi ini pencegah iseng, bukan keamanan ujian.
+- **K3 alat**: langkah terakhir jobsheet punya checkpoint *K3: alat dikembalikan ke lemari alat* (LAN tester, console, laptop, toner). Paraf terakhir menunggu alat kembali.
 - **Rekap kelas tanpa server**: lembar hasil memberi *kode hasil* satu baris (`KN1.…`). Siswa mengirimnya ke guru (chat grup, LMS). Di meja guru, *Guru: rekap kelas* menerima tempelan teks apa pun, mengambil semua kode, menolak kode yang rusak/diubah (checksum), memakai percobaan terbaru per nama, lalu menampilkan tabel (nilai, predikat, langkah tuntas, durasi, rata-rata) dan *Unduh CSV*. Checksum bukan tanda tangan digital: untuk ujian, guru tetap mengamati langsung.
 - Paraf guru: langkah yang checkpoint-nya terpenuhi harus diparaf di meja guru (dicek ulang langsung dari simulator) sebelum lanjut.
 - Lembar hasil: checkpoint terpenuhi ÷ seluruh checkpoint × 100, waktu per langkah, checkpoint yang gagal. Batasan: tanpa server, lembar hasil bisa dipalsukan, jadi guru sebaiknya melihat langsung.
@@ -217,6 +219,7 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
 
 ### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
+- **Izin data & API key**: AI tidak mengirim apa pun sebelum pemain/guru memilih *Setuju* di Pengaturan (yang dikirim: pertanyaan, teks surat kerja/jobsheet, konfigurasi IP simulasi; nama siswa dan nilai tidak). API key bisa disimpan *di perangkat ini* atau *sesi ini saja* untuk komputer lab bersama.
 - Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.
 - **Keluhan pelanggan dari AI**: tiap shift, kalimat keluhan tiket ditulis ulang dengan gaya pelapor (manajer, kasir, tamu hotel) hanya dari gejalanya, jadi pemain tetap harus mendiagnosis sendiri.
 - **Catatan penutupan tiket**: di laporan kerja, pemain menulis catatan seperti teknisi sungguhan. Cek offline menandai 4 bagian (gejala, penyebab, tindakan, verifikasi), lalu AI memberi ulasan dibanding fakta tiket. Catatan tersimpan di browser.

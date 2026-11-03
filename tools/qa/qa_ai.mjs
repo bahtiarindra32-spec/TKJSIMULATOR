@@ -15,7 +15,7 @@ R.offlineReady = await K(() => window.__kota.ai().ready);
 const off = await K(() => window.__kota.ask('kenapa dapat IP 169.254?'));
 R.offlineAnswer = !off.ai && /DHCP|APIPA/.test(off.text);
 // 2) shift with key -> AI complaints
-await K(() => Object.assign(window.__kota.aiCfg, { key: 'sk-or-v1-qa-test-key-0000', enabled: true }));
+await K(() => Object.assign(window.__kota.aiCfg, { key: 'sk-or-v1-qa-test-key-0000', enabled: true, consent: true }));
 R.ready = await K(() => window.__kota.ai().ready);
 await K(() => window.__kota.noc.startShift());
 await p.waitForTimeout(2500);
