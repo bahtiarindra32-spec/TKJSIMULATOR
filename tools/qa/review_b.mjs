@@ -1,0 +1,30 @@
+// Review B: tutorial job end-to-end at 1280x720 with screenshots of each UI step.
+import { boot } from './qa_lib.mjs';
+process.env.DOC = '1';
+const Q = await boot(null, { query: '&low&tutor', viewport: { width: 1280, height: 720 } });
+const { p, K, step, goPc, goAnchor, press, openPc, openCmd, cmd, cmdText, closePc, modalText, mclick, errs } = Q;
+const SH = '/workspace/work/review/shots';
+const shot = async n => { await K(() => window.__kota.step(1)); await p.screenshot({ path: `${SH}/${n}.png` }); console.log('  shot', n); };
+await p.waitForTimeout(1300); await step(2);
+await mclick('brief-ok'); await mclick('order-ok'); await step(2);
+console.log('wp', await K(() => { const e = document.querySelector('.ms-wp'); const r = e?.getBoundingClientRect(); return e && { hidden: e.hidden, x: r.x|0, y: r.y|0, t: e.innerText.replace(/\n/g,' ') }; }));
+let s = await K(() => window.__kota.noc.tutorState());
+console.log('cab', await goAnchor('CABINET')); await step(2); await shot('b01_at_cabinet');
+await press('f'); await step(1); console.log('cabinet modal:', (await modalText())?.slice(0, 600)); await shot('b02_cabinet');
+await mclick('take-tester'); await mclick('take-patch'); await shot('b03_cabinet_taken'); await press('Escape');
+await goPc(s.pc); await step(2); await shot('b04_at_pc');
+await press('c'); await step(1); console.log('phys modal:', (await modalText())?.slice(0, 600)); await shot('b05_phys');
+await mclick('phys-install'); await p.waitForTimeout(800); await shot('b06_installed'); await mclick('phys-test'); await step(2); console.log('after test:', (await modalText())?.slice(0, 400)); await shot('b07_tested'); await press('Escape');
+await press('f'); for (let i = 0; i < 12 && !(await K(() => window.__kota.pcos.isOpen())); i++) await step(3);
+await shot('b08_pc_lock');
+await K(() => document.querySelector('#pcos .lock button')?.click()); await p.waitForTimeout(300); await shot('b09_desktop');
+await openCmd(); await cmd('ipconfig'); await shot('b10_ipconfig');
+s = await K(() => window.__kota.noc.tutorState()); await cmd(`ping ${s.tut.gw}`, 4500); await shot('b11_ping');
+await closePc(); await step(3);
+for (let i = 0; i < 6; i++) { await step(3); await p.waitForTimeout(100); if (await K(() => /Laporan kerja/.test(document.querySelector('.noc-modal h2')?.textContent ?? ''))) break; }
+console.log('report:', (await modalText())?.slice(0, 900)); await shot('b12_report');
+await mclick('report-ok'); await step(3); console.log('after report:', (await modalText())?.slice(0, 600)); await shot('b13_after_report');
+console.log('toast', await K(() => window.__kota.state().toast));
+console.log('save', await K(() => localStorage.getItem('kotaNusantara.noc.v1')));
+console.log('errors', JSON.stringify(errs.filter(e => !/GPU stall/.test(e)).slice(0, 10)));
+await Q.b.close();

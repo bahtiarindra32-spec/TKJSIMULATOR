@@ -48,3 +48,8 @@ real-world standard it follows, and what is deliberately not simulated. Full his
 - Fresh start faces the lobby doors turned toward the Workshop side, so the first W makes progress.
 - Cabinet: items the running job or lab step needs come first with a "Diperlukan" badge + one "Ambil yang
   diperlukan" button. Installing a patch cord is a 0.65 s beat (cord slides in, RJ45 click, LED amber → green).
+
+## Edge router dual-ISP NAT (Nov 2026)
+- On real IOS one access-list can only own one `ip nat inside source list` mapping; a second line for another interface replaces it. Two ISPs therefore use one route-map per exit (`match ip address 1` + `match interface Gi0/X`). The simulator now models exactly that: the old double `list 1` setup was wrong and was removed.
+- Failover contract (x_failover) expects route-map ISP2 on Gi0/1 plus IP SLA/track on the ISP1 default route.
+- Only `permit` sequence 10 is supported; deny sequences and set clauses are out of scope and the console says so.

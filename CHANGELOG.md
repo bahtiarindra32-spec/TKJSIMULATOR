@@ -2,6 +2,9 @@
 
 Ringkasan per hari. Detail lengkap ada di riwayat git.
 
+## 2026-11-03
+- Router edge R-EDGE: NAT dua ISP memakai route-map (ISP1 keluar Gi0/0, ISP2 keluar Gi0/1) seperti contoh dual-ISP PAT Cisco. Perintah baru `route-map NAMA permit 10`, `match ip address`, `match interface`, `ip nat inside source route-map`, `show route-map`. Menulis `list N` yang sama untuk interface lain kini mengganti pemetaan lama dengan peringatan, sesuai perilaku IOS. Unit test edge (48 total), playtest qa_edge.
+
 ## 2026-11-02
 - Review berlapis (juri, guru TKJ, playtester). AI bawaan pindah ke `openrouter/free` dengan fallback dan tombol Tes koneksi AI.
 - Spanning tree di switch: kabel loop hanya menimbulkan broadcast storm kalau STP dimatikan.

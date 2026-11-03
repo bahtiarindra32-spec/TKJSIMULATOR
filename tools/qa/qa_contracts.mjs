@@ -106,7 +106,7 @@ for (const ph of phases) {
     if (ph === 'failover') {
       const j = await accept('x_failover');
       const s0 = await st(); console.log('  before', s0.notes);
-      await K(() => { const E = window.__kota.edge.EDGE; E.sla.set(1, { target: '203.0.113.1', src: 'GigabitEthernet0/0', scheduled: true }); E.track.set(1, 1); E.routes.forEach(r => { if (r.nh === '203.0.113.1') r.track = 1; }); E.routes.push({ net: '0.0.0.0', mask: '0.0.0.0', nh: '198.51.100.1', ad: 10, track: null }); E.nat.push({ acl: 1, iface: 'GigabitEthernet0/1' }); });
+      await K(() => { const E = window.__kota.edge.EDGE; E.sla.set(1, { target: '203.0.113.1', src: 'GigabitEthernet0/0', scheduled: true }); E.track.set(1, 1); E.routes.forEach(r => { if (r.nh === '203.0.113.1') r.track = 1; }); E.routes.push({ net: '0.0.0.0', mask: '0.0.0.0', nh: '198.51.100.1', ad: 10, track: null }); E.rmaps.set('ISP2', { acl: 1, iface: 'GigabitEthernet0/1' }); E.nat.push({ acl: null, rmap: 'ISP2', iface: 'GigabitEthernet0/1' }); });
       for (const pc of j.targets) { await goPc(pc); await openPc(pc); await openCmd(); await browser('http://cari.id', 800); await closeWins(); await closePc(); }
       out.failover = (await fin('failover')) && /SLA|track|cadangan|NAT/.test(s0.notes.join()) ? 'OK' : 'FAIL';
     }

@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
+p.on('console', m => console.log('c:', m.type(), m.text().slice(0, 150))); p.on('pageerror', e => console.log('pe', e.message.slice(0, 300)));
+p.on('framenavigated', f => console.log('nav', f.url()));
+await p.goto('http://127.0.0.1:8787/', { waitUntil: 'commit' });
+await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 120000 });
+await p.waitForTimeout(1500);
+const el = await p.evaluate(() => { const e = document.getElementById('enter'); const r = e.getBoundingClientRect(); const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return [r.x, r.y, r.width, top?.id || top?.tagName, getComputedStyle(e).display, document.getElementById('loading') ? 'loading present' : 'no loading']; });
+console.log(JSON.stringify(el));
+await p.click('#enter', { timeout: 5000 }).catch(e => console.log('err', e.message.slice(0, 200)));
+console.log(await p.evaluate(() => window.__kota.state().mode));
+await p.waitForTimeout(500); console.log(await p.evaluate(() => window.__kota.state().mode));
+await b.close();

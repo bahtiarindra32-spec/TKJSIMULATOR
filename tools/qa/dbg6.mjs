@@ -1,0 +1,10 @@
+import { boot } from './qa_lib.mjs';
+const Q = await boot(null); const { p, K } = Q;
+console.log(await K(() => JSON.stringify(window.__kota.state())), p.url());
+const r = await p.click('#enter', { timeout: 5000 }).then(() => 'clicked').catch(e => 'click err ' + e.message.slice(0, 300));
+console.log(r);
+await K(() => window.__kota.step(3));
+console.log(await K(() => JSON.stringify(window.__kota.state())), Q.errs);
+await K(() => window.__kota.enterWalk()); await K(() => window.__kota.step(3));
+console.log(await K(() => JSON.stringify(window.__kota.state())), Q.errs);
+await Q.b.close();

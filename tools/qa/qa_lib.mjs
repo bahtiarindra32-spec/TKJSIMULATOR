@@ -17,7 +17,7 @@ export async function boot(save, opt = {}) {
   if ((await p.evaluate(() => window.__kota.state().mode)) !== 'walk') await p.evaluate(() => document.getElementById('enter').click());
   await p.evaluate(() => window.__kota.pause(true));
   const K = (f, a) => p.evaluate(f, a);
-  const shot = async n => { await p.evaluate(() => window.__kota.step(1)); await p.screenshot({ path: `/workspace/work/shots/${n}.png` }); };
+  const shot = async n => { if (process.env.NOSHOT) return; await p.evaluate(() => window.__kota.step(1)); await p.screenshot({ path: `/workspace/work/shots/${n}.png` }); };
   const RENDER = !!process.env.RENDER;
   const step = (n = 3) => K(([n, r]) => window.__kota.step(n, 1 / 30, r), [n, RENDER]);
   const go = async (x, z, lv, yaw = 0) => { await K(([x, z, lv, yaw]) => { window.__kota.teleport(x, z, lv, yaw); window.__kota.step(3, 1 / 30, false); }, [x, z, lv, yaw]); };

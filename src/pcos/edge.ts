@@ -10,6 +10,7 @@ import type { Shell, TermIO } from './term';
 export interface Ace { seq: number; act: 'permit' | 'deny'; proto: 'ip' | 'icmp' | 'udp' | 'tcp'; src: string; sw: string; dst: string; dw: string; eq?: number; text: string }
 interface Iface { name: string; ip: string; mask: string; shut: boolean; nat: 'inside' | 'outside' | null; aclIn: number | null; desc: string; isp: 1 | 2 | 0 }
 interface Route { net: string; mask: string; nh: string; ad: number; track: number | null }
+interface Nat { acl: number | null; rmap: string | null; iface: string }
 export const EDGE = {
   host: 'R-EDGE',
   ifs: [
@@ -22,7 +23,10 @@ export const EDGE = {
   sla: new Map<number, { target: string; src: string; scheduled: boolean }>([[1, { target: '203.0.113.1', src: 'GigabitEthernet0/0', scheduled: true }]]),
   track: new Map<number, number>([[1, 1]]),
   acl: new Map<number, Ace[]>(),
-  nat: [{ acl: 1, iface: 'GigabitEthernet0/0' }, { acl: 1, iface: 'GigabitEthernet0/1' }] as { acl: number; iface: string }[],
+  // dual ISP: one NAT rule per exit interface. IOS keeps a single dynamic mapping per access list, so two ISPs need
+  // route-maps (match the inside list + the exit interface), as in Cisco's dual-ISP PAT examples.
+  nat: [{ acl: null, rmap: 'ISP1', iface: 'GigabitEthernet0/0' }, { acl: null, rmap: 'ISP2', iface: 'GigabitEthernet0/1' }] as Nat[],
+  rmaps: new Map<string, { acl: number | null; iface: string | null }>([['ISP1', { acl: 1, iface: 'GigabitEthernet0/0' }], ['ISP2', { acl: 1, iface: 'GigabitEthernet0/1' }]]),
   dirty: false,
 };
 const ip2n = (s: string) => parseIp(s) ?? -1;
@@ -54,6 +58,12 @@ export function aclMatch(l: Ace[] | undefined, src: string, dst: string, p: 'icm
   for (const a of l) { if (a.proto !== 'ip' && a.proto !== pr) continue; if (!wildMatch(src, a.src, a.sw) || !wildMatch(dst, a.dst, a.dw)) continue; if (a.eq !== undefined && a.eq !== port) continue; return a.act === 'permit'; }
   return false;
 }
+/** does this NAT rule translate src leaving through exit? (list N, or a route-map with match ip address / match interface) */
+function natMatch(n: Nat, src: string, exit: string) {
+  if (n.acl !== null) return aclPermit(n.acl, src, '0.0.0.0', 'icmp');
+  const rm = n.rmap ? EDGE.rmaps.get(n.rmap) : undefined;
+  return !!rm && (rm.acl === null || (EDGE.acl.get(rm.acl)?.length ?? 0) > 0 && aclPermit(rm.acl, src, '0.0.0.0', 'icmp')) && (rm.iface === null || rm.iface === exit);
+}
 const ifOf = (nh: string) => EDGE.ifs.find(f => { const m = parseMask(f.mask); return m !== null && networkOf(ip2n(f.ip), m) === networkOf(ip2n(nh), m); }) ?? null;
 const linkUp = (f: Iface) => !f.shut;
 function trackUp(id: number) { const s = EDGE.sla.get(EDGE.track.get(id) ?? -1); if (!s || !s.scheduled) return false; const f = EDGE.ifs.find(x => x.name === s.src) ?? ifOf(s.target); if (!f || !linkUp(f)) return false; const isp = f.isp ? EDGE.isp[f.isp] : null; return !!isp && isp.up && isp.gw === s.target; }
@@ -74,7 +84,7 @@ export function edgeCheck(src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80
   if (priv) {
     if (inside.nat !== 'inside') return { ok: false, why: 'ip nat inside belum di Gi0/2' };
     if (f.nat !== 'outside') return { ok: false, why: `ip nat outside belum di ${f.name}` };
-    const rule = EDGE.nat.find(n => n.iface === f.name && aclPermit(n.acl, src, '0.0.0.0', 'icmp'));
+    const rule = EDGE.nat.find(n => n.iface === f.name && natMatch(n, src, f.name));
     if (!rule) return { ok: false, why: `tidak ada aturan NAT overload untuk ${src} keluar ${f.name}` };
   }
   return { ok: true, why: `via ${f.name} (ISP${f.isp})` };
@@ -82,14 +92,14 @@ export function edgeCheck(src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80
 HOOKS.internet = (_env: Env, src: string, dst: string, p) => edgeCheck(src, dst, p).ok;
 
 // ---------------------------------------------------------------- IOS-like shell
-type Mode = 'user' | 'priv' | 'config' | 'if' | 'sla' | 'acl';
+type Mode = 'user' | 'priv' | 'config' | 'if' | 'sla' | 'acl' | 'rmap';
 const kw = (tok: string | undefined, word: string, min = 1) => !!tok && tok.length >= min && word.startsWith(tok.toLowerCase());
 function ifName(t: string): string | null { const m = /^(?:gigabitethernet|gi|g)(0\/[0-2])$/i.exec(t.replace(/\s+/g, '')); return m ? `GigabitEthernet${m[1]}` : null; }
 export class EdgeShell implements Shell {
-  private mode: Mode = 'user'; private cur: Iface | null = null; private slaId = 0; private aclId = 0; private started = false;
+  private mode: Mode = 'user'; private cur: Iface | null = null; private slaId = 0; private aclId = 0; private rmap = ''; private started = false;
   onCmd: (line: string) => void = () => {};
   banner() { return `\n${EDGE.host} con0 is now available\n\nPress RETURN to get started.\n`; }
-  prompt() { if (!this.started) return ''; const n = EDGE.host; return ({ user: `${n}>`, priv: `${n}#`, config: `${n}(config)#`, if: `${n}(config-if)#`, sla: `${n}(config-ip-sla-echo)#`, acl: `${n}(config-ext-nacl)#` } as Record<Mode, string>)[this.mode]; }
+  prompt() { if (!this.started) return ''; const n = EDGE.host; return ({ user: `${n}>`, priv: `${n}#`, config: `${n}(config)#`, if: `${n}(config-if)#`, sla: `${n}(config-ip-sla-echo)#`, acl: `${n}(config-ext-nacl)#`, rmap: `${n}(config-route-map)#` } as Record<Mode, string>)[this.mode]; }
   exec(line: string, _io: TermIO): string {
     if (!this.started) { this.started = true; return ''; }
     if (!line) return '';
@@ -99,7 +109,7 @@ export class EdgeShell implements Shell {
     const m = this.mode;
     if (kw(t[0], 'do', 2) && m !== 'user' && m !== 'priv') { const k = this.mode; this.mode = 'priv'; const r = this.run(t.slice(1)); this.mode = k; return r; }
     if (kw(t[0], 'end', 3) && m !== 'user' && m !== 'priv') { this.mode = 'priv'; return `%SYS-5-CONFIG_I: Configured from console by console`; }
-    if (kw(t[0], 'exit', 3)) { this.mode = m === 'if' || m === 'sla' || m === 'acl' ? 'config' : m === 'config' ? 'priv' : 'user'; return ''; }
+    if (kw(t[0], 'exit', 3)) { this.mode = m === 'if' || m === 'sla' || m === 'acl' || m === 'rmap' ? 'config' : m === 'config' ? 'priv' : 'user'; return ''; }
     if (m === 'user' || m === 'priv') {
       if (kw(t[0], 'enable', 2)) { this.mode = 'priv'; return ''; }
       if (kw(t[0], 'disable', 4)) { this.mode = 'user'; return ''; }
@@ -120,11 +130,26 @@ export class EdgeShell implements Shell {
         if (!ifOf(nh)) return `%Invalid next hop address (${nh} tidak ada di subnet interface mana pun)`;
         EDGE.routes = EDGE.routes.filter(r => !(r.net === net && r.mask === mask && r.nh === nh)); EDGE.routes.push({ net, mask, nh, ad, track }); EDGE.dirty = true; return '';
       }
-      if (kw(u[0], 'ip', 2) && kw(u[1], 'nat', 3) && kw(u[2], 'inside', 3) && kw(u[3], 'source', 3) && kw(u[4], 'list', 3)) {
-        const acl = +u[5]; const f = ifName(u.slice(7).filter(x => !kw(x, 'overload', 4)).join('')); if (!acl || !kw(u[6], 'interface', 3) || !f) return '% Usage: ip nat inside source list N interface Gi0/X overload';
-        if (no) { EDGE.nat = EDGE.nat.filter(r => !(r.acl === acl && r.iface === f)); EDGE.dirty = true; return ''; }
+      if (kw(u[0], 'ip', 2) && kw(u[1], 'nat', 3) && kw(u[2], 'inside', 3) && kw(u[3], 'source', 3) && (kw(u[4], 'list', 3) || kw(u[4], 'route-map', 3))) {
+        const byMap = kw(u[4], 'route-map', 3); const id = u[5] ?? '';
+        const f = ifName(u.slice(7).filter(x => !kw(x, 'overload', 4)).join(''));
+        if (!id || !kw(u[6], 'interface', 3) || !f) return byMap ? '% Usage: ip nat inside source route-map NAMA interface Gi0/X overload' : '% Usage: ip nat inside source list N interface Gi0/X overload';
+        const acl = byMap ? null : +id; if (!byMap && !acl) return '% Nomor access-list tidak valid';
+        const same = (r: Nat) => (byMap ? r.rmap === id : r.acl === acl);
+        if (no) { EDGE.nat = EDGE.nat.filter(r => !(same(r) && r.iface === f)); EDGE.dirty = true; return ''; }
         if (!u.some(x => kw(x, 'overload', 4))) return '% Tanpa overload hanya 1 alamat publik untuk 1 host: tambahkan "overload" (PAT)';
-        if (!EDGE.nat.some(r => r.acl === acl && r.iface === f)) EDGE.nat.push({ acl, iface: f }); EDGE.dirty = true; return '';
+        if (byMap && !EDGE.rmaps.has(id)) return `% route-map ${id} belum dibuat (route-map ${id} permit 10)`;
+        // IOS keeps one dynamic mapping per list: the same list on another interface replaces the old one
+        const old = EDGE.nat.find(r => same(r) && r.iface !== f);
+        EDGE.nat = EDGE.nat.filter(r => !same(r)); EDGE.nat.push({ acl, rmap: byMap ? id : null, iface: f }); EDGE.dirty = true;
+        return old && !byMap ? `% Catatan: pemetaan list ${acl} keluar ${old.iface} diganti ke ${f}. Satu access-list hanya punya satu pemetaan; untuk dua ISP pakai route-map per interface.` : '';
+      }
+      if (kw(u[0], 'route-map', 3)) {
+        const n = u[1]; if (!n) return '% Usage: route-map NAMA permit 10';
+        if (no) { EDGE.rmaps.delete(n); EDGE.dirty = true; return ''; }
+        if (u[2] && !kw(u[2], 'permit', 2)) return '% Simulator hanya mendukung route-map permit';
+        if (!EDGE.rmaps.has(n)) EDGE.rmaps.set(n, { acl: null, iface: null });
+        this.rmap = n; this.mode = 'rmap'; EDGE.dirty = true; return '';
       }
       if (kw(u[0], 'access-list', 3)) {
         const n = +u[1]; if (!(n >= 1 && n <= 199)) return '% Nomor ACL 1-99 (standard) atau 100-199 (extended)';
@@ -153,6 +178,13 @@ export class EdgeShell implements Shell {
       if (kw(u[0], 'frequency', 2) || kw(u[0], 'timeout', 2) || kw(u[0], 'threshold', 2)) return '';
       return `% Invalid input detected at '^' marker.`;
     }
+    if (m === 'rmap') {
+      const r = EDGE.rmaps.get(this.rmap)!;
+      if (kw(u[0], 'route-map', 3) || kw(u[0], 'interface', 3) || kw(u[0], 'ip', 2)) { this.mode = 'config'; return this.run(t); }
+      if (kw(u[0], 'match', 3) && kw(u[1], 'ip', 2) && kw(u[2], 'address', 3)) { if (no) { r.acl = null; EDGE.dirty = true; return ''; } const n = +u[3]; if (!n) return '% Usage: match ip address NOMOR-ACL'; r.acl = n; EDGE.dirty = true; return ''; }
+      if (kw(u[0], 'match', 3) && kw(u[1], 'interface', 3)) { if (no) { r.iface = null; EDGE.dirty = true; return ''; } const f = ifName(u.slice(2).join('')); if (!f) return '% Usage: match interface Gi0/X'; r.iface = f; EDGE.dirty = true; return ''; }
+      return "% Invalid input detected at '^' marker.";
+    }
     if (m === 'acl') {
       if (no && /^\d+$/.test(u[0] ?? '')) { const l = EDGE.acl.get(this.aclId) ?? []; EDGE.acl.set(this.aclId, l.filter(a => a.seq !== +u[0])); EDGE.dirty = true; return ''; }
       let seq: number | null = null; let rest = u; if (/^\d+$/.test(u[0] ?? '')) { seq = +u[0]; rest = u.slice(1); }
@@ -173,7 +205,8 @@ export class EdgeShell implements Shell {
     if (kw(t[0], 'ip', 2) && kw(t[1], 'interface', 2)) return 'Interface              IP-Address      OK? Method Status                Protocol\n' + EDGE.ifs.map(f => `${f.name.padEnd(23)}${f.ip.padEnd(16)}YES manual ${(f.shut ? 'administratively down' : 'up').padEnd(22)}${f.shut ? 'down' : 'up'}`).join('\n');
     if (kw(t[0], 'ip', 2) && kw(t[1], 'route', 2)) { const a = activeRoute(); return 'Codes: C - connected, S - static, * - candidate default\nGateway of last resort is ' + (a ? `${a.nh} to network 0.0.0.0` : 'not set') + '\n\n' + (a ? `S*    0.0.0.0/0 [${a.ad}/0] via ${a.nh}\n` : '') + EDGE.ifs.filter(f => !f.shut).map(f => `C     ${(() => { const p = parseMask(f.mask)!; const n = networkOf(ip2n(f.ip), p) >>> 0; return `${[n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.')}/${p}`; })()} is directly connected, ${f.name}`).join('\n') + '\nS     192.168.0.0/16 [1/0] via 10.255.0.2\nS     172.16.0.0/22 [1/0] via 10.255.0.2'; }
     if (kw(t[0], 'ip', 2) && kw(t[1], 'nat', 2) && kw(t[2], 'translations', 2)) { const r = edgeCheck('192.168.20.101', '103.10.20.30'); if (!r.ok) return 'Pro Inside global      Inside local       Outside local      Outside global'; const f = ifOf(activeRoute()!.nh)!; return `Pro Inside global      Inside local       Outside local      Outside global\ntcp ${f.ip}:51022  192.168.20.101:51022 103.10.20.30:80   103.10.20.30:80\nudp ${f.ip}:1031   192.168.10.5:1031  8.8.8.8:53         8.8.8.8:53\nicmp ${f.ip}:1     192.168.10.130:1   103.10.20.30:1     103.10.20.30:1`; }
-    if (kw(t[0], 'ip', 2) && kw(t[1], 'nat', 2)) return `Outside interfaces:\n  ${EDGE.ifs.filter(f => f.nat === 'outside').map(f => f.name).join(', ') || '-'}\nInside interfaces:\n  ${EDGE.ifs.filter(f => f.nat === 'inside').map(f => f.name).join(', ') || '-'}\nDynamic mappings:\n${EDGE.nat.map(n => `-- Inside Source\n[Id: ${n.acl}] access-list ${n.acl} interface ${n.iface} refcount 3`).join('\n') || '  (tidak ada)'}`;
+    if (kw(t[0], 'ip', 2) && kw(t[1], 'nat', 2)) return `Outside interfaces:\n  ${EDGE.ifs.filter(f => f.nat === 'outside').map(f => f.name).join(', ') || '-'}\nInside interfaces:\n  ${EDGE.ifs.filter(f => f.nat === 'inside').map(f => f.name).join(', ') || '-'}\nDynamic mappings:\n${EDGE.nat.map((n, i) => `-- Inside Source\n[Id: ${i + 1}] ${n.rmap ? `route-map ${n.rmap}` : `access-list ${n.acl}`} interface ${n.iface} refcount 3`).join('\n') || '  (tidak ada)'}`;
+    if (kw(t[0], 'route-map', 3)) return [...EDGE.rmaps].map(([n, r]) => `route-map ${n}, permit, sequence 10\n  Match clauses:\n${r.acl !== null ? `    ip address (access-lists): ${r.acl}\n` : ''}${r.iface ? `    interface ${r.iface}\n` : ''}  Set clauses:\n  Policy routing matches: 0 packets, 0 bytes`).join('\n') || '% Belum ada route-map';
     if (kw(t[0], 'track', 2)) return [...EDGE.track].map(([n, s]) => `Track ${n}\n  IP SLA ${s} reachability\n  Reachability is ${trackUp(n) ? 'Up' : 'Down'}`).join('\n') || '% Belum ada track';
     if (kw(t[0], 'ip', 2) && kw(t[1], 'sla', 2)) return 'IPSLAs Latest Operation Summary\nID   Type        Destination      State       Return code\n' + [...EDGE.sla].map(([n, s]) => `${String(n).padEnd(5)}icmp-echo   ${(s.target || '-').padEnd(17)}${(s.scheduled ? 'Active' : 'Pending').padEnd(12)}${s.scheduled && s.target ? (trackUpRaw(s) ? 'OK' : 'Timeout') : '-'}`).join('\n');
     if (kw(t[0], 'access-lists', 3)) return [...EDGE.acl].map(([n, l]) => `${n < 100 ? 'Standard' : 'Extended'} IP access list ${n}\n${l.map(a => `    ${a.seq} ${a.text}`).join('\n')}`).join('\n') || '';
@@ -182,7 +215,8 @@ export class EdgeShell implements Shell {
       for (const [n, sl] of EDGE.sla) s += `ip sla ${n}\n icmp-echo ${sl.target} source-interface ${sl.src}\n${sl.scheduled ? `ip sla schedule ${n} life forever start-time now\n` : ''}`;
       for (const [n, sl] of EDGE.track) s += `track ${n} ip sla ${sl} reachability\n`;
       for (const f of EDGE.ifs) s += `!\ninterface ${f.name}\n description ${f.desc}\n ip address ${f.ip} ${f.mask}\n${f.nat ? ` ip nat ${f.nat}\n` : ''}${f.aclIn ? ` ip access-group ${f.aclIn} in\n` : ''}${f.shut ? ' shutdown\n' : ''}`;
-      s += '!\n' + EDGE.nat.map(n => `ip nat inside source list ${n.acl} interface ${n.iface} overload\n`).join('');
+      s += '!\n' + EDGE.nat.map(n => `ip nat inside source ${n.rmap ? `route-map ${n.rmap}` : `list ${n.acl}`} interface ${n.iface} overload\n`).join('');
+      for (const [n, r] of EDGE.rmaps) s += `!\nroute-map ${n} permit 10\n${r.acl !== null ? ` match ip address ${r.acl}\n` : ''}${r.iface ? ` match interface ${r.iface}\n` : ''}`;
       s += EDGE.routes.map(r => `ip route ${r.net} ${r.mask} ${r.nh}${r.ad !== 1 ? ` ${r.ad}` : ''}${r.track ? ` track ${r.track}` : ''}\n`).join('') + 'ip route 192.168.0.0 255.255.0.0 10.255.0.2\nip route 172.16.0.0 255.255.252.0 10.255.0.2\n!\n';
       for (const [n, l] of EDGE.acl) s += l.map(a => `access-list ${n} ${a.text}\n`).join('');
       return s + '!\nend';
@@ -204,7 +238,7 @@ EXT.isp1 = {
     const v = ['track', 'backup', 'nat'][Math.floor(Math.random() * 3)];
     if (v === 'track') { EDGE.routes.forEach(r => { if (r.nh === '203.0.113.1') r.track = null; }); return 'ISP1 (NusaNet) putus di sisi ISP; route default utama tidak memakai "track 1" sehingga tetap aktif dan semua lalu lintas dibuang ke ISP1 → ip route 0.0.0.0 0.0.0.0 203.0.113.1 track 1'; }
     if (v === 'backup') { EDGE.routes = EDGE.routes.filter(r => r.nh !== '198.51.100.1'); return 'ISP1 putus; route cadangan ke ISP2 terhapus → ip route 0.0.0.0 0.0.0.0 198.51.100.1 10'; }
-    EDGE.nat = EDGE.nat.filter(n => n.iface !== 'GigabitEthernet0/1'); return 'ISP1 putus; failover pindah ke ISP2 tapi tidak ada NAT overload keluar Gi0/1 → ip nat inside source list 1 interface Gi0/1 overload';
+    EDGE.nat = EDGE.nat.filter(n => n.iface !== 'GigabitEthernet0/1'); return 'ISP1 putus; failover pindah ke ISP2 tapi aturan NAT keluar Gi0/1 hilang → ip nat inside source route-map ISP2 interface Gi0/1 overload (route-map ISP2: match ip address 1, match interface Gi0/1)';
   },
   ok: pc => !EDGE.isp[1].up && pcOk(pc) && activeRoute()?.nh === '198.51.100.1',
   restore: () => { EDGE.isp[1].up = true; },
@@ -240,12 +274,12 @@ EXT_C.failover = {
   brief: ['Jalur ISP2 (CepatLink, 198.51.100.0/30 di Gi0/1) baru dipasang teknisi ISP. R-EDGE belum memakai jalur itu: kalau ISP1 putus, seluruh gedung mati internet.',
     'Konfigurasi failover standar Cisco: ip sla 1 › icmp-echo 203.0.113.1 source-interface Gi0/0, lalu ip sla schedule 1 life forever start-time now, lalu track 1 ip sla 1 reachability.',
     'Route utama memakai track: ip route 0.0.0.0 0.0.0.0 203.0.113.1 track 1. Route cadangan dengan AD lebih besar (floating static): ip route 0.0.0.0 0.0.0.0 198.51.100.1 10.',
-    'Setelah pindah ke ISP2, alamat dalam harus di-NAT keluar Gi0/1: ip nat inside source list 1 interface Gi0/1 overload. Cek dengan show ip route, show track, show ip nat translations, lalu write memory.'],
+    'Setelah pindah ke ISP2, alamat dalam harus di-NAT keluar Gi0/1. Satu access-list hanya boleh punya satu pemetaan NAT, jadi pakai route-map: route-map ISP2 permit 10 › match ip address 1 › match interface Gi0/1, lalu ip nat inside source route-map ISP2 interface Gi0/1 overload. Cek dengan show route-map, show ip nat translations, lalu write memory.'],
   pick: pcs => pcs.filter(anyWired).slice(0, 2),
   setup() {
     EDGE.sla.clear(); EDGE.track.clear();
     EDGE.routes = EDGE.routes.filter(r => r.nh !== '198.51.100.1'); EDGE.routes.forEach(r => { if (r.nh === '203.0.113.1') r.track = null; });
-    EDGE.nat = EDGE.nat.filter(n => n.iface !== 'GigabitEthernet0/1');
+    EDGE.nat = EDGE.nat.filter(n => n.iface !== 'GigabitEthernet0/1'); EDGE.rmaps.delete('ISP2');
     return ['R-EDGE (ruang server rak 1): ISP2 di Gi0/1 sudah up, belum dipakai sebagai cadangan.', 'Pasang IP SLA + track ke 203.0.113.1, route utama ber-track, floating static ke 198.51.100.1 AD 10, NAT overload keluar Gi0/1. Simpan konfigurasi.', 'Penguji: saat ISP1 diputus, {PCS} tetap bisa internet lewat ISP2.'];
   },
   ok: pc => pcOk(pc) && failoverWorks(pc),

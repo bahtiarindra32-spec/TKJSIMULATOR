@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage', '--no-sandbox'] });
+const p = await b.newPage({ viewport: { width: +(process.env.W||1280), height: +(process.env.H||800) } });
+p.on('crash', () => console.log('CRASH')); p.on('pageerror', e => console.log('ERR', e.message));
+p.on('console', m => console.log('con', m.type(), m.text().slice(0,150)));
+const t0=Date.now();
+await p.goto('http://127.0.0.1:8787/'+(process.env.Q||''), { waitUntil: 'commit', timeout: 60000 });
+await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 }).catch(e=>console.log('wf', e.message.slice(0,100)));
+console.log('loaded', Date.now()-t0);
+await p.waitForTimeout(3000);
+console.log(await p.evaluate(()=>JSON.stringify(window.__kota.stats())).catch(e=>e.message));
+await b.close();
