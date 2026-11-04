@@ -1,7 +1,7 @@
 // Title screen, pause menu, settings / controls / about panels, fade + loading. DOM only, system fonts,
 // inline SVG art (no external resources). main.ts owns the game state; this module only renders and calls back.
 import './menu.css';
-import { aiCfg, saveAiCfg, DEFAULT_MODEL, chat, aiStats } from '../ai/nusa';
+import { aiCfg, saveAiCfg, DEFAULT_MODEL, DEFAULT_LOCAL_URL, DEFAULT_LOCAL_MODEL, chat, aiStats, aiLabel, isLoopback } from '../ai/nusa';
 
 export type QChoice = 'otomatis' | 'tinggi' | 'sedang' | 'rendah' | 'hemat';
 export interface Settings { quality: QChoice; sens: number; volume: number; invertY: boolean; third: boolean; autoTime: boolean; textSize: 'm' | 'l' | 'xl'; colorBlind: boolean;
@@ -141,19 +141,35 @@ export class Menu {
       body.appendChild(el('h4', '', 'Pak Nusa (mentor AI)'));
       row('Aktifkan AI', seg([['1', 'Aktif'], ['0', 'Mati (offline)']], () => (aiCfg.enabled ? '1' : '0'), v => { aiCfg.enabled = v === '1'; saveAiCfg(); }, 'ai'), 'Tanpa AI, Pak Nusa menjawab dari petunjuk offline');
       const txt = (val: () => string, set: (v: string) => void, name: string, ph: string, secret = false) => { const i = el('input', 'pn-text') as HTMLInputElement; i.type = secret ? 'password' : 'text'; i.name = name; i.id = name; i.placeholder = ph; i.value = val(); i.autocomplete = 'off'; i.spellcheck = false; i.addEventListener('change', () => { set(i.value.trim()); saveAiCfg(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
-      row('API key OpenRouter', txt(() => aiCfg.key, v => (aiCfg.key = v), 'aiKey', 'sk-or-v1-…', true), 'Disimpan hanya di browser ini, tidak ikut ke server mana pun selain OpenRouter');
-      row('Izin kirim data ke OpenRouter', seg([['0', 'Belum'], ['1', 'Setuju']], () => (aiCfg.consent ? '1' : '0'), v => { aiCfg.consent = v === '1'; saveAiCfg(); }, 'aiConsent'), 'Yang dikirim: pertanyaanmu, teks surat kerja/jobsheet, dan konfigurasi IP simulasi. Nama siswa dan nilai tidak dikirim. Tanpa izin, Pak Nusa memakai petunjuk offline.');
-      row('Simpan API key', seg([['1', 'Di perangkat ini'], ['0', 'Sesi ini saja']], () => (aiCfg.remember ? '1' : '0'), v => { aiCfg.remember = v === '1'; saveAiCfg(); }, 'aiRemember'), 'Komputer lab bersama: pilih “Sesi ini saja”, key hilang saat tab ditutup');
-      row('Model', txt(() => aiCfg.model, v => (aiCfg.model = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'openrouter/free = OpenRouter memilih model gratis yang sedang tersedia');
+      const local = aiCfg.provider === 'local';
+      const rerender = () => { const sc = host.querySelector('.pn-body')?.scrollTop ?? 0; this.showPanel(host, 'settings'); const nb = host.querySelector('.pn-body'); if (nb) nb.scrollTop = sc; (host.querySelector(`#aiProv-${aiCfg.provider}`) as HTMLElement | null)?.focus({ preventScroll: true }); };
+      row('Penyedia AI', seg([['openrouter', 'OpenRouter (internet)'], ['local', 'Lokal (Ollama/LM Studio)']], () => aiCfg.provider, v => { aiCfg.provider = v === 'local' ? 'local' : 'openrouter'; saveAiCfg(); rerender(); }, 'aiProv'),
+        local ? 'Server AI kompatibel OpenAI di laptop/jaringan lab. Tanpa API key, tetap jalan tanpa internet.' : 'Perlu API key OpenRouter milikmu sendiri dan internet');
+      if (local) {
+        row('Alamat server lokal', txt(() => aiCfg.baseUrl, v => { aiCfg.baseUrl = v || DEFAULT_LOCAL_URL; if (consentHint) consentHint.textContent = consentText(); }, 'aiBaseUrl', DEFAULT_LOCAL_URL), 'Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1. Izinkan CORS (Ollama: OLLAMA_ORIGINS=*, LM Studio: Enable CORS).');
+        row('Model lokal', txt(() => aiCfg.localModel, v => (aiCfg.localModel = v || DEFAULT_LOCAL_MODEL), 'aiLocalModel', DEFAULT_LOCAL_MODEL), 'Nama model yang sudah diunduh, mis. qwen2.5:3b (ollama pull qwen2.5:3b)');
+      } else {
+        row('API key OpenRouter', txt(() => aiCfg.key, v => (aiCfg.key = v), 'aiKey', 'sk-or-v1-…', true), 'Disimpan hanya di browser ini, tidak ikut ke server mana pun selain OpenRouter');
+      }
+      const consentText = () => `Yang dikirim: pertanyaanmu, teks surat kerja/jobsheet, dan konfigurasi IP simulasi. Nama siswa dan nilai tidak dikirim. ${local ? (isLoopback(aiCfg.baseUrl) ? 'Server ini ada di komputer ini (localhost): data tetap di komputer ini, tidak ke internet.' : 'Data dikirim ke alamat server di atas (bukan komputer ini), misalnya laptop guru di jaringan lab.') : 'Data dikirim lewat internet ke OpenRouter dan penyedia modelnya.'} Tanpa izin, Pak Nusa memakai petunjuk offline.`;
+      row(local ? 'Izin kirim data ke server AI lokal' : 'Izin kirim data ke OpenRouter', seg([['0', 'Belum'], ['1', 'Setuju']], () => (aiCfg.consent ? '1' : '0'), v => { aiCfg.consent = v === '1'; saveAiCfg(); }, 'aiConsent'), consentText());
+      const consentHint = body.lastElementChild?.querySelector('small') ?? null;
+      if (!local) {
+        row('Simpan API key', seg([['1', 'Di perangkat ini'], ['0', 'Sesi ini saja']], () => (aiCfg.remember ? '1' : '0'), v => { aiCfg.remember = v === '1'; saveAiCfg(); }, 'aiRemember'), 'Komputer lab bersama: pilih “Sesi ini saja”, key hilang saat tab ditutup');
+        row('Model', txt(() => aiCfg.orModel, v => (aiCfg.orModel = v || DEFAULT_MODEL), 'aiModel', DEFAULT_MODEL), 'openrouter/free = OpenRouter memilih model gratis yang sedang tersedia');
+      }
       { const w = el('div', 'pn-seg pn-ai'); const b = el('button', 'seg on', 'Tes koneksi AI') as HTMLButtonElement; b.type = 'button'; b.name = 'aiTest'; const o = el('output', '', aiStats.last ? (aiStats.last === 'ok' ? 'Terakhir: tersambung' : `Terakhir gagal: ${aiStats.last.slice(0, 60)}`) : 'Belum dites');
         b.addEventListener('click', async () => {
+          // inputs save on "change"; pick up a value still being typed
+          for (const i of host.querySelectorAll<HTMLInputElement>('#aiKey, #aiBaseUrl, #aiLocalModel, #aiModel')) i.dispatchEvent(new Event('change'));
           saveAiCfg();
+          const loc = aiCfg.provider === 'local';
           if (!aiCfg.enabled) { o.textContent = 'AI dimatikan: Pak Nusa memakai petunjuk offline.'; return; }
-          if (aiCfg.key.trim().length < 10) { o.textContent = 'Isi API key OpenRouter dulu. Tanpa key, Pak Nusa tetap jalan dengan petunjuk offline.'; return; }
+          if (!loc && aiCfg.key.trim().length < 10) { o.textContent = 'Isi API key OpenRouter dulu, atau pilih penyedia Lokal. Tanpa AI, Pak Nusa tetap jalan dengan petunjuk offline.'; return; }
           if (!aiCfg.consent) { o.textContent = 'Pilih “Setuju” di Izin kirim data dulu. Tanpa izin, tidak ada data yang dikirim.'; return; }
-          b.disabled = true; o.textContent = 'Menghubungi OpenRouter…';
-          try { const t = await chat([{ role: 'user', content: 'Jawab satu kata: siap' }], { maxTokens: 10, timeoutMs: 15000 }); o.textContent = `Tersambung (${aiStats.lastModel ?? aiCfg.model}): “${t.slice(0, 30)}”`; }
-          catch (e) { o.textContent = `Gagal: ${String((e as Error).message ?? e).slice(0, 80)}. Pak Nusa memakai petunjuk offline.`; }
+          b.disabled = true; o.textContent = loc ? `Menghubungi server lokal ${aiCfg.baseUrl}…` : 'Menghubungi OpenRouter…';
+          try { const t = await chat([{ role: 'user', content: 'Jawab satu kata: siap' }], { maxTokens: 10, timeoutMs: 15000 }); o.textContent = `Tersambung (${loc ? 'Lokal' : 'OpenRouter'} · ${aiStats.lastModel ?? aiLabel()}): “${t.slice(0, 30)}”`; }
+          catch (e) { o.textContent = `Gagal: ${String((e as Error).message ?? e).slice(0, 80)}.${loc ? ' Cek: server jalan (ollama serve), model sudah diunduh, CORS diizinkan.' : ''} Pak Nusa memakai petunjuk offline.`; }
           finally { b.disabled = false; }
         });
         w.append(b, o); row('Status AI', w); }
@@ -165,7 +181,7 @@ export class Menu {
         <p>Kotanya fiktif bergaya Jakarta: simpang Sudirman–Thamrin, perkantoran, ruko, masjid, taman, lapangan, SMK Nusantara, dan kampung bergang yang bisa dijelajahi jalan kaki atau naik motor matic.</p>
         <h4>Privasi &amp; transparansi AI</h4>
         <p>Game ini tidak memakai akun, iklan, cookie pelacak, maupun analitik. Progres, pengaturan, dan catatan tiket hanya disimpan di <i>localStorage</i> browser kamu.</p>
-        <p>Fitur AI (Pak Nusa, kalimat keluhan pelanggan, umpan balik catatan tiket) hanya aktif kalau kamu mengisi API key OpenRouter sendiri. Yang dikirim ke OpenRouter: data simulasi game (tiket, konfigurasi IP simulasi, log langkahmu) dan teks yang kamu ketik. Setiap jawaban AI diberi label <b>AI</b> dan bisa keliru, jadi selalu buktikan di perangkat. Tanpa key atau internet, semuanya tetap jalan dengan petunjuk offline.</p>
+        <p>Fitur AI (Pak Nusa, kalimat keluhan pelanggan, umpan balik catatan tiket) hanya aktif kalau kamu memberi izin dan memilih penyedia: OpenRouter (API key milikmu sendiri, lewat internet) atau server AI lokal kompatibel OpenAI seperti Ollama/LM Studio (tanpa key, tanpa internet). Yang dikirim ke penyedia itu: data simulasi game (tiket, konfigurasi IP simulasi, log langkahmu) dan teks yang kamu ketik. Setiap jawaban AI diberi label <b>AI</b> dan bisa keliru, jadi selalu buktikan di perangkat. Tanpa AI, semuanya tetap jalan dengan petunjuk offline. Ringkasan AI di rekap kelas guru hanya mengirim angka per langkah, tanpa nama siswa.</p>
         <p>Hemat sumber daya: satu file HTML, bisa jalan offline, tanpa aset luar; kalau FPS turun, game hanya menurunkan resolusi render.</p>
         <p class="pn-dim">Dibangun dengan Three.js · seluruh grafis prosedural, tanpa aset luar · Versi ${h.build}</p>`));
     }

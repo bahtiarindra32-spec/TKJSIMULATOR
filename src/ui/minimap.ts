@@ -8,7 +8,7 @@ export class Minimap {
   el: HTMLDivElement; cv: HTMLCanvasElement; base: HTMLCanvasElement; big = false;
   constructor() {
     this.el = document.createElement('div'); this.el.id = 'minimap';
-    this.el.innerHTML = '<canvas width="400" height="300"></canvas><div class="mm-legend"><span class="mm-me"></span> Kamu <span class="mm-tg"></span> Tujuan misi · <b>M</b> peta besar</div>';
+    this.el.innerHTML = '<canvas width="400" height="300"></canvas><div class="mm-legend"><span class="mm-me"></span> Kamu <span class="mm-tg"></span> Tujuan · <b>M</b> peta</div>';
     this.cv = this.el.querySelector('canvas')!;
     document.body.appendChild(this.el);
     this.el.addEventListener('click', () => this.toggle());

@@ -336,7 +336,8 @@ body.cb .jobsheet .js-c li.ok i { background: #3b82f6; border-color: #1d4ed8; }
 .demo-bar p { margin: 0 0 10px; color: var(--k-tx2, #c5cad0); }
 .demo-bar .db-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .demo-bar.min p, .demo-bar.min .db-row, .demo-bar.min .db-t { display: none; }
-body:has(.noc-modal) .demo-bar { z-index: 960; top: 10px; bottom: auto; left: auto; right: 10px; transform: none; width: min(340px, 40vw); padding: 6px 10px 8px; }
+body:has(.noc-modal) .demo-bar { z-index: 960; top: auto; bottom: 10px; left: 10px; right: auto; transform: none; width: min(300px, calc(50vw - 300px)); min-width: 200px; padding: 6px 10px 8px; }
+body:has(.noc-modal) .demo-bar .db-t { font-size: 13px; margin: 4px 0; }
 body:has(.noc-modal) .demo-bar p { display: none; }
 body:has(.noc-modal) .demo-bar .db-t { font-size: 13px; margin: 4px 0 6px; }
 body.touch .demo-bar { bottom: auto; top: calc(98px + env(safe-area-inset-top)); font-size: 12px; padding: 8px 10px; }
@@ -345,3 +346,11 @@ body.touch.demo #noc-hud, body.touch.demo .jobsheet { top: calc(230px + env(safe
 .demo-bar .db-row button { font: 600 12.5px/1 var(--k-ui, system-ui); padding: 7px 12px; border-radius: 4px; border: 1px solid var(--k-line2, #3a3f46); background: #22262c; color: var(--k-tx, #eef0f2); cursor: pointer; }
 .demo-bar .db-row button.pri { background: var(--k-acc, #f2c230); border-color: var(--k-acc, #f2c230); color: #111; }
 .demo-bar .db-row button:focus-visible { outline: 2px solid var(--k-acc, #f2c230); outline-offset: 2px; }
+
+/* Modals never run off a short screen (1280x720 and smaller): the box scrolls, its action row stays reachable. */
+.noc-modal .noc-box { max-height: calc(100dvh - 24px); overflow: auto; }
+.noc-modal .noc-box > .row:last-child { position: sticky; bottom: -20px; margin-bottom: -20px; padding: 10px 0 20px; background: var(--k-p); }
+/* Phone: a toast must not sit on the jobsheet header; drop it above the touch controls instead. */
+@media (max-width: 560px) { body:has(.jobsheet) #toast { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); } }
+/* the walk hint line wraps instead of running off narrow windows */
+#hints { white-space: normal; text-align: center; max-width: min(92vw, 760px); width: max-content; }

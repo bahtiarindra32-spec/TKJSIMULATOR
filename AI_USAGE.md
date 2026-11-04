@@ -7,7 +7,7 @@ Dokumen ini menjelaskan dengan terbuka di mana AI dipakai: saat **membangun** ga
 - Game ini dikembangkan oleh Indra Bachtiar Zakaria dengan bantuan agen AI (Hark) yang menulis sebagian besar kode TypeScript/Three.js berdasarkan arahan.
 - Peran pengembang: menentukan ide dan tujuan (simulator TKJ untuk siswa SMK), memilih dan menolak fitur, menetapkan aturan desain (setiap mekanik harus sesuai standar nyata, tanpa kuis, tanpa tombol ajaib), mencoba game, dan memberi koreksi tiap versi.
 - Peran AI: menulis dan merapikan kode, menulis tes otomatis (Vitest, Playwright), meriset standar (T568B, perintah Cisco IOS, Capaian Pembelajaran TKJ, instrumen UKK), dan mereview game dari sudut juri, guru, dan pemain.
-- Riwayat permintaan awal ada di `design/request.md`; riwayat perubahan di `CHANGELOG.md` dan riwayat git.
+- Brief proyek ada di `design/brief.md`. Permintaan awal ke agen AI (27 Okt 2026) adalah membangun dunia kota dari dokumen rancangan milik pengembang (`design/source-pascal-prompt.md`), dengan brainstorm, rencana, dan target bertahap. Riwayat perubahan di `CHANGELOG.md` dan riwayat git.
 - Semua kode diuji: `tsc --noEmit`, unit test Vitest, dan playtest otomatis di browser sebelum dipublikasikan.
 
 ## 2. AI di dalam game

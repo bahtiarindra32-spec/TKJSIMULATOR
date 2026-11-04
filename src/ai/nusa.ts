@@ -1,62 +1,135 @@
-// Pak Nusa: the in-game AI mentor (OpenRouter chat completions) with an offline fallback.
+// Pak Nusa: the in-game AI mentor with an offline fallback. Provider: OpenRouter (internet, the player's own key) or a
+// local OpenAI-compatible server (Ollama / LM Studio on the school laptop, no key, works without internet). Same /chat/completions format.
 // Privacy: only simulated game state is ever sent (job text, simulated IP config, the player's own questions/notes).
+// Never sent: the player's name (kept in the game settings), XP, scores/grades. This file does not import the settings at all (checked in tests/nusa.test.ts).
 // The API key lives only in this browser's localStorage, never in the build or the repository.
 // Every AI answer is labelled as AI in the UI; when there is no key / no internet the offline rule engine answers instead.
 
-export interface AiConfig { key: string; model: string; enabled: boolean;
-  /** the player (or teacher) agreed that questions + simulated game state go to OpenRouter (off until they say yes) */
+export type AiProvider = 'openrouter' | 'local';
+export interface AiConfig { key: string; enabled: boolean;
+  /** where requests go: OpenRouter (internet, needs a key) or a local OpenAI-compatible server (Ollama / LM Studio, no key) */
+  provider: AiProvider;
+  /** OpenRouter model id */
+  orModel: string;
+  /** local server base URL, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio) */
+  baseUrl: string;
+  /** model name on the local server, e.g. qwen2.5:3b */
+  localModel: string;
+  /** per-provider consent: agreeing to OpenRouter does not imply agreeing to a local server and vice versa */
+  orConsent: boolean; localConsent: boolean;
+  /** the player (or teacher) agreed that questions + simulated game state go to the active provider (off until they say yes) */
   consent: boolean;
+  /** display label of the live provider + model ("OpenRouter · openrouter/free", "Lokal · qwen2.5:3b"); setting it sets the active provider's model */
+  model: string;
   /** keep the key on this device; false = only for this browser session (sessionStorage) */
   remember: boolean }
 const KEY = 'kotaNusantara.ai.v1';
 /** OpenRouter's free router picks whichever free model is up (single free model ids get retired often) */
 export const DEFAULT_MODEL = 'openrouter/free';
+export const DEFAULT_LOCAL_URL = 'http://localhost:11434/v1';
+export const DEFAULT_LOCAL_MODEL = 'qwen2.5:3b';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const RETIRED = ['meta-llama/llama-3.3-70b-instruct:free'];
-export const aiCfg: AiConfig = { key: '', model: DEFAULT_MODEL, enabled: true, consent: false, remember: true };
+const PROVIDER_NAME: Record<AiProvider, string> = { openrouter: 'OpenRouter', local: 'Lokal' };
+export const aiCfg: AiConfig = {
+  key: '', enabled: true, provider: 'openrouter', orModel: DEFAULT_MODEL, baseUrl: DEFAULT_LOCAL_URL, localModel: DEFAULT_LOCAL_MODEL, orConsent: false, localConsent: false, remember: true,
+  get consent() { return this.provider === 'local' ? this.localConsent : this.orConsent; },
+  set consent(v: boolean) { if (this.provider === 'local') this.localConsent = !!v; else this.orConsent = !!v; },
+  get model() { return `${PROVIDER_NAME[this.provider]} · ${activeModel(this)}`; },
+  set model(v: string) { const m = String(v ?? '').replace(/^(OpenRouter|Lokal) · /, '').trim(); if (this.provider === 'local') this.localModel = m || DEFAULT_LOCAL_MODEL; else this.orModel = m || DEFAULT_MODEL; },
+};
+/** the model id actually sent in the request */
+export function activeModel(c: Pick<AiConfig, 'provider' | 'orModel' | 'localModel'> = aiCfg) { return c.provider === 'local' ? (c.localModel.trim() || DEFAULT_LOCAL_MODEL) : (c.orModel.trim() || DEFAULT_MODEL); }
+/** /chat/completions URL for a provider; a local base URL is normalised (scheme added, trailing slash or a pasted /chat/completions dropped, /v1 added when no path) */
+export function chatUrl(provider: AiProvider, baseUrl = ''): string {
+  if (provider !== 'local') return OPENROUTER_URL;
+  let u = baseUrl.trim() || DEFAULT_LOCAL_URL;
+  if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
+  u = u.replace(/\/+$/, '').replace(/\/chat\/completions$/i, '').replace(/\/+$/, '');
+  if (!/^https?:\/\/[^/]+\/./i.test(u)) u += '/v1';
+  return `${u}/chat/completions`;
+}
+/** true when the local server is this computer (data never leaves it) */
+export function isLoopback(baseUrl: string) { try { const h = new URL(chatUrl('local', baseUrl)).hostname.replace(/^\[|\]$/g, ''); return h === 'localhost' || h === '::1' || /^127\./.test(h); } catch { return false; } }
+/** e.g. "OpenRouter · openrouter/free" or "Lokal · qwen2.5:3b" */
+export const aiLabel = () => aiCfg.model;
 const SKEY = 'kotaNusantara.ai.key';
-try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { if (typeof o.key === 'string') aiCfg.key = o.key; if (typeof o.model === 'string' && o.model.trim()) aiCfg.model = RETIRED.includes(o.model.trim()) ? DEFAULT_MODEL : o.model.trim(); if (typeof o.enabled === 'boolean') aiCfg.enabled = o.enabled; } } catch { /* ignore */ }
-try { const o = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (o && typeof o === 'object') { aiCfg.consent = o.consent === true || (o.consent === undefined && typeof o.key === 'string' && o.key.length > 10); if (o.remember === false) aiCfg.remember = false; } const sk = sessionStorage.getItem(SKEY); if (!aiCfg.key && sk) aiCfg.key = sk; } catch { /* ignore */ }
+try {
+  const o = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+  if (o && typeof o === 'object') {
+    if (typeof o.key === 'string') aiCfg.key = o.key;
+    const om = typeof o.orModel === 'string' ? o.orModel : o.model;   // v1 saves kept the OpenRouter model in "model"
+    if (typeof om === 'string' && om.trim()) aiCfg.orModel = RETIRED.includes(om.trim()) ? DEFAULT_MODEL : om.trim();
+    if (typeof o.enabled === 'boolean') aiCfg.enabled = o.enabled;
+    if (o.provider === 'local' || o.provider === 'openrouter') aiCfg.provider = o.provider;
+    if (typeof o.baseUrl === 'string' && o.baseUrl.trim()) aiCfg.baseUrl = o.baseUrl.trim();
+    if (typeof o.localModel === 'string' && o.localModel.trim()) aiCfg.localModel = o.localModel.trim();
+    const oc = o.orConsent ?? o.consent;   // v1 had one consent, which was for OpenRouter
+    aiCfg.orConsent = oc === true || (oc === undefined && typeof o.key === 'string' && o.key.length > 10);
+    aiCfg.localConsent = o.localConsent === true;
+    if (o.remember === false) aiCfg.remember = false;
+  }
+  const sk = sessionStorage.getItem(SKEY); if (!aiCfg.key && sk) aiCfg.key = sk;
+} catch { /* ignore */ }
 export function saveAiCfg() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(aiCfg.remember ? aiCfg : { ...aiCfg, key: '' }));
-    if (aiCfg.remember) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, aiCfg.key);
+    const c = aiCfg;
+    const o = { key: c.remember ? c.key : '', model: c.orModel, orModel: c.orModel, enabled: c.enabled, consent: c.orConsent, orConsent: c.orConsent, localConsent: c.localConsent, remember: c.remember, provider: c.provider, baseUrl: c.baseUrl, localModel: c.localModel };
+    localStorage.setItem(KEY, JSON.stringify(o));
+    if (c.remember) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, c.key);
   } catch { /* ignore */ }
 }
-export const aiReady = () => aiCfg.enabled && aiCfg.consent && aiCfg.key.trim().length > 10 && navigator.onLine !== false;
+const isLocal = () => aiCfg.provider === 'local';
+/** a local server needs no key and no internet (offline final on the school laptop); OpenRouter needs both */
+export const aiReady = () => aiCfg.enabled && aiCfg.consent && (isLocal() ? aiCfg.baseUrl.trim().length > 0 : aiCfg.key.trim().length > 10 && navigator.onLine !== false);
 /** why the AI is not used right now (for the status line), '' = ready */
-export const aiWhyOff = () => !aiCfg.enabled ? 'AI dimatikan' : aiCfg.key.trim().length <= 10 ? 'isi API key OpenRouter di Pengaturan untuk mengaktifkan AI' : !aiCfg.consent ? 'izin kirim data ke OpenRouter belum diberikan (Pengaturan)' : navigator.onLine === false ? 'tidak ada internet' : '';
+export const aiWhyOff = () => !aiCfg.enabled ? 'AI dimatikan'
+  : isLocal() ? (!aiCfg.baseUrl.trim() ? 'isi alamat server AI lokal di Pengaturan' : !aiCfg.consent ? 'izin kirim data ke server AI lokal belum diberikan (Pengaturan)' : '')
+  : aiCfg.key.trim().length <= 10 ? 'isi API key OpenRouter di Pengaturan, atau pilih penyedia Lokal (Ollama/LM Studio)' : !aiCfg.consent ? 'izin kirim data ke OpenRouter belum diberikan (Pengaturan)' : navigator.onLine === false ? 'tidak ada internet' : '';
 
 export interface ChatMsg { role: 'system' | 'user' | 'assistant'; content: string }
-export interface AiStats { calls: number; fails: number; tokens: number; last: string; lastModel?: string }
+export interface AiStats { calls: number; fails: number; tokens: number; last: string; lastModel?: string; lastProvider?: AiProvider;
+  /** mentor replies replaced by the anti-answer-leak guard */
+  guarded?: number }
 export const aiStats: AiStats = { calls: 0, fails: 0, tokens: 0, last: '' };
 
 /** test hook: QA replaces the network call with a fake */
 export const aiTransport: { fetch: (url: string, init: RequestInit) => Promise<Response> } = { fetch: (u, i) => fetch(u, i) };
 
 let lastCall = 0;
-/** one chat completion; throws on any failure so callers can fall back to the offline engine */
+/** one chat completion (same OpenAI /chat/completions format for OpenRouter and local servers); throws on any failure so callers can fall back to the offline engine */
 export async function chat(messages: ChatMsg[], o: { maxTokens?: number; temperature?: number; timeoutMs?: number; json?: boolean } = {}): Promise<string> {
   if (!aiReady()) throw new Error('offline');
-  const wait = 1500 - (Date.now() - lastCall); if (wait > 0) await new Promise(r => setTimeout(r, wait));   // gentle client-side rate limit
+  const local = isLocal();
+  const wait = (local ? 300 : 1500) - (Date.now() - lastCall); if (wait > 0) await new Promise(r => setTimeout(r, wait));   // gentle client-side rate limit
   lastCall = Date.now();
-  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), o.timeoutMs ?? 20000);
+  // small local models on a school laptop CPU are slow: allow more time
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), (o.timeoutMs ?? 20000) * (local ? 3 : 1));
   aiStats.calls++;
   try {
-    const call = (model: string) => aiTransport.fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST', signal: ctl.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${aiCfg.key.trim()}`, 'X-Title': 'Kota Nusantara TKJ Simulator', 'HTTP-Referer': location.origin || 'https://bahtiarindra32-spec.github.io' },
-      body: JSON.stringify({ model, messages, max_tokens: o.maxTokens ?? 350, temperature: o.temperature ?? 0.6, ...(o.json ? { response_format: { type: 'json_object' } } : {}) }),
+    const url = chatUrl(aiCfg.provider, aiCfg.baseUrl);
+    // local: only Content-Type (no key, no extra headers, so the CORS preflight stays simple); no response_format (not every local server supports json_object; callers parse JSON from the text)
+    const headers: Record<string, string> = local ? { 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json', Authorization: `Bearer ${aiCfg.key.trim()}`, 'X-Title': 'Kota Nusantara TKJ Simulator', 'HTTP-Referer': location.origin || 'https://bahtiarindra32-spec.github.io' };
+    const call = (model: string) => aiTransport.fetch(url, {
+      method: 'POST', signal: ctl.signal, headers,
+      body: JSON.stringify({ model, messages, max_tokens: o.maxTokens ?? 350, temperature: o.temperature ?? 0.6, stream: false, ...(o.json && !local ? { response_format: { type: 'json_object' } } : {}) }),
     });
-    let r = await call(aiCfg.model);
-    // a chosen model that no longer exists: fall back to the free router once instead of going silent
-    if ((r.status === 400 || r.status === 404) && aiCfg.model !== DEFAULT_MODEL) { aiStats.lastModel = DEFAULT_MODEL; r = await call(DEFAULT_MODEL); } else aiStats.lastModel = aiCfg.model;
+    const model = activeModel();
+    let r = await call(model);
+    // a chosen OpenRouter model that no longer exists: fall back to the free router once instead of going silent
+    if (!local && (r.status === 400 || r.status === 404) && model !== DEFAULT_MODEL) { aiStats.lastModel = DEFAULT_MODEL; r = await call(DEFAULT_MODEL); } else aiStats.lastModel = model;
+    aiStats.lastProvider = aiCfg.provider;
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`HTTP ${r.status} ${t.slice(0, 120)}`); }
-    const d = await r.json() as { choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: number }; error?: { message?: string } };
-    if (d.error) throw new Error(d.error.message ?? 'error');
-    const txt = d.choices?.[0]?.message?.content?.trim(); if (!txt) throw new Error('empty');
+    const d = await r.json() as { choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: number }; error?: { message?: string } | string };
+    if (d.error) throw new Error(typeof d.error === 'string' ? d.error : d.error.message ?? 'error');
+    let txt = d.choices?.[0]?.message?.content?.trim(); if (!txt) throw new Error('empty');
+    txt = txt.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() || txt;   // reasoning models (qwen3, deepseek-r1) on Ollama prepend their thinking
     aiStats.tokens += d.usage?.total_tokens ?? 0; aiStats.last = 'ok';
+    const g = MENTOR_CALLS.get(messages);
+    if (g) { const f = guardLeak(txt, g); if (f.leak) { aiStats.guarded = (aiStats.guarded ?? 0) + 1; txt = f.text; } }
     return txt;
-  } catch (e) { aiStats.fails++; aiStats.last = String((e as Error).message ?? e); throw e; }
+  } catch (e) { aiStats.fails++; aiStats.last = String((e as Error).name === 'AbortError' ? 'timeout' : (e as Error).message ?? e); throw e; }
   finally { clearTimeout(to); }
 }
 
@@ -71,21 +144,60 @@ export interface MentorCtx {
 const SYS_MENTOR = `Kamu "Pak Nusa", teknisi senior & mentor di game simulasi TKJ (Teknik Komputer dan Jaringan) untuk siswa SMK kelas 10-11.
 Gaya: bahasa Indonesia santai tapi sopan, singkat (maks 5 kalimat atau 4 butir), seperti guru produktif di bengkel.
 Aturan:
-- Jangan langsung memberi jawaban/perintah perbaikan lengkap. Bimbing dengan pertanyaan diagnosis dan satu langkah berikutnya yang bisa dicek siswa (urut lapisan OSI: fisik dulu, lalu IP, gateway, DNS).
-- Kalau siswa sudah mencoba 2x dan tetap buntu (lihat log), boleh sebut perintah/menu spesifik di game.
+- Kamu PEMBIMBING, bukan pemberi jawaban. Bimbing dengan pertanyaan diagnosis dan satu langkah berikutnya yang bisa dicek siswa (urut lapisan OSI: fisik dulu, lalu IP, gateway, DNS).
+- JANGAN PERNAH memberi konfigurasi lengkap yang siap disalin: tidak boleh menulis pasangan IP + subnet mask + gateway lengkap untuk soal siswa, dan tidak boleh menulis blok perintah CLI berisi lebih dari 2 baris konfigurasi. Kalau siswa meminta jawaban lengkap, tolak halus dan beri petunjuk atau pertanyaan pancingan.
+- Kalau siswa sudah mencoba 2x dan tetap buntu (lihat log), boleh sebut SATU perintah/menu spesifik di game, bukan seluruh konfigurasi.
 - Gunakan istilah standar (IP address, subnet mask, default gateway, DNS, VLAN, trunk, patch panel) dan jelaskan singkat bila perlu.
 - Hanya bahas jaringan/TKJ dan game ini. Tolak sopan topik lain.
 - Data "RAHASIA" hanya untukmu agar petunjukmu akurat; jangan sebut penyebabnya secara gamblang.`;
 
+/** what the leak guard needs to turn a blocked reply into a hint */
+export interface GuardCtx { next: string; hint: string }
+/** prompts built by mentorPrompt, so chat() knows to run the leak guard on the reply */
+const MENTOR_CALLS = new WeakMap<ChatMsg[], GuardCtx>();
+
 export function mentorPrompt(ctx: MentorCtx, history: ChatMsg[], question: string): ChatMsg[] {
   const j = ctx.job;
+  // Only these MentorCtx fields are sent. MentorCtx has no name / XP / score field on purpose (tests/nusa.test.ts).
   const state = [
-    `Pangkat siswa: ${ctx.rank}. Posisi: ${ctx.place}.`,
+    `Pangkat siswa (level permainan, bukan nilai): ${ctx.rank}. Posisi: ${ctx.place}.`,
     j ? `Pekerjaan aktif ${j.id} (${j.kind}): ${j.title}\nSurat kerja: ${j.order.join(' | ')}\nLangkah berikutnya menurut sistem: ${j.next}\nLog tindakan siswa (terbaru di akhir): ${j.log.slice(-10).join(' ; ') || '-'}\nRAHASIA penyebab: ${j.faults.map(f => `${f.cause} → perbaikan: ${f.fix}`).join(' + ') || '-'}` : 'Tidak ada pekerjaan aktif.',
     ctx.pc ? `Siswa sedang di dekat ${ctx.pc}. Status (simulasi): ${ctx.pcState ?? '-'}` : '',
     ctx.rack ? `Siswa di dekat rak ${ctx.rack}.` : '',
   ].filter(Boolean).join('\n');
-  return [{ role: 'system', content: SYS_MENTOR }, { role: 'system', content: `KONDISI GAME:\n${state}` }, ...history.slice(-6), { role: 'user', content: question }];
+  const msgs: ChatMsg[] = [{ role: 'system', content: SYS_MENTOR }, { role: 'system', content: `KONDISI GAME:\n${state}` }, ...history.slice(-6), { role: 'user', content: question }];
+  MENTOR_CALLS.set(msgs, { next: j?.next ?? '', hint: j?.faults[0]?.hint ?? '' });
+  return msgs;
+}
+
+// ---------------------------------------------------------------- anti-answer-leak guard
+const IPV4 = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g;
+const isMask = (ip: string) => /^255\.(?:0|128|192|224|240|248|252|254|255)\.\d{1,3}\.\d{1,3}$/.test(ip);
+/** a configuration command (Cisco-style CLI, MikroTik, netsh); diagnostics like ping/ipconfig/show do not count */
+const CFG_LINE = /^\s*(?:[\w.-]+(?:\([\w-]+\))?[#>]\s*)?(?:enable$|conf(?:ig(?:ure)?)?(?:\s+t(?:erminal)?)?$|int(?:erface)?\s+\S|switchport\b|ip\s+(?:address|route|default-gateway|dhcp|helper-address|nat|dns|domain|name-server|host|access-group)\b|no\s+shut(?:down)?\b|vlan\s+\d|name\s+\S|spanning-tree\b|power\s+inline\b|encapsulation\b|access-list\b|permit\b|deny\b|network\s+\d|default-router\b|dns-server\b|router\s+\w|write(?:\s+mem(?:ory)?)?$|copy\s+run|end$|exit$|\/ip\s|\/interface\s|netsh\s)/i;
+export interface GuardResult { leak: boolean; reason: '' | 'ip-triple' | 'cli-block'; text: string }
+/** does a mentor reply hand over a full ready-to-paste solution?
+ *  ip-triple: one reply carries a subnet mask (dotted or /prefix) plus a host IP plus a gateway IP (the complete IPv4 setting).
+ *  cli-block: four or more configuration command lines.
+ *  A leaking reply is replaced by its non-leaking sentences + the system hint, with a note saying why. */
+export function guardLeak(reply: string, g: GuardCtx = { next: '', hint: '' }): GuardResult {
+  const text = reply.replace(/```[a-z]*\n?/gi, '');
+  const lines = text.split(/\n/);
+  const cfgLines = lines.filter(l => CFG_LINE.test(l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')));
+  const ips = [...new Set(text.match(IPV4) ?? [])];
+  const hosts = ips.filter(ip => !isMask(ip));
+  const hasMask = ips.some(isMask) || /\b(?:\d{1,3}\.){3}\d{1,3}\s*\/\s*(?:[89]|[12]\d|3[0-2])\b/.test(text) || /\bprefix\s*(?:length)?\s*:?\s*(?:[89]|[12]\d|3[0-2])\b/i.test(text);
+  const triple = hasMask && hosts.length >= 2 && /gateway|\bgw\b|default-router|gerbang/i.test(text);
+  const reason: GuardResult['reason'] = cfgLines.length >= 4 ? 'cli-block' : triple ? 'ip-triple' : '';
+  if (!reason) return { leak: false, reason, text: reply };
+  // keep only sentences without addresses or config commands
+  const hasIp = (x: string) => (x.match(IPV4) ?? []).length > 0 || /\/\s*(?:[89]|[12]\d|3[0-2])\b/.test(x);
+  const keep = text.split(/(?<=[.!?:])\s+|\n+/).map(x => x.trim()).filter(x => /\w{3}/.test(x) && !hasIp(x) && !CFG_LINE.test(x.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')) && !/:$/.test(x) && !/jawabannya|berikut (ini|konfigurasi)|isi (saja|seperti)|tinggal (isi|ketik|salin)/i.test(x));
+  const out = [...keep.slice(0, 3)];
+  out.push(reason === 'cli-block' ? 'Pak Nusa tidak menuliskan blok konfigurasi lengkap: susun perintahnya sendiri dari surat kerja, satu baris demi satu baris, lalu cek hasilnya (show ...).'
+    : 'Pak Nusa tidak menuliskan IP, subnet mask, dan gateway lengkap: bandingkan sendiri alamat PC dengan subnet dan alamat router di surat kerja.');
+  if (g.hint) out.push(`Petunjuk: ${g.hint}`); else if (g.next) out.push(`Langkah berikutnya: ${g.next}.`);
+  return { leak: true, reason, text: `${out.join('\n')}\n(Jawaban AI dipotong oleh penjaga anti-contek.)` };
 }
 
 const CONCEPTS: [RegExp, string][] = [

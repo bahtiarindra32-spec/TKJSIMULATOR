@@ -10,6 +10,7 @@ import { LABR, resetLabRouter, labPermits } from '../pcos/labrouter';
 import { encodeResult, readRecap, recapCsv, mmss as mmssR, type ResultData } from './recap';
 import { vlsmCase, vlsmKey, vlsmCheck, type Plan, type Row } from './vlsm';
 import { aiReady, chat } from '../ai/nusa';
+import { recapAiPanel } from '../ai/recapAi';
 import { ukkGrade, ukkCsv, isCore, type UkkStep } from './ukk';
 import type { Noc } from './noc';
 import type { PcOS } from '../pcos/os';
@@ -31,7 +32,9 @@ interface Run { spec: LabSpec; code: string; name: string; pc: string; label: st
   /** the student's VLSM table (same order as P.vl.needs) and the last ping result per target from the student's PC */
   rows: Partial<Row>[]; pings: Map<string, boolean>;
   /** wrong teacher PINs in a row, and until when paraf is locked */
-  pinFails?: number; pinLock?: number }
+  pinFails?: number; pinLock?: number;
+  /** set once the student has held any tool from the cabinet during this run (K3 is only scored then) */
+  usedTools?: boolean }
 
 const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langkah: (P: Params, R: Run) => string[] }> = {
   crimp: { tujuan: 'Membuat kabel UTP straight-through standar T568B dan menyambungkan PC ke jaringan.', alat: 'Kabel UTP Cat6, 2 konektor RJ45, tang crimping, LAN tester (lemari alat & meja crimping).', k3: 'Potong dan kupas kabel menjauh dari badan. Sisa potongan kabel dibuang ke tempat sampah, bukan di lantai.',
@@ -185,6 +188,7 @@ export class Praktik {
     const rw = h('div', 'row');
     rw.append(btn('Buat rekap', () => this.openRecap(ta.value, fi.value), 'btn pri', 'lab-recap-make'));
     if (rc.rows.length) rw.append(btn('Unduh CSV', () => this.download(recapCsv(rc), `rekap-lab-${new Date().toISOString().slice(0, 10)}.csv`), 'btn', 'lab-recap-csv'));
+    if (rc.rows.length) { const ra = recapAiPanel(rc.rows); rw.append(ra.button); box.append(ra.out); }   // anonymous aggregate summary (src/ai/recapAi.ts)
     rw.append(btn('Kembali', () => this.openDesk()));
     box.append(rw);
     this.noc.present(box);
@@ -269,7 +273,10 @@ export class Praktik {
   /** rubric checkpoints of the current step, read from netsim; the last step also checks that borrowed tools are back (K3) */
   checks(): Check[] {
     const R = this.run!; const cs = this.stepChecks();
-    if (R.i === R.spec.steps.length - 1) { const v = this.noc.inv; cs.push({ label: 'K3: alat dikembalikan ke lemari alat', ok: !v.tester && !v.console && !v.laptop && !v.toner && !v.analyzer }); }
+    const v = this.noc.inv, holding = !!(v.tester || v.console || v.laptop || v.toner || v.analyzer);
+    if (holding) R.usedTools = true;
+    // K3 only counts when tools were actually borrowed: an untouched cabinet is not a free point.
+    if (R.i === R.spec.steps.length - 1 && R.usedTools) cs.push({ label: 'K3: alat dikembalikan ke lemari alat', ok: !holding });
     return cs;
   }
   private stepChecks(): Check[] {
@@ -388,6 +395,8 @@ export class Praktik {
     rw.append(btn('Tutup', () => this.noc.closeModal(), 'btn pri', 'lab-done'));
     box.append(rw);
     this.noc.present(box);
+    // focusing the first button scrolls a tall sheet; open it at the letterhead instead
+    requestAnimationFrame(() => { box.scrollTop = 0; });
   }
 
   private download(text: string, name: string) {

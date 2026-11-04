@@ -93,7 +93,7 @@ scene.fog = new THREE.Fog('#cdbfae', 220, 1400);
 
 const hemi = new THREE.HemisphereLight('#cfe3ff', '#7a6a55', 0.75); scene.add(hemi);
 const dir = new THREE.DirectionalLight('#ffd7a8', 2.6);
-dir.castShadow = true; dir.shadow.mapSize.set(4096, 4096); dir.shadow.bias = -0.0004; dir.shadow.normalBias = 0.03;
+dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048);   // the walk-mode shadow box is 120 m wide: 2048 = ~6 cm texels, 4x less GPU memory than 4096 dir.shadow.bias = -0.0004; dir.shadow.normalBias = 0.03;
 const sc = dir.shadow.camera as THREE.OrthographicCamera; sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 1; sc.far = 700;
 scene.add(dir, dir.target);
 const interiorLight = new THREE.PointLight('#fff1dc', 0, 18, 1.4); scene.add(interiorLight);
@@ -286,7 +286,7 @@ let riding: Bike | null = null;
 let camRoll = 0; const camTgt = new THREE.Vector3();
 let mountT = 1, wantDismount = false, chaseYaw = 0, camDistR = 4, rideShake = 0, hitToastT = 0;
 const rideLook = { yaw: 0, pitch: -0.16, idle: 0 };
-const WALK_HINTS = 'WASD jalan · Mouse menoleh · Shift lari · Spasi lompat · X jongkok · V kamera · F interaksi · T papan kerja · C cek fisik · R Wi-Fi analyzer · E/Q tangga/lift · M peta · Esc keluar';
+const WALK_HINTS = 'WASD jalan · Shift lari · F aksi · C cek fisik · T papan kerja · J Pak Nusa · M peta · Esc menu (daftar lengkap: menu Kontrol)';
 const RIDE_HINTS = 'W gas · S rem / mundur pelan · A/D belok · Spasi rem belakang · Mouse lihat sekeliling · V kamera · F turun · R kembalikan ke jalan · Esc keluar';
 missions.onModalChange(open => { if (open) keys.clear(); });
 noc.toast = (s, ms) => toast(s, ms);
@@ -357,7 +357,7 @@ const demo = new DemoTour([
     go: () => { demoReset(); noc.startShift(); noc.openBoard(); } },
   { title: 'Lab Praktik: VLSM → router-on-a-stick → ACL', text: 'Mode guru-siswa di gedung lab SMK. Isi tabel VLSM di jobsheet, lalu konfigurasi R-LAB (subinterface dot1Q) dan trunk SW-LAB, lalu ACL antar-VLAN. Checkpoint dibaca langsung dari simulator jaringan.',
     go: () => { demoReset(); praktik.start({ steps: ['vlsm', 'intervlan', 'acl'], minutes: 0, perStudent: false, seed: 2026 }, 'JURI26', 'Juri LOGICODIX'); placeAt(labB.spots.rack.x, labB.spots.rack.z + 1.2, 1, 0); } },
-  { title: 'Pak Nusa: mentor AI', text: 'Tanya apa saja soal pekerjaan yang sedang jalan. Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban. Tanpa API key, ia memakai mode offline. AI tidak pernah menilai.',
+  { title: 'Pak Nusa: mentor AI', text: 'Tanya apa saja soal pekerjaan yang sedang jalan. Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban. Untuk AI live: Pengaturan → Penyedia AI (OpenRouter dengan API key, atau AI lokal Ollama/LM Studio di laptop ini tanpa internet) lalu Setuju. Tanpa itu ia memakai mode offline. AI tidak pernah menilai.',
     go: () => { demoReset(); noc.openNusa(); } },
   { title: 'Rekap kelas untuk guru (tanpa server)', text: 'Tiap siswa mendapat kode hasil satu baris. Guru menempel semua kode di meja guru dan mendapat tabel + CSV. Data di bawah ini contoh tiga siswa fiktif.',
     go: () => { demoReset(); placeAt(labB.spots.guru.x, labB.spots.guru.z + 1.4, 1, 0); const when = Date.now();
@@ -656,7 +656,7 @@ const gfx = new GfxTier([world, batches, hiDetail]); gfx.collect();
 type QName = 'tinggi' | 'sedang' | 'rendah' | 'hemat';
 interface QProfile { label: string; pr: number; ao: boolean; shadow: number; far: number; fog: [number, number]; traffic: number; peds: number }
 const QUALITY: Record<QName, QProfile> = {
-  tinggi: { label: 'Tinggi', pr: 2, ao: true, shadow: 4096, far: 1600, fog: [220, 1400], traffic: 1, peds: 1 },
+  tinggi: { label: 'Tinggi', pr: 2, ao: true, shadow: 2048, far: 1600, fog: [220, 1400], traffic: 1, peds: 1 },
   sedang: { label: 'Sedang', pr: 1.5, ao: false, shadow: 2048, far: 900, fog: [160, 850], traffic: 0.6, peds: 0.67 },
   rendah: { label: 'Rendah', pr: 1, ao: false, shadow: 0, far: 420, fog: [90, 400], traffic: 0.35, peds: 0.34 },
   hemat: { label: 'Hemat', pr: 0.7, ao: false, shadow: 0, far: 260, fog: [55, 250], traffic: 0.2, peds: 0.34 },
@@ -1074,7 +1074,7 @@ const tmp = new THREE.Vector3();
 const lightBasis = new THREE.Matrix4(), lightBasisT = new THREE.Matrix4(), ZERO3 = new THREE.Vector3(), UP3 = new THREE.Vector3(0, 1, 0), sunNeg = new THREE.Vector3();
 /** ?qa: automated playtest starts paused (frames only advance through __kota.step), so software GL is not flooded with frames */
 const QA = new URLSearchParams(location.search).has('qa');
-let paused = QA, fixedDt = 0, skipRender = false, anaT = 0;
+let paused = QA, fixedDt = 0, skipRender = false, anaT = 0, lastDraw = 0;
 function frame() {
   const now = performance.now(); const realDt = (now - last) / 1000; const dt0 = fixedDt || Math.min(realDt, 0.05); const dt = menu.paused ? 0 : dt0; last = now; elapsed += dt; const t = elapsed;
   watchFps(Math.min(realDt, 1));
@@ -1151,7 +1151,9 @@ function frame() {
     }
   } else { missionMarker.setTarget(null); updateWaypoint(waypoint, camera, null, null); }
   if (mode === 'walk') minimap.update(cityX(player.pos.x), cityZ(player.pos.z), hdg * Math.PI / 180, missionTarget());
-  if (!skipRender) { frameCount++; renderer.info.reset(); if (quality) composer.render(); else renderer.render(scene, camera); }
+  // Energy: while a panel/PC screen covers play the scene barely changes, so redraw it at ~10 fps instead of the display rate.
+  const tDraw = performance.now(), idleUi = mode === 'walk' && !fixedDt && uiBlocked();
+  if (!skipRender && (!idleUi || tDraw - lastDraw > 100)) { lastDraw = tDraw; frameCount++; renderer.info.reset(); if (quality) composer.render(); else renderer.render(scene, camera); }
   if (!paused) requestAnimationFrame(frame);
 }
 
@@ -1181,8 +1183,8 @@ applySettings();
 if (QA && !QS.has('menu')) menu.show(false); else menu.show(true);   // ?qa skips the title screen (?qa&menu keeps it for screenshots)
 requestAnimationFrame(() => { if (!QA) frame(); const l = $('loading'); l.classList.add('done'); $('ldSub').textContent = 'Siap'; setTimeout(() => { l.style.opacity = '0'; setTimeout(() => l.remove(), 520); }, QA ? 0 : 260); });
 
-// test hooks (used by automated playtest)
-(window as any).__kota = {
+// test hooks for the automated playtest: only with ?qa (or the dev server), never exposed in a normal session
+if (QA0 || import.meta.env.DEV) (window as any).__kota = {
   goView: (id: string) => goView(id, true), enterWalk, keys, player, renderer, scene, world,
   teleport: (X: number, Z: number, level = 1, yaw = Math.PI) => { player.pos.set(wx(X), LEVELS[level - 1].elev + 0.12, wz(Z)); player.level = level; player.yaw = yaw; },
   // automated playtest on software GL: pause the rAF loop so real input events get dispatched, then advance fixed steps

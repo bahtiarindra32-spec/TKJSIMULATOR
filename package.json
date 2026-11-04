@@ -1,20 +1,29 @@
 {
   "name": "kota-nusantara",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "build:single": "vite build -c vite.single.config.ts"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "build:single": "vite build -c vite.single.config.ts",
+    "lint": "eslint src tests",
+    "format": "prettier --write src/game/noc src/game/noc.ts tests/noc.test.ts",
+    "format:check": "prettier --check src/game/noc src/game/noc.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
     "@types/three": "^0.186.0",
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0",
     "jsdom": "^30.1.3",
+    "prettier": "^3.9.10",
     "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.4",
     "vitest": "^3.2.7"
   },

@@ -1,1 +1,0 @@
-START="click:#enter;;js:[...document.querySelectorAll('button')].filter(b=>b.offsetParent&&/Mulai hari/.test(b.textContent)).map(b=>b.click()).length;;js:[...document.querySelectorAll('button')].filter(b=>b.offsetParent&&/Siap/.test(b.textContent)).map(b=>b.click()).length"

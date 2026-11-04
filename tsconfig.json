@@ -18,7 +18,10 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "erasableSyntaxOnly": false,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    /* Type safety: TypeScript 6 already defaults to strict; spelled out so the setting is visible and stays on */
+    "strict": true,
+    "strictNullChecks": true
   },
   "include": ["src"]
 }

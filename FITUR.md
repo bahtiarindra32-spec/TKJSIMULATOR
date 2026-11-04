@@ -1,0 +1,283 @@
+# Kota Nusantara — referensi fitur lengkap
+
+Ringkasan untuk juri ada di [README.md](README.md). Dokumen ini daftar fitur rinci; riwayat ada di [CHANGELOG.md](CHANGELOG.md).
+
+Game 3D berbasis browser untuk siswa SMK TKJ kelas 10/11. Pemain magang di **Nusantara Tech Hotel & Office**, gedung 8 lantai di tengah kota fiktif bergaya Jakarta (400 × 300 m), lalu mengerjakan misi jaringan komputer yang diselaraskan dengan CP TKJ Fase E/F.
+
+**▶ Main langsung di browser:** https://bahtiarindra32-spec.github.io/TKJSIMULATOR/
+
+Dokumen ini hanya mencatat apa yang sudah dibuat dan diuji.
+
+---
+
+## 1. Tech stack
+
+| Bagian | Yang dipakai |
+|---|---|
+| Bahasa | TypeScript 6 (`tsc --noEmit` lolos, unit test vitest (`npm test`)) |
+| Rendering 3D | Three.js 0.186 (WebGL, tanpa engine/framework lain) |
+| Build tool | Vite 8 (build ES module) + konfigurasi kedua untuk build IIFE/classic |
+| Paket single-file | `tools/make_single.py`: CSS dan JS dijadikan satu `index.html` (target es2018) yang bisa dibuka offline |
+| Karakter | Humanoid 17 tulang dengan skinning di vertex shader (bukan `SkinnedMesh`, karena crash di SwiftShader) |
+| Fisika | Kolisi AABB buatan sendiri + grid spasial 8 m (tanpa library fisika) |
+| Aset | Semua model dibuat prosedural dari kode (geometri Three.js), tanpa file model atau font eksternal |
+| Ekspor | GLTFExporter (tombol Ekspor GLB, nama objek ikut terbawa untuk Blender/Meshy) |
+| QA otomatis | Playwright + Chromium + SwiftShader (headless), skrip di `tools/qa/` |
+| Hosting | GitHub Pages dari folder `docs/` (branch `main`) |
+
+Dependensi runtime hanya `three`. Dev: `typescript`, `vite`, `@types/three`.
+
+## 2. Penggunaan AI dan lisensi
+
+Game ini dibangun dengan bantuan agen AI; pembagian peran, data yang dikirim fitur AI di dalam game, dan batasannya dijelaskan di [AI_USAGE.md](AI_USAGE.md). Riwayat perubahan: [CHANGELOG.md](CHANGELOG.md). Lisensi: MIT ([LICENSE](LICENSE)).
+
+Dokumen sumber: PDF "Prompt Pascal Kota Nusantara" milik pengguna (`design/source-pascal-prompt.md`). PDF ini **diaudit**, tidak diikuti mentah (lihat bagian 6). Tag CP mengacu pada dokumen CP TKJ Fase F (BSKAP), salinan dari situs SMKN 1 Pogalan:
+https://huda.smkn1pogalan.sch.id/wp-content/uploads/2024/08/Fase-F-SMK-TKJ.pdf
+
+## 3. Menjalankan
+
+```bash
+npm install
+npm run dev                                # http://localhost:5173
+npm run build                              # tsc + build ke dist/
+npm test                                   # unit test (vitest)
+npx vite build -c vite.single.config.ts    # build classic/IIFE ke dist-classic/
+python3 tools/make_single.py               # gabung jadi satu index.html offline
+```
+
+Cara cepat tanpa install: buka `docs/index.html` langsung di browser (Chrome/Edge).
+
+## 4. Kontrol
+
+| Tombol | Fungsi |
+|---|---|
+| Klik + tarik, roda mouse | Orbit dan zoom di mode tampilan |
+| MASUK KOTA | Masuk mode jalan kaki di depan hotel |
+| W A S D / panah | Jalan dan menoleh (gerak dan tolehan halus, dengan akselerasi) |
+| Mouse | Menoleh |
+| Shift | Lari |
+| Spasi | Lompat (bisa juga jatuh dari pinggiran). Saat jongkok: berdiri. Saat naik motor: rem belakang |
+| X | Jongkok / berdiri (C sudah dipakai untuk Cek, Z untuk zona). Jalan pelan ±1,1 m/s, tidak bisa lari; tidak bisa berdiri kalau ada halangan di atas kepala |
+| V | Ganti kamera orang pertama / orang ketiga (avatar siswa terlihat) |
+| F | Buka PC, buka/tutup pintu engsel, Lemari Alat (Workshop), Rak MDF (Ruang Server L1), Rak IDF (ruang IDF L2/L3), Papan kerja (meja NOC), Rak 1 router edge, Rak 2 server Linux, Rak 3 NAS, panel printer, telepon IP |
+| F (dekat motor) | Naik motor / turun (kalau masih melaju, motor direm otomatis dulu, lalu pemain turun di sisi yang kosong) |
+| E / Q | Di pintu tangga: naik/turun satu lantai. Di pintu lift: panel lift (tombol 1–8 atau ketuk lantai, E/Q satu lantai, Esc batal) |
+| T | Papan kerja NOC: ambil surat kerja, mulai shift, lacak pekerjaan |
+| C | Cek fisik di meja: konektor, LED link, LAN tester, patch cord, pasang toner di outlet, tempel label outlet |
+| M | Peta besar (minimap selalu tampil) |
+| Z | Tampilkan 12 zona kota |
+| Esc | Keluar dari mode jalan / tutup jendela (kalau sedang naik motor, motor diparkir di tempat) |
+
+**Saat naik Motor Matic:** W / ↑ gas · S / ↓ rem, kalau sudah berhenti tahan untuk mundur pelan · A / D (← / →) belok · Spasi rem belakang · mouse atau tarik layar untuk melihat sekeliling (kembali ke tengah sendiri saat melaju) · V kamera kejar / mata pengendara · F turun · R kembalikan motor ke jalan terdekat.
+
+**Sentuh:** tombol Jongkok di kanan bawah. Saat naik motor: joystick kiri = belok + gas (dorong ke atas) / rem-mundur (tarik ke bawah), tombol Gas, Rem, Turun, Reset. Melepas joystick atau menggeser jari keluar dari tombol Gas langsung menghentikan gas. Saat jendela kehilangan fokus semua tombol dilepas.
+
+## 5. Yang sudah dibuat ✅
+
+### Kota (Fase A–C, E–G dari PDF)
+- ✅ Jalan arteri (gaya Sudirman/Thamrin), kolektor, gang kampung, trotoar, kerb hitam-putih, median, marka, 12 zebra cross, dan JPO dengan tangga sesuai batas kemiringan.
+- ✅ 12 zona: CBD (menara), apartemen, ruko, minimarket, bank, masjid, pasar, warung, 52 rumah kampung, taman, dan lahan cadangan.
+- ✅ Properti jalan: lampu jalan, lampu lalu lintas bersiklus, rambu, tiang listrik + kabel, halte, pohon, billboard, gapura, pos ronda, gerobak.
+- ✅ Penunjuk arah: panah lajur (lalu lintas kiri), papan nama jalan di tiap simpang, rambu petunjuk hijau, minimap + peta besar.
+- ✅ Lalu lintas: kendaraan berjalan di lajur kiri dan berhenti di lampu merah atau saat ada pemain di lajurnya, plus pejalan kaki.
+
+### Kendaraan & orang
+- ✅ Kendaraan khas Indonesia: skuter gaya BeAT dengan pengendara, MPV, sedan, hatchback, taksi biru, mikrolet M01, dan bus TransJakarta (roda berputar).
+- ✅ Orang: 9 jenis pakaian Indonesia, pose jalan, diam, duduk, dan mengetik.
+
+### Gedung Nusantara Tech Hotel (Fase D)
+- ✅ 8 lantai + atap + eksterior. Pintu lobi kaca geser otomatis, pintu engsel manual (F) yang beranimasi dan padat saat tertutup.
+- ✅ Lantai 1 lengkap: lobi & resepsionis (marmer), lounge, workshop TKJ, ruang IT/NOC dengan video wall, ruang server (rak 42U, switch, router, patch panel, ODF, PDU, server, UPS), toilet, poster T568B/OSI/K3/topologi, papan arah.
+- ✅ Lantai 2–3 kantor: 24 meja dengan PC dan IP phone, AP di plafon, printer, outlet RJ45, ruang meeting (TV, floor box, conference phone), rak penyimpanan.
+- ✅ Lantai 4–8 hotel: 8 kamar per lantai (kamar mandi, kasur, TV + STB IPTV, meja + laptop, AP dinding, outlet RJ45, AC split), AP plafon dan CCTV IP di koridor, rak housekeeping.
+- ✅ Lift dan tangga dengan animasi naik/turun (overlay pintu lift dan indikator lantai).
+
+### Perangkat jaringan (`src/assets/netdevices.ts`)
+- ✅ Sekitar 50 perangkat berukuran nyata: rak 42U, switch 24 port, router, patch panel, ODF, PDU, server, UPS, AP, ONT, ODP, crimper, LAN tester, stripper, punch down, RJ45, dus kabel UTP, multimeter, matras ESD, monitor/PC/laptop, telepon VoIP, cable tray, APAR, rambu K3.
+
+### PC yang bisa dibuka: OS "Jendela 11" (`src/pcos/`)
+- ✅ 98 PC/laptop di gedung bisa dibuka dengan F.
+- ✅ OS mirip Windows 11 dengan merek sendiri: layar kunci, desktop, Start, taskbar, Settings, Notepad, Run.
+- ✅ CMD yang bisa diketik: `ipconfig` (`/all`, `/release`, `/renew`, `/flushdns`), `ping` (`-n`, `-t`, `-l`), `tracert`, `nslookup`, `arp -a`, `route print`, `netsh int ip show config`, `getmac`, dll.
+- ✅ Network Connections, Status/Details, Properties, dan dialog IPv4 dengan validasi ala Windows.
+- ✅ Browser "Tepi": WebKonfig router, halaman server, printer, halaman internet, dan halaman error.
+- ✅ Simulasi jaringan (`net.ts`): lab 192.168.10.0/24, kantor 192.168.20.0/24, tamu 172.16.4.0/22, adapter per PC, lease DHCP, ping, resolve DNS, dan hop.
+
+### Pekerjaan jaringan (tanpa kuis, bisa diulang) — `src/game/noc.ts`
+Semua pekerjaan datang dari **Papan Kerja NOC** (T, atau F di meja NOC). Rantai misi kuis lama sudah tidak dipakai.
+
+**Surat kerja (kontrak acak).** Tiap kali diambil, lokasi, PC, alamat IP, subnet, nama, dan kejutannya berbeda:
+
+| Surat kerja | Yang dikerjakan pemain | Terbuka |
+|---|---|---|
+| Pasang IP Statis | Isi IPv4 statis persis surat kerja di 2–3 PC, uji dari tiap PC | Magang |
+| Sambungkan Meja Baru | Pasang patch cord di meja, pasang toner di outlet tanpa label, sapu probe di patch panel rak lantai itu, patch ke port switch di surat kerja, `switchport access vlan` + `no shutdown` lewat console, tempel label outlet, uji DHCP | Magang |
+| Nama untuk Server Intranet | Tambah record DNS di router (WebKonfig), perbaiki PC yang memakai DNS publik, buka nama itu di browser | Teknisi Junior |
+| Pasang Router Baru & DHCP | Router setelan pabrik 192.168.88.1: IP statis sementara di PC, ganti alamat LAN (koneksi putus!), pindah subnet, atur DHCP & DNS, kembalikan PC ke DHCP, renew, uji | Teknisi Junior |
+| Pindahkan Meja ke VLAN Kasir | `vlan 30` / `name KASIR` / `switchport access vlan 30` di switch lantai, renew, buka server POS 192.168.30.10 | Teknisi |
+| Buat Patch Cord Sendiri (Crimping) | Susun 8 kabel tiap ujung RJ45 (T568B, pin 1 di kiri), crimp, tes LAN tester (wiremap 1–8), pasang di meja, ping gateway. Crossover A–B tetap nyala (Auto MDI-X) tapi ditolak; urutan non-standar yang sama di kedua ujung lolos tester murah tapi split pair, link gagal | Magang |
+| Pasang Printer Jaringan Baru | Printer setelan pabrik 192.168.1.50: set IP statis di panel depan, tambah port TCP/IP di 2 PC, cetak halaman uji | Teknisi Junior |
+| Pasang Telepon IP di Meja | `power inline auto` + `switchport voice vlan 100` di port meja, telepon terdaftar ke ippbx, panggil 9000 | Teknisi Junior |
+| Buat Folder Bersama di NAS | Aktifkan SMB, buat shared folder dengan hak Baca/Tulis, `net use P:` dari 2 PC | Teknisi Junior |
+| Aktifkan DHCP Server di Linux | `dhcpd.conf` masih contoh bawaan Debian (layanan gagal start): tulis blok subnet, `dhcpd -t`, `systemctl restart isc-dhcp-server`, renew di PC, buka intranet | Teknisi |
+| Aktifkan Jalur Cadangan ISP2 | IP SLA + track ke gateway ISP1, route default ber-track, floating static AD 10 ke ISP2, NAT overload keluar Gi0/1; diuji dengan memutus ISP1 | Teknisi |
+
+**Hari kerja (siklus utama).** Pagi: satu surat kerja (dipilih dari jenis yang paling jarang/paling sering gagal kamu kerjakan). Siang: shift helpdesk. Sore: insiden, satu akar masalah dengan banyak pengguna terdampak (terbuka di Teknisi Junior). Lalu evaluasi harian Kak Rani dengan bonus XP untuk SLA penuh, bintang tinggi, dan rangkaian hari baik. Tiap hari SLA 3% lebih ketat (minimal 70%) dan shift makin banyak tiket. Mulai Teknisi Junior, sebagian tiket punya 2 akar masalah; mulai Teknisi bisa sampai 3.
+
+**Shift helpdesk.** 3–5 tiket gangguan nyata dengan SLA: konektor longgar, patch cord rusak (LAN tester: pin 3 & 6 putus), port switch shutdown, port di VLAN salah, patch cord di rak tercabut, uplink lantai putus (fiber longgar / Gi1/0/49 shutdown / VLAN tidak diizinkan di trunk), loop antar-port switch saat spanning-tree dimatikan (badai broadcast + log MAC flapping), adapter disabled, DHCP release, IP salah subnet, gateway salah, DNS salah, IP bentrok.
+
+**Aturan dunia nyata**
+- Pemain harus berjalan ke lokasinya: PC (duduk, layar penuh), Lemari Alat di Workshop TKJ, Rak MDF di Ruang Server L1, Rak IDF di ruang IDF lantai 2 dan 3. Penanda hanya menunjuk arah.
+- Alat fisik: toner + probe, LAN tester, kabel console USB–RJ45, laptop teknisi, patch cord (stok habis pakai). Tanpa console + laptop, switch tidak bisa dikonfigurasi.
+- Switch per lantai (SW-L1/L2/L3, 48 port) dengan CLI mirip Cisco IOS: `enable`, `conf t`, `interface [range] gi1/0/N`, `shutdown`, `switchport access vlan`, `vlan`/`name`, `show interfaces status`, `show vlan brief`, `show mac address-table`, `show running-config`, `write memory`, singkatan (`sh vl br`), `?`, dan pesan error IOS. LED port di rak mengikuti status.
+- Router tiap segmen bisa diubah di WebKonfig: alamat LAN, DHCP server (pool, gateway, DNS, lease, daftar lease), DNS forwarder (upstream, Allow Remote Requests, record A).
+- Klien DHCP menyimpan lease lama sampai renew; lease dari subnet lama ditolak dan klien mencoba ulang sendiri (±60 detik). Lepas/colok kabel atau enable adapter = minta alamat baru. IP bentrok antar-PC terdeteksi.
+- Pekerjaan selesai hanya kalau jaringan benar-benar sesuai **dan** pemain menguji dari PC terdampak (ping/browser).
+- Uji kenaikan pangkat (bukan UKK resmi): XP cukup saja belum menaikkan pangkat. Di papan kerja muncul Uji kenaikan pangkat (satu surat kerja tingkat pangkat sekarang, SLA 80%). Lulus kalau minimal ★★ dan tidak minta bantuan Pak Nusa; gagal bisa diulang. Save lama tetap memakai pangkat yang sudah dicapai.
+- Tahapan kerja di HUD: Survei (sudah datang ke perangkat) → Kerja → Uji → Dokumentasi. Setelah lolos uji, pekerjaan baru ditutup kalau teknisi menulis berita acara (uraian penyebab & tindakan) di surat kerja lalu tanda tangan; saat tanda tangan kondisi jaringan dicek ulang. Waktu menulis berita acara ikut dihitung SLA. Tutorial pertama tidak memakai berita acara.
+- Laporan kerja dibuat otomatis dari aksi pemain (perintah, pengaturan, aksi fisik). Bintang 1–3: SLA, tidak ada perangkat lain yang ikut putus, tanpa material terbuang + konfigurasi switch disimpan.
+- Konsekuensi: PC lain yang tadinya normal lalu putus karena ulah pemain masuk sebagai **keluhan susulan** yang harus diperbaiki. Perubahan jaringan bertahan sepanjang sesi (mis. PC yang dipindah ke VLAN kasir tetap di sana).
+- Briefing Kak Rani muncul saat pertama kali mengambil tiap jenis surat kerja. XP dan pangkat Magang (0) → Teknisi Junior (800 XP) → Teknisi (2.500) → Network Engineer (5.000) → Senior Network Engineer (9.000) tersimpan di `localStorage` (`kotaNusantara.noc.v1`). Meja crimping punya stok konektor RJ45 (10, satu per ujung yang di-crimp); kabel yang dibuang ikut membuang konektornya, isi ulang per pak dan pemakaiannya tercatat. XP per pekerjaan dikali 0,4 supaya naik pangkat butuh beberapa hari kerja (Teknisi Junior sekitar hari ke-2), bukan beberapa pekerjaan.
+
+### Pengkabelan terstruktur (TIA-568)
+- Meja → patch cord → outlet dinding → kabel horizontal → patch panel di rak lantai → patch cord → port switch. Nomor outlet = nomor port patch panel (contoh `L2-07`); nomor port switch berbeda, seperti di gedung nyata. Tiap 4 outlet ada 1 outlet cadangan.
+- Rak MDF di ruang server L1 (SW-L1, inti). Rak IDF di ruang IDF L2 dan L3 (SW-L2, SW-L3), uplink fiber Gi1/0/49 (trunk 802.1Q) ke MDF.
+- Rak: patch panel 48 port + switch 48 port bisa diklik. Klik port patch panel lalu port switch untuk memasang patch cord; cabut patch cord; cabut kabel loop; pasang ulang fiber uplink.
+- Toner + probe: pasang toner di outlet meja, nyalakan probe di rak, sapu port patch panel. Port yang benar berbunyi keras, port sebelahnya samar (induksi), dan nadanya melemah kalau port itu sudah tersambung ke port switch yang aktif.
+- Console switch: `interface gi1/0/49`, `switchport mode trunk`, `switchport trunk allowed vlan [add|remove|except|all|none] ...`, `show interfaces trunk`, dan log `%SW_MATM-4-MACFLAP_NOTIF` saat ada loop. Spanning tree: `show spanning-tree`, `spanning-tree mode rapid-pvst`, `no spanning-tree vlan 1`. STP aktif seperti bawaan Catalyst, jadi kabel loop baru bikin broadcast storm kalau STP dimatikan; dengan STP aktif port kedua masuk BLK.
+
+### Hari pertama: tutorial (pekerjaan fisik, tanpa kuis)
+- Pemain baru langsung mendapat surat kerja **Hari Pertama: Sambungkan PC Workshop** (juga ada di papan kerja sampai selesai): ambil LAN tester + patch cord di Lemari Alat, pasang patch cord dan tes kabel (C / tombol Cek), nyalakan PC (F / tombol Aksi), `ipconfig`, lalu `ping` Default Gateway.
+- Langkah dicatat dari aksi nyata. Petunjuk Kak Rani hanya muncul saat pemain tampak macet: diam ±8 detik tanpa kemajuan setelah ±22 detik, langkah salah (membuka PC sebelum kabel beres, mengetik perintah lain), atau terlalu lama. Petunjuk naik dari arahan singkat ke langkah rinci dan hilang begitu ada kemajuan. Teks menyesuaikan kontrol sentuh.
+
+### Kenyamanan bermain
+- Lemari alat menaruh alat yang dibutuhkan pekerjaan/langkah lab di atas dengan tanda **Diperlukan**, plus tombol *Ambil yang diperlukan*.
+- Memasang patch cord: kabel masuk, bunyi klik RJ45, LED link kuning lalu hijau (±0,65 detik).
+- *Pengaturan › Nama kamu* dipakai di tanda tangan surat kerja dan form jobsheet.
+
+### Mode Juri (tur 5 menit) — `src/game/demo.ts`
+- Tombol **Mode Juri** di menu utama atau tautan `?juri`. Enam pemberhentian, masing-masing langsung ke keadaan siap dicoba: surat kerja Pasang IP Statis di depan PC-nya, rak IDF dengan console switch, shift helpdesk dengan tiket gangguan, Lab Praktik VLSM → router-on-a-stick → ACL di rak lab, Pak Nusa, dan rekap kelas berisi contoh tiga siswa fiktif.
+- Tidak ada yang diskenariokan berhasil: pemain tetap mengerjakan sendiri. Save pemain disimpan dulu dan dikembalikan saat keluar (juga bila tab ditutup atau dimuat ulang di tengah tur).
+
+### Gedung Lab Praktik TKJ (SMK Nusantara, Kota Selatan) — `src/world/labBuilding.ts`, `src/game/praktik.ts`
+Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahlia). Terpisah dari magang di Nusantara Tech: tidak ada surat kerja, tiket, SLA, XP, atau supervisor.
+- Isi: 8 meja PC siswa (outlet LAB-01..08), meja guru + papan tulis, lemari alat, meja crimping, rak dengan patch panel dan switch SW-LAB. Jaringannya segmen sendiri: VLAN 70, 192.168.70.0/24, router-praktik 192.168.70.1 (WebKonfig), srv-jobsheet 192.168.70.10.
+- Meja guru: guru mencentang langkah (crimping T568B, pengkabelan terstruktur, IP statis, DHCP router, VLAN, rancang VLSM, routing antar-VLAN router-on-a-stick, firewall antar-VLAN dengan ACL extended, DNS lokal, troubleshooting 2 gangguan), batas waktu, dan opsi soal & meja beda tiap siswa, lalu mendapat kode 6 karakter (7 karakter bila memakai langkah VLSM/antar-VLAN/ACL; kode lama tetap bisa dibuka) atau tautan `?lab=KODE`. Kode menyimpan seluruh jobsheet, tanpa server. Kalimat guru bisa diubah jadi centang lewat kata kunci, atau AI kalau diaktifkan; AI tidak menilai.
+- Siswa memasukkan kode + nama di meja guru, mendapat satu meja, dan mengerjakan jobsheet berurutan. Panel jobsheet berisi tujuan, alat & bahan, K3, langkah kerja, dan checkpoint yang tercentang langsung dari simulator (urutan kabel, port switch, VLAN, label outlet, IP, DHCP, DNS, hasil ping/browser dari PC).
+- **VLSM**: blok 192.168.x.0/24 dengan empat kebutuhan host (GURU, SISWA, SERVER, link router). Siswa mengisi network, prefix, gateway, dan broadcast di jobsheet. Desain apa pun yang benar diterima (prefix terkecil yang cukup, mulai di batas blok, tidak tumpang tindih), bukan hanya urutan buku.
+- **Routing antar-VLAN (router-on-a-stick)**: router lab **R-LAB** di rak lab, console bergaya Cisco IOS (`interface g0/0.N`, `encapsulation dot1Q N`, `ip address`, `show ip interface brief`, `show vlans`, `show running-config`, `write memory`). Kabel Gi0/0 ke SW-LAB Gi1/0/24, yang harus dijadikan trunk (`switchport mode trunk`, `switchport trunk native vlan 70` agar meja lain tetap di VLAN 70, `switchport trunk allowed vlan`). Alamat memakai tabel VLSM siswa bila benar. PC GURU dan SISWA saling ping lewat router; gateway salah di salah satu PC membuat balasan tidak kembali.
+- **Firewall antar-VLAN**: ACL extended bernomor di R-LAB (`access-list 110 deny ip … …`, `permit ip any any`, `ip access-group 110 in|out`, `show access-lists`). Dicek dari simulator: SISWA tidak bisa ke GURU, tapi server lab 192.168.70.10 tetap terbuka.
+- **PIN paraf guru**: guru boleh mengisi PIN 4–6 angka saat menyusun jobsheet. Kode jadi 8 karakter dan hanya membawa cek 7-bit dari PIN (bukan PIN-nya). Setiap paraf meminta PIN; 3 kali salah mengunci paraf 1 menit. Batasan jujur: cek 7-bit bisa ditebak dengan banyak percobaan, jadi ini pencegah iseng, bukan keamanan ujian.
+- **K3 alat**: langkah terakhir jobsheet punya checkpoint *K3: alat dikembalikan ke lemari alat* (LAN tester, console, laptop, toner). Paraf terakhir menunggu alat kembali.
+- **Rekap kelas tanpa server**: lembar hasil memberi *kode hasil* satu baris (`KN1.…`). Siswa mengirimnya ke guru (chat grup, LMS). Di meja guru, *Guru: rekap kelas* menerima tempelan teks apa pun, mengambil semua kode, menolak kode yang rusak/diubah (checksum), memakai percobaan terbaru per nama, lalu menampilkan tabel (nilai, predikat, langkah tuntas, durasi, rata-rata) dan *Unduh CSV*. Checksum bukan tanda tangan digital: untuk ujian, guru tetap mengamati langsung.
+- Paraf guru: langkah yang checkpoint-nya terpenuhi harus diparaf di meja guru (dicek ulang langsung dari simulator) sebelum lanjut.
+- Lembar hasil: checkpoint terpenuhi ÷ seluruh checkpoint × 100, waktu per langkah, checkpoint yang gagal. Batasan: tanpa server, lembar hasil bisa dipalsukan, jadi guru sebaiknya melihat langsung.
+
+### Server Linux srv-nusa (Rak 2, ruang server L1)
+- Ubuntu-like, 192.168.10.5 di VLAN lab. Dipakai lewat **console KVM** di rak (F) atau **SSH dari PC** (`ssh teknisi@srv-nusa`, sandi `smkbisa`).
+- Layanan benar-benar menjalankan jaringan lab: `isc-dhcp-server` memberi lease lab dari `/etc/dhcp/dhcpd.conf`, `bind9` menjawab zone `lab.smk.local` dari `/etc/bind/db.lab.smk.local` dan meneruskan nama lain ke router-lab, `apache2` menyajikan `http://intranet.lab.smk.local` dari `/var/www/html/index.html`, `ssh`.
+- Shell: `ls cd cat grep nano` (editor dengan Ctrl+O/Ctrl+X), `sudo systemctl status|start|stop|restart|reload|enable`, `journalctl -u`, `ip a`, `ip r`, `ss -tlnp`, `ping`, `dig`, `nslookup`, `host`, `named-checkzone`, `named-checkconf`, `dhcpd -t`, `dhcp-lease-list`, `curl`.
+- Tiket: layanan mati (bind9/apache2/isc-dhcp-server), record zone salah atau salah ketik yang membuat zone ditolak, scope DHCP salah (range di luar subnet atau `option routers` salah).
+
+### Perangkat kantor L2/L3
+- **Printer jaringan** PRN-L2 (192.168.20.50) dan PRN-L3 (192.168.20.51): panel depan (F) untuk IP/mask/gateway, cetak halaman konfigurasi, colok kabel. Di PC: ikon **Printers** atau `control printers`, tambah printer TCP/IP, **Cetak halaman uji**.
+- **Telepon IP** di meja kantor: berbagi port switch dengan PC, data di access VLAN 20, suara di **voice VLAN 100**, daya PoE. Layar telepon (F) menunjukkan status pendaftaran; tes panggil ke 9000 (echo) atau ext lain. Switch CLI: `switchport voice vlan 100`, `no switchport voice vlan`, `power inline auto|never`, `show interfaces gi1/0/N` menampilkan voice VLAN dan PoE.
+- **NAS nas-kantor** (192.168.20.10, Rak 3 ruang server L1): web admin (layanan SMB, shared folder, hak akses grup staf, buat folder). Di PC: `net use Z: \\nas-kantor\dokumen`, `net use`, `net view`, dengan error Windows asli (53, 67, 5).
+- Tiket: printer kembali ke setelan pabrik / kabel lepas, telepon kehilangan voice VLAN / PoE, NAS SMB mati / hak akses hilang / kabel lepas.
+
+### Router edge R-EDGE (Rak 1, ruang server L1)
+- Gi0/0 ISP1 (utama), Gi0/1 ISP2 (cadangan), Gi0/2 inside. Semua lalu lintas internet dari PC, laptop tamu, dan srv-nusa melewati router ini: default route + **IP SLA/track** untuk failover, **NAT/PAT overload** di interface keluar, dan **ACL** di interface inside (dibaca dari atas, deny implisit).
+- CLI ala Cisco (console + laptop dari Lemari Alat): `show ip interface brief`, `show ip route`, `show ip nat statistics|translations`, `show track`, `show ip sla summary`, `show access-lists`, `show running-config`, `ip route ... [AD] [track N]`, `ip nat inside|outside`, `ip nat inside source list N interface Gi0/X overload`, `access-list N ...`, `ip access-list extended N` + `no <seq>`, `ip access-group N in`, `ip sla N` / `icmp-echo`, `ip sla schedule`, `track N ip sla M reachability`, `ping`, `write memory`.
+- Tiket: ISP1 putus dengan failover salah (route utama tanpa track, route cadangan hilang, atau NAT keluar Gi0/1 belum ada), NAT tidak mencakup segmen, ACL memblok segmen/DNS.
+- Semua tiket baru di atas hanya tertutup kalau akar masalahnya benar-benar beres di simulasi **dan** pemain menguji dari klien (browser intranet, cetak uji, panggilan telepon, `net use`, ping/situs).
+
+### Jongkok & Motor Matic (30 Okt 2026)
+- ✅ Jongkok (X / tombol Jongkok): mata turun halus 1,62 → 1,05 m, kapsul tabrakan 1,75 → 1,25 m, jalan jongkok ±1,1 m/s, pose jongkok + jalan jongkok di kamera orang ketiga. Cek plafon sebelum berdiri. Otomatis berdiri saat duduk di PC, naik tangga/lift, atau naik motor. Meja kantor (daun meja) sekarang padat: tidak bisa ditembus berdiri maupun jongkok (tinggi meja 0,76 m < tinggi jongkok).
+- ✅ Motor Matic (`src/game/motor.ts`, model di `src/assets/vehicles.ts`): skuter matic 1:1 (panjang 1,86 m, jarak sumbu roda 1,26 m, jok 0,74–0,80 m) prosedural, tanpa merek. Setang + spakbor depan + roda depan berbelok di sumbu kemudi, standar samping saat parkir, lampu rem menyala saat mengerem, pelat nomor, roda berputar.
+- ✅ Diparkir di: `PROP_MOTOR_01–03` di deretan parkir motor depan hotel (X 241,5–243,5 · Z 165, dekat spawn) dan `PROP_MOTOR_04–05` di parkir mobil hotel (X 276,5 / 277,7 · Z 199,5).
+- ✅ Fisika arcade yang masuk akal: akselerasi menurun mendekati 85 km/j, rem ±7 m/s², mundur pelan 1,3 m/s, sudut belok dibatasi kecepatan, motor miring saat menikung sesuai kecepatan, mengikuti tinggi aspal/kerb/trotoar (naik kerb ≤ 22 cm), tabrakan dengan gedung/properti/kendaraan/pejalan kaki/motor lain dengan sub-step (tidak tembus di 85 km/j), tidak bisa masuk hotel/tangga JPO, pemulihan otomatis kalau terjepit, R = kembali ke jalan terdekat. Spidometer, suara mesin hasil Web Audio (tanpa file).
+- ✅ Saat naik motor: interaksi PC/rak/tangga/cek dimatikan, pemain duduk dengan tangan di setang (ikut berbelok) dan kaki kiri turun saat berhenti.
+
+### Kamera, gerak, grafik
+- ✅ Orang pertama/ketiga. Kamera orang ketiga berhenti sebelum tembok/plafon, dan arah pitch-nya sudah diperbaiki.
+- ✅ Kolisi otomatis untuk semua mesh padat ≥ 25 cm (audit: 76 gedung kota dan 30 properti jalan tertutup kolider).
+- ✅ Anti-flicker (shadow frustum di-snap, near/far kamera dinamis, polygonOffset lantai/marka), GTAO.
+- ✅ Satu level grafik untuk semua perangkat: AO, bayangan 2048, lampu malam, pohon dan detail penuh (fasad, AC outdoor, atap, gorong-gorong, isi toko ruko, meja kantor). Kalau rata-rata < 24 FPS, game hanya mematikan AO lalu menurunkan resolusi render; aset tidak berubah. Di dalam hotel hanya lantai pemain ±1 yang digambar.
+- ✅ Kontrol sentuh: tombol E/Q hanya muncul di depan tangga/lift, panel lift di tengah layar, tombol F berlabel aksi yang tersedia.
+- ✅ Loading screen dengan penjaga error WebGL. Tidak ada resource jaringan eksternal (aman offline).
+
+### Update 30 Okt 2026 (v9)
+- Menu utama ala game: flyover kota 3D, Mulai/Lanjutkan, Mulai dari Awal, Jelajah Kota, Pengaturan (sensitivitas mouse, volume, invert Y, kamera, siklus hari), Kontrol, Tentang; layar loading; menu pause (Esc) dengan gaya sama. Responsif desktop/HP.
+- Siklus siang-malam: 1 hari game = 24 menit nyata; tombol **N** / tombol sentuh **Waktu** untuk Pagi/Siang/Sore/Malam; jam di HUD; lampu jalan, jendela, dan lampu kendaraan menyala saat malam.
+- Belokan motor lebih halus (setang, kemiringan, kamera mengikuti pelan).
+- Kota Selatan: kota diperluas 400x300 m menjadi 400x600 m: Jl. Anggrek, Jl. Dahlia, Jl. Flamboyan, Kampung C dan D dengan gang, ruko + minimarket, perkantoran/apartemen, Lapangan Anggrek, Masjid Al-Ikhlas, Taman Dahlia, SMK Nusantara, perumahan.
+- Perbaikan: Spasi setelah Esc tidak lagi mengembalikan pemain ke spawn; keluar-masuk menu mempertahankan posisi (termasuk jongkok/motor); lift tidak macet saat kunci mouse lepas; rumah baru padat (tidak bisa ditembus).
+
+### Update 31 Okt 2026: suara suasana kota
+- Suara khas kota Indonesia, semua disintesis Web Audio (tanpa file luar): dengung lalu lintas (lebih ramai jam sibuk, sepi malam), motor lewat, klakson "tin tin", tukang bakso "ting-ting" sore-malam, burung pagi, jangkrik malam, langkah kaki (lebih pelan saat jongkok). Diredam saat di dalam gedung, diam saat menu/pause.
+- **H** = klakson saat naik motor. Volume diatur di Pengaturan > Volume suara.
+
+### Update 31 Okt 2026: lahan kosong dibangun
+- Bekas "Lahan Cadangan" (pagar proyek yang bisa ditembus) dihapus dan diisi: ruko di selatan Jl. Cempaka (barat dan timur), BLD_OFFICE_C1, BLD_APT_C1, BLD_APT_C2, BLD_OFFICE_C3, dan BLD_OFFICE_C2 di timur hotel. Semua padat (solidAudit 320 objek, 0 tembus).
+
+### Update 31 Okt 2026: NPC hotel
+- Lobi L1: 2 resepsionis di balik meja, satpam dekat pintu, tamu check-in, orang lalu-lalang. Kantor L1-L3: karyawan duduk mengetik di sekitar separuh PC (NPC menghilang saat pemain memakai PC itu). Pantry L2/L3 orang ngobrol, koridor L2-L8 tamu berjalan. NPC lantai pemain ±1 ditampilkan, lobi tetap terlihat dari luar; NPC tidak pernah menghilang mendadak: karyawan berdiri dan geser ke samping meja saat PC-nya mau dipakai.
+- NPC padat: pemain tidak bisa menembus NPC, dan NPC yang berjalan berhenti kalau jalannya dihalangi pemain.
+- Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
+
+### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
+- **Izin data & API key**: AI tidak mengirim apa pun sebelum pemain/guru memilih *Setuju* di Pengaturan (yang dikirim: pertanyaan, teks surat kerja/jobsheet, konfigurasi IP simulasi; nama siswa dan nilai tidak). API key bisa disimpan *di perangkat ini* atau *sesi ini saja* untuk komputer lab bersama.
+- Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.
+- **Keluhan pelanggan dari AI**: tiap shift, kalimat keluhan tiket ditulis ulang dengan gaya pelapor (manajer, kasir, tamu hotel) hanya dari gejalanya, jadi pemain tetap harus mendiagnosis sendiri.
+- **Catatan penutupan tiket**: di laporan kerja, pemain menulis catatan seperti teknisi sungguhan. Cek offline menandai 4 bagian (gejala, penyebab, tindakan, verifikasi), lalu AI memberi ulasan dibanding fakta tiket. Catatan tersimpan di browser.
+- Pakai **OpenRouter** (model bisa diganti, bawaan model gratis). API key diisi di Pengaturan → Pak Nusa dan hanya disimpan di browser. Tanpa key, offline, atau saat AI error, semua fitur tetap jalan dengan mesin petunjuk offline.
+- Setiap teks AI berlabel **AI**. Bertanya ke Pak Nusa dihitung seperti memakai petunjuk (tanpa bonus XP tanpa-petunjuk).
+
+### Aksesibilitas, privasi, Green IT (1 Nov 2026)
+- Pengaturan → Aksesibilitas: ukuran teks panel kerja (Normal, Besar, Sangat besar) dan mode buta warna (status hijau/merah jadi biru/oranye).
+- Menu Tentang memuat penjelasan privasi dan transparansi AI: tanpa akun, analitik, iklan, atau pelacak; data hanya di `localStorage`.
+- Satu level grafik dengan detail penuh; kalau FPS turun, hanya AO dan resolusi render yang diturunkan.
+
+### Rekayasa perangkat lunak (1 Nov 2026)
+- `ARCHITECTURE.md`: diagram modul, alur tiket, desain AI, privasi.
+- `tests/`: unit test (vitest) untuk simulasi jaringan, Lab Praktik, gameplay NOC, dan Pak Nusa. `npm test`.
+- `.github/workflows/ci.yml`: cek tipe, unit test, dan build di setiap push.
+
+## 6. Perubahan dari PDF (hasil audit)
+1. Trotoar arteri 3 m menjadi 5 m (pedoman kawasan bisnis), lebar Sudirman/Thamrin menjadi 26 m.
+2. Zebra cross tengah ruas X=140 dan X=260 dihapus (arteri terbagi < 300 m dari simpang). Penyeberangan lewat JPO, total zebra 12.
+3. Tangga JPO: run 15,5 m untuk naik 5,5 m (±19,5°, maks 20°), lebar 2 m.
+4. Halte dipindah ke sisi luar trotoar sehingga jalur pejalan 3,5 m tetap bebas.
+5. Curtain wall lobi dipotong karena bertabrakan dengan pintu utama 3 m di PDF.
+6. Workshop TKJ memakai lantai keramik/vinyl, bukan karpet.
+
+## 7. Struktur folder
+
+```
+kota-nusantara/
+├─ index.html, package.json, tsconfig.json
+├─ vite.config.ts            build ES module
+├─ vite.single.config.ts     build classic/IIFE
+├─ src/
+│  ├─ main.ts                UI, mode jalan, kamera, interaksi, ekspor GLB, hook tes window.__kota
+│  ├─ data/city.ts           semua koordinat jalan, zona, gedung, level hotel, anchor, spawn
+│  ├─ world/                 core, roads, buildings, hotel, props, wayfinding, interiorDressing
+│  ├─ assets/                netdevices, vehicles, people
+│  ├─ game/                  physics, traffic, motor (Motor Matic), missionSystem, missionLogic, missions, missionsF
+│  ├─ ui/                    minimap, missionUI, waypoint, mission.css
+│  └─ pcos/                  net.ts (simulasi jaringan), os.ts (Jendela 11), switchcli.ts, wifi.ts,
+│                            linux.ts (srv-nusa), office.ts (printer/telepon/NAS), edge.ts (R-EDGE), term.ts, ext.ts
+├─ dev/                      halaman pamer: devices, vehicles, people, missions
+├─ docs/index.html           build satu file (GitHub Pages), bisa dibuka offline
+├─ tools/
+│  ├─ make_single.py         pembuat index.html satu file
+│  ├─ reach_png.py           visualisasi peta jangkauan lantai
+│  └─ qa/*.mjs               skrip Playwright (play, qa_v4, qa_tp, qa_pcos, qa_reach, qa_near, ...)
+└─ design/                   dokumen desain (.world): prompt sumber, expanded prompt, scene summary, laporan validasi
+```
+
+Konversi koordinat: `three.x = X − 200`, `three.z = Z − 150` (X/Z = koordinat tabel PDF).
+Semua nama objek dari PDF (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_, ...) dipertahankan di objek Three.js.
+
+## 8. Validasi
+Riwayat validasi per versi ada di [CHANGELOG.md](CHANGELOG.md); skrip playtest Playwright ada di `tools/qa/`.
