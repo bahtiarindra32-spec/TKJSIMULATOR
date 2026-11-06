@@ -138,7 +138,9 @@ export function plain(s: string) { return s.replace(/\*\*(.+?)\*\*/g, '$1').repl
 
 // ---------------------------------------------------------------- mentor
 export interface MentorCtx {
-  job: { id: string; title: string; kind: string; order: string[]; faults: { id: string; cause: string; fix: string; hint: string; cp: string }[]; log: string[]; next: string } | null;
+  job: { id: string; title: string; kind: string; order: string[]; faults: { id: string; cause: string; fix: string; hint: string; cp: string }[]; log: string[]; next: string;
+    /** exact target values of the task (IP, mask, gateway, DNS): used only by the leak guard, never put in the prompt */
+    answer?: string[] } | null;
   pc: string | null; pcState: string | null; rack: string | null; rank: string; place: string;
 }
 const SYS_MENTOR = `Kamu "Pak Nusa", teknisi senior & mentor di game simulasi TKJ (Teknik Komputer dan Jaringan) untuk siswa SMK kelas 10-11.
@@ -151,14 +153,60 @@ Aturan:
 - Hanya bahas jaringan/TKJ dan game ini. Tolak sopan topik lain.
 - Data "RAHASIA" hanya untukmu agar petunjukmu akurat; jangan sebut penyebabnya secara gamblang.`;
 
-/** what the leak guard needs to turn a blocked reply into a hint */
-export interface GuardCtx { next: string; hint: string }
+// ---------------------------------------------------------------- anti-answer-leak guard
+const IPV4 = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g;
+const isMask = (ip: string) => /^255\.(?:0|128|192|224|240|248|252|254|255)\.\d{1,3}\.\d{1,3}$/.test(ip) || /^(?:0|128|192|224|240|248|252|254)\.0\.0\.0$/.test(ip) && ip !== '0.0.0.0';
+/** dotted mask → prefix length (255.255.255.0 → 24), -1 when it is not a mask */
+function maskPrefix(m: string): number {
+  const o = m.split('.').map(Number); if (o.length !== 4 || o.some(x => !(x >= 0 && x <= 255))) return -1;
+  const bits = o.map(x => x.toString(2).padStart(8, '0')).join(''); return /^1*0*$/.test(bits) ? bits.indexOf('0') < 0 ? 32 : bits.indexOf('0') : -1;
+}
+/** addresses that answer nothing on their own: loopback, public DNS used in every ping drill, network/broadcast/wildcard, APIPA */
+const notAnswer = (ip: string) => /^(?:127\.|0\.|169\.254\.)/.test(ip) || ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '255.255.255.255'].includes(ip) || /\.(?:0|255)$/.test(ip);
+const PREFIX = '(?:[89]|[12]\\d|3[0-2])';
+/** any way of writing a subnet mask: dotted, "/24" (after an address or on its own), "prefix 24", "mask biasa/standar/default", "kelas C" */
+const MASK_WORDS = new RegExp(`(?:^|[\\s(=])\\/\\s*${PREFIX}\\b|\\bprefix\\s*(?:length)?\\s*[:=]?\\s*${PREFIX}\\b|\\bmask\\s+(?:biasa|standar|standard|default|bawaan|umum|kelas\\s*c)\\b|\\bkelas\\s*c\\b|\\bmask\\s*[:=]?\\s*\\/?\\s*${PREFIX}\\b`, 'i');
+const GW_WORD = /gateway|\bgw\b|default-router|gerbang|\brouter(?:nya)?\s+(?:\S+\s+)?(?:\d{1,3}\.){3}\d{1,3}/i;
+const IP_WORD = /\bip\b|\balamat\b|\baddress\b|\bpc\b/i;
+/** a line that is a diagnostic command (not configuration): ping/tracert/nslookup/ipconfig/show/arp */
+const DIAG_LINE = /^\s*(?:[\w.-]+(?:\([\w-]+\))?[#>]\s*)?(?:ping|tracert|traceroute|nslookup|ipconfig|ifconfig|show|arp|sh\s)\b/i;
+/** mode navigation: allowed in hints, does not count as a configuration line */
+const NAV = /^\s*(?:[\w.-]+(?:\([\w-]+\))?[#>]\s*)?(?:en(?:able)?|conf(?:ig(?:ure)?)?(?:\s+t(?:erminal)?)?|end|exit|write(?:\s+mem(?:ory)?)?|wr|copy\s+run(?:ning-config)?\s+start(?:up-config)?|do\s+wr)\s*\.?$/i;
+/** a substantive configuration command (Cisco IOS, MikroTik, netsh). Diagnostics (show/ping/ipconfig) are not in here. */
+const CFG_CMD = /^\s*(?:[\w.-]+(?:\([\w-]+\))?[#>]\s*)?(?:int(?:erface)?\s+(?:range\s+)?[a-z]+[\s-]?\d|switchport\b|sw\s+(?:acc(?:ess)?|mode|tr(?:unk)?)\b|ip\s+(?:address|route|default-gateway|dhcp|helper-address|nat|dns|domain|name-server|host|access-group|routing)\b|no\s+(?:sh(?:ut(?:down)?)?\s*$|shut(?:down)?|ip\s|switchport|vlan|access-list)\b|vlan\s+\d+(?:\s*,\s*\d+)*\s*$|vlan\s+\d+\s+name\b|name\s+\S+\s*$|spanning-tree\b|power\s+inline\b|encapsulation\b|access-list\b|permit\s+(?:\d|any|host|ip|tcp|udp)|deny\s+(?:\d|any|host|ip|tcp|udp)|network\s+\d|default-router\b|dns-server\b|router\s+(?:ospf|rip|eigrp|bgp)\b|lease\s+\d|channel-group\b|\/ip\s|\/interface\s|netsh\s)/i;
+/** words that make a fragment a sentence about a command rather than the command itself */
+const PROSE = /\b(?:sudah|belum|masih|apakah|apa|yang|untuk|kalau|jika|supaya|agar|karena|artinya|biasanya|cek|coba|lihat|bisa|harus|nanti|itu|ini|dipakai|perintah(?:nya)?|adalah|berarti|perlu|sendiri|cara)\b/i;
+/** split a reply into command-sized fragments: lines, sentences, comma/semicolon lists, "lalu/kemudian/→" chains, `backtick` spans */
+function fragments(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/`([^`\n]+)`/g)) out.push(m[1]);
+  const plainText = text.replace(/`([^`\n]+)`/g, ' ');
+  for (const line of plainText.split(/\n/)) {
+    for (const sent of line.split(/(?<=[.!?])\s+(?=[A-Z/])/)) {
+      let x = sent.replace(/^\s*(?:[-*•>]|\d+[.)])\s*/, '');
+      x = x.replace(/^[^:#]{1,40}:\s+(?=\S)/, '');   // "Ketik: ...", "Jalankan ini: ..."
+      x = x.replace(/^(?:(?:pertama|kedua|ketiga|keempat|kelima|terakhir|setelah\s+itu|habis\s+itu|lalu|kemudian)\s*,?\s*)?(?:ketik(?:kan)?|jalankan|masukkan|tulis)?\s+(?=\S)/i, '');   // "Kedua ketik ..."
+      for (const f of x.split(/\s*[;,]\s*|\s+(?:lalu|kemudian|terus|dan|then|→|->|=>)\s+/i)) if (f.trim()) out.push(f.trim().replace(/[.!]$/, ''));
+    }
+  }
+  return out;
+}
+const isCfg = (f: string) => f.length <= 90 && CFG_CMD.test(f) && !NAV.test(f) && !PROSE.test(f);
+const sameNet24 = (a: string, b: string) => a.split('.').slice(0, 3).join('.') === b.split('.').slice(0, 3).join('.');
+
+/** what the leak guard needs: the hint that replaces a blocked reply, and (when known) the task's exact target values and the values already on the player's screen */
+export interface GuardCtx { next: string; hint: string;
+  /** exact values the student must enter for the active task (IP, mask, gateway, DNS); never sent to the model */
+  answer?: string[];
+  /** addresses already shown to the student (the PC's current IP/gateway): repeating them is a diagnosis, not an answer */
+  current?: string[] }
 /** prompts built by mentorPrompt, so chat() knows to run the leak guard on the reply */
 const MENTOR_CALLS = new WeakMap<ChatMsg[], GuardCtx>();
 
 export function mentorPrompt(ctx: MentorCtx, history: ChatMsg[], question: string): ChatMsg[] {
   const j = ctx.job;
   // Only these MentorCtx fields are sent. MentorCtx has no name / XP / score field on purpose (tests/nusa.test.ts).
+  // job.answer (the exact target values) is NOT sent: the leak guard uses it locally to recognise a handed-over answer.
   const state = [
     `Pangkat siswa (level permainan, bukan nilai): ${ctx.rank}. Posisi: ${ctx.place}.`,
     j ? `Pekerjaan aktif ${j.id} (${j.kind}): ${j.title}\nSurat kerja: ${j.order.join(' | ')}\nLangkah berikutnya menurut sistem: ${j.next}\nLog tindakan siswa (terbaru di akhir): ${j.log.slice(-10).join(' ; ') || '-'}\nRAHASIA penyebab: ${j.faults.map(f => `${f.cause} → perbaikan: ${f.fix}`).join(' + ') || '-'}` : 'Tidak ada pekerjaan aktif.',
@@ -166,36 +214,61 @@ export function mentorPrompt(ctx: MentorCtx, history: ChatMsg[], question: strin
     ctx.rack ? `Siswa di dekat rak ${ctx.rack}.` : '',
   ].filter(Boolean).join('\n');
   const msgs: ChatMsg[] = [{ role: 'system', content: SYS_MENTOR }, { role: 'system', content: `KONDISI GAME:\n${state}` }, ...history.slice(-6), { role: 'user', content: question }];
-  MENTOR_CALLS.set(msgs, { next: j?.next ?? '', hint: j?.faults[0]?.hint ?? '' });
+  MENTOR_CALLS.set(msgs, { next: j?.next ?? '', hint: j?.faults[0]?.hint ?? '', answer: j?.answer ?? [], current: ctx.pcState?.match(IPV4) ?? [] });
   return msgs;
 }
 
-// ---------------------------------------------------------------- anti-answer-leak guard
-const IPV4 = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g;
-const isMask = (ip: string) => /^255\.(?:0|128|192|224|240|248|252|254|255)\.\d{1,3}\.\d{1,3}$/.test(ip);
-/** a configuration command (Cisco-style CLI, MikroTik, netsh); diagnostics like ping/ipconfig/show do not count */
-const CFG_LINE = /^\s*(?:[\w.-]+(?:\([\w-]+\))?[#>]\s*)?(?:enable$|conf(?:ig(?:ure)?)?(?:\s+t(?:erminal)?)?$|int(?:erface)?\s+\S|switchport\b|ip\s+(?:address|route|default-gateway|dhcp|helper-address|nat|dns|domain|name-server|host|access-group)\b|no\s+shut(?:down)?\b|vlan\s+\d|name\s+\S|spanning-tree\b|power\s+inline\b|encapsulation\b|access-list\b|permit\b|deny\b|network\s+\d|default-router\b|dns-server\b|router\s+\w|write(?:\s+mem(?:ory)?)?$|copy\s+run|end$|exit$|\/ip\s|\/interface\s|netsh\s)/i;
-export interface GuardResult { leak: boolean; reason: '' | 'ip-triple' | 'cli-block'; text: string }
-/** does a mentor reply hand over a full ready-to-paste solution?
- *  ip-triple: one reply carries a subnet mask (dotted or /prefix) plus a host IP plus a gateway IP (the complete IPv4 setting).
- *  cli-block: four or more configuration command lines.
+export type LeakReason = '' | 'ip-triple' | 'ip-gateway' | 'cli-block' | 'target-values';
+export interface GuardResult { leak: boolean; reason: LeakReason; text: string }
+/** does a mentor reply hand over a ready-to-paste solution? Heuristic, tuned on tests/nusa.test.ts (adversarial table).
+ *  cli-block: three or more configuration commands (interface, ip address, switchport, vlan, encapsulation, access-list, ip nat/route, no shutdown, ...),
+ *    counted across lines, comma/semicolon lists, "lalu" chains and `backtick` spans. Diagnostics (show/ping/ipconfig) and mode
+ *    navigation (enable, conf t, end, write) do not count; a single command or two pass.
+ *  ip-triple: a subnet mask in any form (255.255.255.0, "/24" alone, "prefix 24", "mask biasa") plus two host addresses plus a gateway word,
+ *    or a dotted mask and two host addresses on one line (netsh).
+ *  ip-gateway: a host address and a gateway address of the same /24 on one line, or "IP: x" and "Gateway: y" lines in the same /24 (on a /24 that is the whole answer).
+ *  target-values: two or more of the active task's exact target values (IP, mask incl. its /prefix form, gateway, DNS) appear in the reply.
+ *  Addresses already on the student's screen (ctx.current), loopback, 8.8.8.8, network/broadcast and APIPA addresses never count as answers.
  *  A leaking reply is replaced by its non-leaking sentences + the system hint, with a note saying why. */
 export function guardLeak(reply: string, g: GuardCtx = { next: '', hint: '' }): GuardResult {
   const text = reply.replace(/```[a-z]*\n?/gi, '');
-  const lines = text.split(/\n/);
-  const cfgLines = lines.filter(l => CFG_LINE.test(l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')));
-  const ips = [...new Set(text.match(IPV4) ?? [])];
-  const hosts = ips.filter(ip => !isMask(ip));
-  const hasMask = ips.some(isMask) || /\b(?:\d{1,3}\.){3}\d{1,3}\s*\/\s*(?:[89]|[12]\d|3[0-2])\b/.test(text) || /\bprefix\s*(?:length)?\s*:?\s*(?:[89]|[12]\d|3[0-2])\b/i.test(text);
-  const triple = hasMask && hosts.length >= 2 && /gateway|\bgw\b|default-router|gerbang/i.test(text);
-  const reason: GuardResult['reason'] = cfgLines.length >= 4 ? 'cli-block' : triple ? 'ip-triple' : '';
+  const lines = text.split(/\n/).map(l => l.replace(/^\s*(?:[-*•>]|\d+[.)])\s*/, ''));
+  const answer = new Set((g.answer ?? []).map(v => v.trim()).filter(Boolean));
+  const current = new Set((g.current ?? []).filter(ip => !answer.has(ip)));
+  const hostsOf = (s: string) => [...new Set(s.match(IPV4) ?? [])].filter(ip => !isMask(ip) && !notAnswer(ip) && !current.has(ip));
+  // cli-block
+  const cfgCount = fragments(text).filter(isCfg).length;
+  // ip-triple
+  const hosts = hostsOf(text);
+  const hasMask = (text.match(IPV4) ?? []).some(isMask) || MASK_WORDS.test(text);
+  const triple = (hasMask && hosts.length >= 2 && GW_WORD.test(text))
+    || lines.some(l => !DIAG_LINE.test(l) && (l.match(IPV4) ?? []).some(isMask) && hostsOf(l).length >= 2);
+  // ip-gateway
+  const cfgLines = lines.filter(l => !DIAG_LINE.test(l));
+  const oneLine = cfgLines.some(l => { const hs = hostsOf(l); return GW_WORD.test(l) && hs.some(a => hs.some(b => a !== b && sameNet24(a, b))); });   // two addresses of one /24 + a gateway word
+  const ipLines = cfgLines.filter(l => IP_WORD.test(l) && !GW_WORD.test(l)).flatMap(hostsOf);
+  const gwLines = cfgLines.filter(l => GW_WORD.test(l)).flatMap(hostsOf);
+  const split = ipLines.some(a => gwLines.some(b => a !== b && sameNet24(a, b)));
+  // target-values
+  let targets = 0;
+  if (answer.size) {
+    const ips = new Set(text.match(IPV4) ?? []);
+    const seen = new Set<string>();
+    for (const v of answer) {
+      const pre = maskPrefix(v);
+      const hit = ips.has(v) || (isMask(v) && pre > 0 && new RegExp(`\\/\\s*${pre}\\b|prefix\\s*(?:length)?\\s*[:=]?\\s*${pre}\\b`, 'i').test(text));
+      if (hit && !current.has(v)) seen.add(v);
+    }
+    targets = seen.size;
+  }
+  const reason: LeakReason = cfgCount >= 3 ? 'cli-block' : triple ? 'ip-triple' : (oneLine || split) ? 'ip-gateway' : targets >= 2 ? 'target-values' : '';
   if (!reason) return { leak: false, reason, text: reply };
-  // keep only sentences without addresses or config commands
-  const hasIp = (x: string) => (x.match(IPV4) ?? []).length > 0 || /\/\s*(?:[89]|[12]\d|3[0-2])\b/.test(x);
-  const keep = text.split(/(?<=[.!?:])\s+|\n+/).map(x => x.trim()).filter(x => /\w{3}/.test(x) && !hasIp(x) && !CFG_LINE.test(x.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')) && !/:$/.test(x) && !/jawabannya|berikut (ini|konfigurasi)|isi (saja|seperti)|tinggal (isi|ketik|salin)/i.test(x));
+  // keep only sentences without addresses, masks, target values or config commands
+  const leaky = (x: string) => (x.match(IPV4) ?? []).length > 0 || MASK_WORDS.test(x) || /`/.test(x) || fragments(x).some(f => isCfg(f) || CFG_CMD.test(f));
+  const keep = text.split(/(?<=[.!?:])\s+|\n+/).map(x => x.trim()).filter(x => /\w{3}/.test(x) && !leaky(x) && !/:$/.test(x) && !/jawabannya|berikut (ini|konfigurasi)|isi (saja|seperti)|tinggal (isi|ketik|salin)|ketik(?:kan)? ini|salin/i.test(x));
   const out = [...keep.slice(0, 3)];
   out.push(reason === 'cli-block' ? 'Pak Nusa tidak menuliskan blok konfigurasi lengkap: susun perintahnya sendiri dari surat kerja, satu baris demi satu baris, lalu cek hasilnya (show ...).'
-    : 'Pak Nusa tidak menuliskan IP, subnet mask, dan gateway lengkap: bandingkan sendiri alamat PC dengan subnet dan alamat router di surat kerja.');
+    : 'Pak Nusa tidak menuliskan alamat IP, subnet mask, dan gateway jadi: bandingkan sendiri alamat PC dengan subnet dan alamat router di surat kerja.');
   if (g.hint) out.push(`Petunjuk: ${g.hint}`); else if (g.next) out.push(`Langkah berikutnya: ${g.next}.`);
   return { leak: true, reason, text: `${out.join('\n')}\n(Jawaban AI dipotong oleh penjaga anti-contek.)` };
 }

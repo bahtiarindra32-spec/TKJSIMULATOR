@@ -14,6 +14,22 @@ export function applyA11y() { const b = document.body; b.classList.toggle('txt-l
 try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY) ?? '{}')); } catch { /* ignore */ }
 export function saveSettings() { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* ignore */ } }
 
+/** every browser-storage key this game writes starts with one of these (grep localStorage/sessionStorage in src):
+ *  kotaNusantara.settings.v1 / .ai.v1 / .ai.key / .noc.v1 / .notes.v1 / .missions.v2 / .demoBackup, kn-reloaded, __ms_probe */
+export const GAME_KEY_PREFIXES = ['kotaNusantara.', 'kn-', '__ms_probe'];
+type KeyStore = Pick<Storage, 'length' | 'key' | 'removeItem'>;
+/** remove all of this game's keys (progress, settings, AI key and consent, notes, lab/demo backups) from the given stores; other sites' and apps' keys on the same origin stay. Returns the removed keys. */
+export function wipeGameData(stores: KeyStore[]): string[] {
+  const gone: string[] = [];
+  for (const st of stores) {
+    try {
+      const keys: string[] = []; for (let i = 0; i < st.length; i++) { const k = st.key(i); if (k !== null && GAME_KEY_PREFIXES.some(p => k.startsWith(p))) keys.push(k); }
+      for (const k of keys) { st.removeItem(k); gone.push(k); }
+    } catch { /* storage blocked: nothing to remove */ }
+  }
+  return gone;
+}
+
 export interface MenuHooks {
   start(fresh: boolean): void; resume(): void; tour(): void; lab(): void; demo(): void; toMainMenu(): void;
   setQuality(q: QChoice): void; setTime(id: 'pagi' | 'siang' | 'sore' | 'malam'): void; applySettings(): void;
@@ -84,6 +100,8 @@ export class Menu {
     document.body.appendChild(this.pauseEl);
     this.fadeEl.id = 'fade'; document.body.appendChild(this.fadeEl);
     this.clockEls = [...document.querySelectorAll<HTMLElement>('[data-clock]')];
+    // other modules (Pak Nusa's "Coba AI live" panel) open Settings at a section without importing the menu instance
+    window.addEventListener('kn:open-settings', e => this.openSettingsAt((e as CustomEvent<{ section?: string; provider?: 'openrouter' | 'local' }>).detail ?? {}));
     // keyboard navigation inside menus (arrow keys move focus, Esc closes a panel)
     for (const host of [this.root, this.pauseEl]) host.addEventListener('keydown', e => {
       const ke = e as KeyboardEvent;
@@ -92,6 +110,14 @@ export class Menu {
         const i = bs.indexOf(document.activeElement as HTMLElement); const n = bs[(i + (ke.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]; n?.focus(); e.preventDefault();
       }
     });
+  }
+  /** open Settings (title screen or pause card) scrolled to a section; provider preselects the AI provider */
+  openSettingsAt(o: { section?: string; provider?: 'openrouter' | 'local' }) {
+    if (o.provider) { aiCfg.provider = o.provider; saveAiCfg(); }
+    let host = this.panel;
+    if (!this.open) { if (!this.paused) this.pause(true); host = this.ppanel; }
+    this.showPanel(host, 'settings');
+    if (o.section === 'ai') setTimeout(() => { const hd = host.querySelector<HTMLElement>('#pnAi'); hd?.scrollIntoView({ block: 'start' }); (host.querySelector<HTMLElement>('#aiKey') ?? host.querySelector<HTMLElement>(`#aiProv-${aiCfg.provider}`))?.focus({ preventScroll: true }); }, 90);
   }
   setClock(t: string) { for (const e of this.clockEls) if (e.textContent !== t) e.textContent = t; }
   setTimeActive(label: string) { this.pauseEl.querySelectorAll('.seg').forEach(b => b.classList.toggle('on', b.textContent === label)); }
@@ -138,7 +164,7 @@ export class Menu {
       body.appendChild(el('h4', '', 'Aksesibilitas'));
       row('Ukuran teks panel kerja', seg([['m', 'Normal'], ['l', 'Besar'], ['xl', 'Sangat besar']], () => S.textSize, v => { S.textSize = v as Settings['textSize']; applyA11y(); }, 'txt'), 'Papan kerja, surat kerja, laporan, HUD tiket');
       row('Mode buta warna', seg([['0', 'Mati'], ['1', 'Aktif']], () => (S.colorBlind ? '1' : '0'), v => { S.colorBlind = v === '1'; applyA11y(); }, 'cb'), 'Lampu link & status hijau/merah jadi biru/oranye')
-      body.appendChild(el('h4', '', 'Pak Nusa (mentor AI)'));
+      { const hd = el('h4', '', 'Pak Nusa (mentor AI)'); hd.id = 'pnAi'; body.appendChild(hd); }
       row('Aktifkan AI', seg([['1', 'Aktif'], ['0', 'Mati (offline)']], () => (aiCfg.enabled ? '1' : '0'), v => { aiCfg.enabled = v === '1'; saveAiCfg(); }, 'ai'), 'Tanpa AI, Pak Nusa menjawab dari petunjuk offline');
       const txt = (val: () => string, set: (v: string) => void, name: string, ph: string, secret = false) => { const i = el('input', 'pn-text') as HTMLInputElement; i.type = secret ? 'password' : 'text'; i.name = name; i.id = name; i.placeholder = ph; i.value = val(); i.autocomplete = 'off'; i.spellcheck = false; i.addEventListener('change', () => { set(i.value.trim()); saveAiCfg(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
       const local = aiCfg.provider === 'local';
@@ -173,6 +199,15 @@ export class Menu {
           finally { b.disabled = false; }
         });
         w.append(b, o); row('Status AI', w); }
+      body.appendChild(el('h4', '', 'Privasi &amp; data'));
+      { const w = el('div', 'pn-seg'); const b = el('button', 'seg', 'Hapus semua data saya') as HTMLButtonElement; b.type = 'button'; b.name = 'wipeData'; b.id = 'wipeData';
+        b.addEventListener('click', () => {
+          if (!confirm('Hapus semua data Kota Nusantara di browser ini?\n\nYang dihapus: progres dan XP, catatan tiket, pengaturan (termasuk nama), API key dan izin AI, cadangan Mode Juri. Tidak bisa dibatalkan. Halaman akan dimuat ulang.')) return;
+          const gone = wipeGameData([localStorage, sessionStorage]);
+          b.disabled = true; b.textContent = `Terhapus (${gone.length} data) · memuat ulang…`;
+          location.reload();   // at once: nothing gets a chance to save again
+        });
+        w.appendChild(b); row('Hapus semua data saya', w, 'Progres, catatan, pengaturan, nama, API key, dan izin AI yang disimpan game ini di browser ini. Data situs lain tidak tersentuh.'); }
     } else if (kind === 'controls') {
       const sec = (title: string, rows: [string, string][]) => { body.appendChild(el('h4', '', title)); const t = el('div', 'pn-keys'); for (const [k, d] of rows) t.appendChild(el('div', 'pn-key', `<kbd>${k}</kbd><span>${d}</span>`)); body.appendChild(t); };
       if (h.touch) { sec('Layar sentuh', ROWS_TOUCH); sec('Keyboard', ROWS_KB); } else { sec('Keyboard & mouse', ROWS_KB); sec('Layar sentuh', ROWS_TOUCH); }

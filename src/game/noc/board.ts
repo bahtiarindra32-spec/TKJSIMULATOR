@@ -8,6 +8,9 @@ import {
   aiCfg,
   aiStats,
   chat,
+  saveAiCfg,
+  isLoopback,
+  DEFAULT_LOCAL_URL,
   mentorPrompt,
   offlineMentor,
   plain,
@@ -75,6 +78,10 @@ export class Noc extends NocWorkshop {
             faults: j.faults.map(f => ({ id: f, cause: FAULTS[f].cause, fix: FAULTS[f].fix, hint: FAULTS[f].hint, cp: FAULTS[f].cp })),
             log: [...new Set(j.log)],
             next: this.nextHint(j),
+            // exact target values, for the local leak guard only (mentorPrompt never sends them)
+            answer: [...j.targets.flatMap(t => [t.ip, t.mask, t.gw, t.dns]), j.record?.ip, j.router?.ip, j.router?.start, j.router?.end].filter(
+              (v): v is string => !!v,
+            ),
           }
         : null,
       pc: pc ? this.pcLabel(pc) : null,
@@ -103,12 +110,98 @@ export class Noc extends NocWorkshop {
     }
     return { text: offlineMentor(ctx, q), ai: false };
   }
+  /** shown in the Pak Nusa window while the AI is off: two honest ways to try the AI live (no recorded answers, no fake output) */
+  private tryAiPanel(paintMode: () => void): HTMLElement {
+    const box = h('div', 'nusa-try');
+    box.id = 'nusa-try';
+    box.style.cssText =
+      'border:1px solid rgba(240,192,46,.5);border-radius:8px;padding:9px 12px;margin:0 0 10px;background:rgba(240,192,46,.07);font-size:13px;line-height:1.45';
+    box.innerHTML = '<b>Coba AI live</b> <small style="opacity:.8">Sekarang Pak Nusa menjawab dari petunjuk offline. Pilih salah satu:</small>';
+    const row = h('div', 'row left');
+    row.style.cssText = 'margin:7px 0 2px;gap:6px;flex-wrap:wrap';
+    const out = h('div', 'nusa-try-out');
+    out.id = 'nusa-try-out';
+    out.style.cssText = 'margin-top:6px';
+    const steps = `<ol style="margin:6px 0 0 18px;padding:0">
+      <li>Pasang Ollama dari <b>ollama.com/download</b> (Windows, macOS, Linux).</li>
+      <li>Unduh model sekali (±2 GB): <code>ollama pull qwen2.5:3b</code></li>
+      <li>Game dibuka dari file HTML atau dari GitHub Pages? Izinkan browser memanggil Ollama dengan <code>OLLAMA_ORIGINS=*</code>: Windows <code>setx OLLAMA_ORIGINS "*"</code> lalu tutup dan buka lagi Ollama · macOS <code>launchctl setenv OLLAMA_ORIGINS "*"</code> lalu buka lagi Ollama · Linux <code>OLLAMA_ORIGINS=* ollama serve</code></li>
+      <li>Kalau browser menanyakan izin akses jaringan lokal, pilih Izinkan. Lalu klik <b>Coba lagi</b>.</li></ol>`;
+    const test = async () => {
+      const prev = { provider: aiCfg.provider, enabled: aiCfg.enabled };
+      aiCfg.provider = 'local';
+      aiCfg.enabled = true;
+      if (!isLoopback(aiCfg.baseUrl)) aiCfg.baseUrl = DEFAULT_LOCAL_URL;
+      saveAiCfg();
+      out.innerHTML = `Menghubungi server AI lokal ${esc(aiCfg.baseUrl)}…`;
+      try {
+        const t = await chat([{ role: 'user', content: 'Jawab satu kata: siap' }], { maxTokens: 10, timeoutMs: 15000 });
+        out.innerHTML = `<span style="color:#5ff09a">●</span> Tersambung: <b>${esc(aiCfg.model)}</b> menjawab “${esc(t.slice(0, 40))}” <i class="ai-tag" title="Dibuat oleh AI, bisa keliru">AI</i>. Pak Nusa sekarang memakai AI lokal; data tetap di komputer ini. Tanyakan sesuatu di bawah.`;
+        row.remove();
+        box.firstElementChild?.nextElementSibling?.remove();
+      } catch (e) {
+        aiCfg.provider = prev.provider; // not reachable: back to how it was, Pak Nusa stays offline (honest status line)
+        aiCfg.enabled = prev.enabled;
+        saveAiCfg();
+        const why = String(aiStats.last || (e as Error).message || e).slice(0, 90);
+        out.innerHTML = `<span style="color:#ff8a65">●</span> Server AI lokal di ${esc(aiCfg.baseUrl.replace(/\/v1\/?$/, ''))} tidak menjawab (${esc(why)}). Pak Nusa tetap offline. Cara menyiapkannya:${steps}`;
+        const again = btn('Coba lagi', () => void test(), 'btn pri', 'nusa-try-again');
+        again.style.marginTop = '6px';
+        out.append(again);
+      } finally {
+        paintMode();
+      }
+    };
+    const ask = () => {
+      if (aiCfg.localConsent && isLoopback(aiCfg.baseUrl)) {
+        void test();
+        return;
+      }
+      out.innerHTML = `<b>Izin dulu.</b> Pak Nusa akan bertanya ke server AI di komputer ini (Ollama di ${esc(DEFAULT_LOCAL_URL.replace(/\/v1$/, ''))}, atau alamat lokal di Pengaturan). Yang dikirim: pertanyaanmu, teks surat kerja, dan konfigurasi IP simulasi. Nama dan nilai tidak dikirim. <b>Data tetap di komputer ini, tidak ke internet.</b>`;
+      const ok = btn(
+        'Setuju',
+        () => {
+          aiCfg.localConsent = true;
+          saveAiCfg();
+          void test();
+        },
+        'btn pri',
+        'nusa-try-consent',
+      );
+      const no = btn('Batal', () => (out.innerHTML = 'Dibatalkan. Tidak ada data yang dikirim.'), 'btn', 'nusa-try-cancel');
+      const r2 = h('div', 'row left');
+      r2.style.cssText = 'margin-top:6px;gap:6px';
+      r2.append(ok, no);
+      out.append(r2);
+    };
+    row.append(
+      btn('AI lokal di laptop ini', ask, 'btn pri', 'nusa-try-local'),
+      btn(
+        'OpenRouter (API key)',
+        () => {
+          this.closeModal();
+          window.dispatchEvent(new CustomEvent('kn:open-settings', { detail: { section: 'ai', provider: 'openrouter' } }));
+        },
+        'btn',
+        'nusa-try-or',
+      ),
+    );
+    box.append(row, out);
+    return box;
+  }
   openNusa() {
     const box = h('div', 'noc-box nusa');
-    const mode = aiReady() ? `AI aktif · ${esc(aiCfg.model)}` : `Mode offline (tanpa AI) · ${aiWhyOff()}`;
+    const modeEl = h('p', 'nusa-mode', '');
+    const paintMode = () => {
+      const mode = aiReady() ? `AI aktif · ${esc(aiCfg.model)}` : `Mode offline (tanpa AI) · ${aiWhyOff()}`;
+      modeEl.innerHTML = `<span class="${aiReady() ? 'on' : 'off'}">●</span> ${mode}`;
+    };
+    paintMode();
     box.append(h('h2', '', 'Pak Nusa · Mentor Teknisi'));
-    box.append(h('p', 'nusa-mode', `<span class="${aiReady() ? 'on' : 'off'}">●</span> ${mode}`));
+    box.append(modeEl);
+    if (!aiReady()) box.append(this.tryAiPanel(paintMode));
     const log = h('div', 'nusa-log');
+    if (box.querySelector('#nusa-try')) log.style.height = 'min(30vh, 250px)'; // room for the "Coba AI live" panel at 720p
     const paint = () => {
       log.innerHTML = this.nusaView.length
         ? this.nusaView

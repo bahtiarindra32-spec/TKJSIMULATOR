@@ -27,13 +27,13 @@ Enam pemberhentian, masing-masing langsung ke keadaan siap dicoba: surat kerja d
 
 | Fitur | Untuk | Cara kerja |
 |---|---|---|
-| Pak Nusa, mentor | Siswa | Membaca kondisi pekerjaan (surat kerja, log langkah, IP simulasi) dan memberi arah diagnosis per lapisan OSI. Filter anti-bocor mengganti jawaban siap-tempel dengan petunjuk. |
+| Pak Nusa, mentor | Siswa | Membaca kondisi pekerjaan (surat kerja, log langkah, IP simulasi) dan memberi arah diagnosis per lapisan OSI. Filter anti-bocor (heuristik, bukan jaminan) mengganti jawaban siap-tempel dengan petunjuk: IP + gateway satu subnet, mask dalam bentuk apa pun (255.255.255.0, /24, "mask biasa") bersama alamat host, ≥3 perintah konfigurasi CLI (termasuk yang dipisah koma/titik koma), dan ≥2 nilai target tugas yang sedang aktif. Satu perintah atau penjelasan konsep tetap lolos (tabel uji 44 kasus di `tests/nusa.test.ts`). |
 | Ringkasan rekap kelas | Guru | Dari data rekap anonim (tanpa nama): checkpoint yang paling sering gagal dan saran remedial. Berlabel "Dibuat AI". |
 | Keluhan pelanggan | Siswa | Kalimat tiket ditulis ulang dengan gaya pelapor dari gejala saja. |
 | Ulasan catatan tiket | Siswa | Catatan penutupan dibandingkan dengan fakta tiket. |
 
 - Penyedia: OpenRouter (API key sendiri) atau **AI lokal** kompatibel OpenAI (Ollama/LM Studio di `localhost`), jadi AI tetap jalan tanpa internet.
-- Tidak ada data yang dikirim sebelum pengguna memilih *Setuju* di Pengaturan. Nama siswa dan nilai tidak pernah dikirim (diuji di `tests/nusa.test.ts`).
+- Tidak ada data yang dikirim sebelum pengguna memilih *Setuju* (di Pengaturan, atau di jendela Pak Nusa untuk AI lokal). Nama siswa dan nilai tidak pernah dikirim (diuji di `tests/nusa.test.ts`).
 - **Penilaian tidak memakai AI.** Tanpa AI semua fitur tetap jalan dengan petunjuk offline. Detail: [AI_USAGE.md](AI_USAGE.md).
 
 ## Menjalankan
@@ -46,7 +46,8 @@ npm run typecheck && npm run lint
 npm run build        # dist/
 ```
 
-Tanpa install: buka `docs/index.html` langsung di Chrome/Edge (satu file, offline, tanpa resource luar). Untuk AI lokal: jalankan Ollama, lalu Pengaturan → Penyedia AI → Lokal.
+Tanpa install: buka `docs/index.html` langsung di Chrome/Edge (satu file, offline, tanpa resource luar). Untuk AI lokal: jalankan Ollama, lalu Pengaturan → Penyedia AI → Lokal, atau J Pak Nusa → "AI lokal di laptop ini" (tes koneksi + langkah pemasangan).
+AI lokal saat game dibuka dari `docs/index.html` atau GitHub Pages: jalankan Ollama dengan `OLLAMA_ORIGINS=*` (Windows: `setx OLLAMA_ORIGINS "*"`, lalu buka ulang Ollama), kalau tidak browser memblokir panggilannya (CORS).
 
 Kontrol utama: WASD + mouse, F aksi, C cek fisik, T papan kerja, J Pak Nusa, M peta, Esc menu. Layar sentuh didukung (joystick + tombol aksi). Daftar lengkap ada di menu Kontrol.
 

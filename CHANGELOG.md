@@ -2,7 +2,10 @@
 
 Ringkasan per hari. Detail lengkap ada di riwayat git.
 
-> **Sebelum vs selama Hacking Week LOGICODIX 2026 (7–14 Nov 2026):** semua entri bertanggal sebelum 7 Nov 2026 dibuat sebelum Hacking Week. Pekerjaan selama Hacking Week akan dicatat di bawah tanggalnya masing-masing.
+## 2026-11-06
+- Green IT (tetap satu tampilan): lantai hotel L2–L8 digabung per material; mobil jauh (>70 m) digambar instanced, motor jauh digabung, lajur jauh disimulasi 4 Hz; pass AO tidak merender ulang bayangan; menu pause digambar ulang ±4 fps. Draw call titik awal 3.714 → 2.049, kota 2.241 → 977, Lab 753 → 516. Kode tier mati dihapus; penjaga FPS hanya menurunkan AO lalu resolusi render.
+- Perbaikan: bias bayangan aktif lagi (sebelumnya mati karena komentar sebaris); hitungan ELEMEN UTAMA di lembar hasil; langkah yang belum dikerjakan dihitung "belum", bukan dibuang; minimap kecil yang bisa diketuk di HP; toast HP landscape tidak menutupi jobsheet; panel Mode Juri tidak menutupi baris petunjuk.
+- Playtest: qa_mobile port/land, qa_v6 (lift + tangga), qa_npc2, tangkapan lantai hotel & lalu lintas dibandingkan dengan build sebelumnya. 205 unit test.
 
 ## 2026-11-04
 - AI: penyedia Lokal (Ollama/LM Studio, kompatibel OpenAI, tanpa key/internet) di Pengaturan dengan izin per penyedia; status Pak Nusa menyebut penyedia + model. Rekap kelas guru: tombol "Ringkasan AI" (hanya angka anonim per langkah, label "Dibuat AI · periksa kembali", ringkasan angka tetap tampil tanpa AI). Penjaga anti-contek memotong jawaban mentor yang berisi IP/mask/gateway lengkap atau blok CLI ≥4 baris. Unit test nusa (privasi payload, URL penyedia, penjaga, prompt rekap), playtest qa_ai_local.
@@ -12,6 +15,7 @@ Ringkasan per hari. Detail lengkap ada di riwayat git.
 - Green IT (tetap satu tampilan): bayangan 2048 (dari 4096, memori GPU ¼), adegan digambar ulang ±10 fps saat panel/layar PC menutupi permainan.
 - Privasi: hook tes `window.__kota` hanya aktif dengan `?qa`.
 - Repo: README ditulis ulang untuk juri (masalah bersumber, Mode Juri, AI, batasan); daftar fitur lengkap pindah ke FITUR.md; `design/request.md` diganti `design/brief.md`; storyboard video di `design/video-storyboard.md`; skrip QA usang dan folder `single/` dihapus (build satu file tetap di `docs/index.html`); versi 1.0.0.
+- Review juri 3: penjaga anti-contek diperketat (IP + gateway satu baris, mask "/24"/"mask biasa"/"prefix 24", ≥3 perintah konfigurasi termasuk yang dipisah koma/titik koma/`backtick`, ≥2 nilai target tugas aktif) dengan tabel uji adversarial 44 kasus; jendela Pak Nusa saat AI mati menampilkan "Coba AI live" (AI lokal di laptop ini: izin di tempat → tes koneksi → hasil atau langkah pasang Ollama; OpenRouter: membuka Pengaturan di bagian AI), teks Mode Juri stop 5 disesuaikan, tanpa jawaban AI rekaman; Pengaturan › Privasi & data: "Hapus semua data saya".
 
 ## 2026-11-03
 - Router edge R-EDGE: NAT dua ISP memakai route-map (ISP1 keluar Gi0/0, ISP2 keluar Gi0/1) seperti contoh dual-ISP PAT Cisco. Perintah baru `route-map NAMA permit 10`, `match ip address`, `match interface`, `ip nat inside source route-map`, `show route-map`. Menulis `list N` yang sama untuk interface lain kini mengganti pemetaan lama dengan peringatan, sesuai perilaku IOS. Unit test edge (48 total), playtest qa_edge.

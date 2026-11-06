@@ -15,7 +15,7 @@ import { HotelNpcs, type TalkCtx } from './game/hotelNpc';
 const ambient = new Ambient();
 addEventListener('pointerdown', () => ambient.start()); addEventListener('keydown', () => ambient.start());
 import { buildSouth, SOUTH_PEDS } from './world/south';
-import { Menu, settings, applyA11y, type QChoice } from './ui/menu';
+import { Menu, settings, applyA11y } from './ui/menu';
 applyA11y();
 import { createPerson, randomSpec, walkPose, idlePose, typingPose, crouchPose, ridePose, WALK_STRIDE } from './assets/people';
 import { buildRoads } from './world/roads';
@@ -50,6 +50,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GfxTier } from './game/gfxTier';
+import { FloorStack } from './world/floorBatch';
 import { aiCfg } from './ai/nusa';
 import { buildHiDetail } from './world/hiDetail';
 import './ui/skin.css';   // Nusantara Tech UI skin: loaded last so it overrides module styles
@@ -93,7 +94,8 @@ scene.fog = new THREE.Fog('#cdbfae', 220, 1400);
 
 const hemi = new THREE.HemisphereLight('#cfe3ff', '#7a6a55', 0.75); scene.add(hemi);
 const dir = new THREE.DirectionalLight('#ffd7a8', 2.6);
-dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048);   // the walk-mode shadow box is 120 m wide: 2048 = ~6 cm texels, 4x less GPU memory than 4096 dir.shadow.bias = -0.0004; dir.shadow.normalBias = 0.03;
+// the walk-mode shadow box is 120 m wide: 2048 = ~6 cm texels, 4x less GPU memory than 4096
+dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.bias = -0.0004; dir.shadow.normalBias = 0.03;
 const sc = dir.shadow.camera as THREE.OrthographicCamera; sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 1; sc.far = 700;
 scene.add(dir, dir.target);
 const interiorLight = new THREE.PointLight('#fff1dc', 0, 18, 1.4); scene.add(interiorLight);
@@ -214,7 +216,9 @@ batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SEL
 // the practice lab and the street-name signs were drawn object by object (~590 draw calls): batch them like the hotel
 batches.add(bakeStatic(labB.group, 'BATCH_LAB_TKJ', o => /^DOOR_/.test(o.name), { max: 0.35, tier: 'in', keep: GEAR_RE }));
 batches.add(bakeStatic(world.getObjectByName('WAYFINDING')!, 'BATCH_WAYFINDING'));
-const upperParts = ['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
+// Green IT: the seven identical upper floors share one merged batch per material; cullHotel picks which floors it draws
+const floorStack = new FloorStack(['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8'].map(n => hotelBatches.get(n)!), [2, 3, 4, 5, 6, 7, 8], 'BATCH_HOTEL_L2_L8'); batches.add(floorStack.group);
+const upperParts = ['ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
 
 // ---------- views ----------
 interface View { id: string; label: string; loc: string; pos: [number, number, number]; target: [number, number, number]; cutaway?: boolean }
@@ -339,7 +343,7 @@ const menu = new Menu({
   lab: () => menu.fade(() => { enterWalk(false); if (riding) endRide(riding, null); document.body.classList.remove('riding'); speedo.classList.remove('on'); player.level = 1; player.pos.set(labB.spots.guru.x, LEVELS[0].elev + 0.12, labB.spots.guru.z + 1.4); setTimeout(() => { if (mode === 'walk') praktik.openDesk(); }, 500); }, QA),
   tour: () => menu.fade(() => { menu.show(false); tourMode = true; document.body.classList.add('tour'); goView('overview', true); }, QA),
   toMainMenu: () => toMainMenu(),
-  setQuality: q => setQualityChoice(q),
+  setQuality: () => { /* one look for everyone: the menu no longer offers quality levels */ },
   setTime: id => { dn.goTo(id as PresetId); menu.setTimeActive(id[0].toUpperCase() + id.slice(1)); },
   applySettings: () => applySettings(),
 });
@@ -357,7 +361,7 @@ const demo = new DemoTour([
     go: () => { demoReset(); noc.startShift(); noc.openBoard(); } },
   { title: 'Lab Praktik: VLSM → router-on-a-stick → ACL', text: 'Mode guru-siswa di gedung lab SMK. Isi tabel VLSM di jobsheet, lalu konfigurasi R-LAB (subinterface dot1Q) dan trunk SW-LAB, lalu ACL antar-VLAN. Checkpoint dibaca langsung dari simulator jaringan.',
     go: () => { demoReset(); praktik.start({ steps: ['vlsm', 'intervlan', 'acl'], minutes: 0, perStudent: false, seed: 2026 }, 'JURI26', 'Juri LOGICODIX'); placeAt(labB.spots.rack.x, labB.spots.rack.z + 1.2, 1, 0); } },
-  { title: 'Pak Nusa: mentor AI', text: 'Tanya apa saja soal pekerjaan yang sedang jalan. Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban. Untuk AI live: Pengaturan → Penyedia AI (OpenRouter dengan API key, atau AI lokal Ollama/LM Studio di laptop ini tanpa internet) lalu Setuju. Tanpa itu ia memakai mode offline. AI tidak pernah menilai.',
+  { title: 'Pak Nusa: mentor AI', text: 'Pak Nusa membaca kondisi simulasi dan memberi arah diagnosis, bukan jawaban; filter anti-bocor memotong konfigurasi siap-tempel. Tanpa AI ia menjawab dari petunjuk offline (berlabel offline). Coba AI live dari kotak kuning di jendela ini: "AI lokal di laptop ini" (Ollama, minta izin dulu, data tetap di komputer ini, lalu tes koneksi) atau "OpenRouter" (API key sendiri, membuka Pengaturan). Tidak ada jawaban AI rekaman. AI tidak pernah menilai.',
     go: () => { demoReset(); noc.openNusa(); } },
   { title: 'Rekap kelas untuk guru (tanpa server)', text: 'Tiap siswa mendapat kode hasil satu baris. Guru menempel semua kode di meja guru dan mendapat tabel + CSV. Data di bawah ini contoh tiga siswa fiktif.',
     go: () => { demoReset(); placeAt(labB.spots.guru.x, labB.spots.guru.z + 1.4, 1, 0); const when = Date.now();
@@ -379,7 +383,6 @@ function resumeGame() {
 function toMainMenu() { menu.pause(false); menu.fade(() => { if (mode === 'walk') exitWalk(); showMenu(); }, QA); }
 function showMenu() { tourMode = false; document.body.classList.remove('tour', 'viewing'); goView('overview', true); setCutaway(false); menu.show(true); }
 function applySettings() { dn.auto = settings.autoTime; motors.engine.vol = settings.volume / 100; ambient.vol = settings.volume / 100 * 0.8; }
-function setQualityChoice(q: QChoice) { if (q === 'otomatis') { autoQ = true; fpsW.warm = 4; applyQuality(qName, 'start'); } else { autoQ = false; applyQuality(q, 'manual'); } }
 
 const touchUi = setupTouch({ canvas: renderer.domElement, toast: (m, ms) => toast(m, ms), active: () => mode === 'walk' && !uiBlocked() && !ride, look: (dx, dy) => lookBy(dx, dy) });
 function lookBy(dx: number, dy: number) {
@@ -652,57 +655,41 @@ composer.addPass(gtao);
 composer.addPass(new OutputPass());
 const hiDetail = buildHiDetail(scene, world, hotel);
 const gfx = new GfxTier([world, batches, hiDetail]); gfx.collect();
-// ---------- graphics quality: automatic low mode for phones / slow GPUs, G or the Grafik button cycles ----------
-type QName = 'tinggi' | 'sedang' | 'rendah' | 'hemat';
-interface QProfile { label: string; pr: number; ao: boolean; shadow: number; far: number; fog: [number, number]; traffic: number; peds: number }
-const QUALITY: Record<QName, QProfile> = {
-  tinggi: { label: 'Tinggi', pr: 2, ao: true, shadow: 2048, far: 1600, fog: [220, 1400], traffic: 1, peds: 1 },
-  sedang: { label: 'Sedang', pr: 1.5, ao: false, shadow: 2048, far: 900, fog: [160, 850], traffic: 0.6, peds: 0.67 },
-  rendah: { label: 'Rendah', pr: 1, ao: false, shadow: 0, far: 420, fog: [90, 400], traffic: 0.35, peds: 0.34 },
-  hemat: { label: 'Hemat', pr: 0.7, ao: false, shadow: 0, far: 260, fog: [55, 250], traffic: 0.2, peds: 0.34 },
-};
-const QORDER: QName[] = ['tinggi', 'sedang', 'rendah', 'hemat'];
-const QDESC: Record<QName, string> = {
-  tinggi: ' · AO, bayangan tajam, lampu malam, pohon & detail penuh, lalu lintas ramai',
-  sedang: ' · bayangan, pohon 80%, detail kecil tetap ada',
-  rendah: ' · tanpa bayangan, pohon 55%, detail kecil luar ruangan disembunyikan',
-  hemat: ' · material sederhana, pohon 30%, tanpa detail kecil, jarak pandang pendek',
-};
-// one look for everyone (user decision Nov 1, 2026): always the full 'tinggi' assets; ?q= stays for QA only.
-// On slow devices the watchdog only lowers render resolution / drops AO, never the assets.
-let qName: QName = (QORDER as string[]).includes(QS.get('q') ?? '') ? QS.get('q') as QName : QS.has('low') && QA0 ? 'rendah' : 'tinggi';   // ?qa&low: headless QA speed only
-let quality = false;              // true = post-processing (AO) on
-let autoQ = !QS.has('q');         // the FPS watchdog may lower quality until the player picks one
-
-function applyQuality(n: QName, why: 'start' | 'manual' | 'auto' = 'manual') {
-  const Q = QUALITY[n], prevShadow = renderer.shadowMap.enabled; qName = n; quality = Q.ao;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.pr)); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
-  const sh = Q.shadow > 0; renderer.shadowMap.enabled = sh; dir.castShadow = sh;
-  if (sh && dir.shadow.mapSize.x !== Q.shadow) { dir.shadow.mapSize.set(Q.shadow, Q.shadow); dir.shadow.map?.dispose(); (dir.shadow as { map: THREE.WebGLRenderTarget | null }).map = null; }
-  if (prevShadow !== sh) scene.traverse(o => { const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined; if (m) (Array.isArray(m) ? m : [m]).forEach(x => (x.needsUpdate = true)); });
-  farBase = Q.far; (scene.fog as THREE.Fog).near = Q.fog[0]; (scene.fog as THREE.Fog).far = Q.fog[1];
-  for (const l of nightLights) l.visible = n === 'tinggi'; headSpot.visible = n === 'tinggi'; renderer.shadowMap.needsUpdate = true;
-  traffic.setDensity(Q.traffic); peds.setDensity(Q.peds);
-  gfx.apply(n);
-  const b = document.getElementById('btnGfx'); if (b) b.textContent = `Grafik: ${Q.label}${autoQ ? ' (otomatis)' : ''}`;
-  void why; void QDESC; prScale = 1;
+// ---------- one look for everyone (user decision Nov 1, 2026) ----------
+// Every player gets the same picture: AO pass, 2048 shadows, night lamp lights, full trees/detail/traffic, the same
+// view distance. No quality menu and no automatic downgrade; the savings are batching, LOD and culling only.
+// QA ONLY: `?qa&low` is a speed switch for the headless Playwright harness (software GL). It turns off shadows, AO and
+// the lamp lights, shortens the view, thins trees/traffic. It is unreachable without ?qa and never shown to players.
+const QA_LOW = QA0 && QS.has('low');
+const LOOK = QA_LOW
+  ? { pr: 1, ao: false, shadow: false, far: 420, fog: [90, 400] as [number, number], traffic: 0.35, peds: 0.34 }
+  : { pr: 2, ao: true, shadow: true, far: 1600, fog: [220, 1400] as [number, number], traffic: 1, peds: 1 };
+let quality = LOOK.ao;            // true = post-processing (AO) on (the FPS watchdog may drop it on a slow device)
+const farBase = LOOK.far;
+function applyLook() {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, LOOK.pr)); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = LOOK.shadow; dir.castShadow = LOOK.shadow; renderer.shadowMap.needsUpdate = true;
+  (scene.fog as THREE.Fog).near = LOOK.fog[0]; (scene.fog as THREE.Fog).far = LOOK.fog[1];
+  for (const l of nightLights) l.visible = !QA_LOW; headSpot.visible = !QA_LOW;
+  if (QA_LOW) { traffic.setDensity(LOOK.traffic); peds.setDensity(LOOK.peds); traffic.forceLow = true; }
+  gfx.apply(QA_LOW);
 }
-function setQuality(_q?: boolean) { /* single graphics level: nothing to cycle */ }
+/** FPS watchdog (same assets for everyone): if a device stays under 24 fps, first drop the AO pass, then render at a lower
+ *  resolution. Nothing is removed from the world, so the look stays the same, only softer. */
 let prScale = 1;
-let farBase = 1600;
-/** FPS watchdog: after a warm-up, if the average frame rate stays low, step quality down one level */
 const fpsW = { t: 0, n: 0, warm: 4 };
 function watchFps(realDt: number) {
-  if (!autoQ || paused || fixedDt || mode !== 'walk' || uiBlocked() || document.hidden) { fpsW.t = fpsW.n = 0; return; }
+  if (QA0 || paused || fixedDt || mode !== 'walk' || uiBlocked() || document.hidden) { fpsW.t = fpsW.n = 0; return; }
   if (fpsW.warm > 0) { fpsW.warm -= realDt; return; }
   fpsW.t += realDt; fpsW.n++;
-  if (fpsW.t >= 4) { const fps = fpsW.n / fpsW.t; fpsW.t = fpsW.n = 0; const i = QORDER.indexOf(qName); void i; if (fps < 24) lowerCost(); } }
-/** slow device: first drop the AO pass, then render at lower resolution (same assets, softer image) */
+  if (fpsW.t >= 4) { const fps = fpsW.n / fpsW.t; fpsW.t = fpsW.n = 0; if (fps < 24) lowerCost(); }
+}
 function lowerCost() {
   if (quality) { quality = false; fpsW.warm = 3; return; }
-  const base = Math.min(window.devicePixelRatio, QUALITY[qName].pr);
+  const base = Math.min(window.devicePixelRatio, LOOK.pr);
   if (base * prScale <= 0.6) return;
-  prScale = Math.max(0.6 / base, prScale * 0.8); renderer.setPixelRatio(base * prScale); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); fpsW.warm = 3;
+  prScale = Math.max(0.6 / base, prScale * 0.8); renderer.setPixelRatio(base * prScale);
+  renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); fpsW.warm = 3;
 }
 /** inside the hotel only the floors around the camera can be seen: hide the others (big draw-call saving on every quality level) */
 const LEVEL_GROUPS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'ROOF'].map((n, i) => ({ lv: i + 1, batch: hotelBatches.get(n)!, group: hotel.getObjectByName(n)! }));
@@ -721,7 +708,12 @@ function cullHotel() {
   if (key === cullKey) return; cullKey = key;
   // from outside, upper floors keep only their baked shell (walls/windows/furniture); the loose dynamic bits (doors, lift
   // doors, APs) of L2-L8 cannot be seen from the street and cost ~400 draw calls
-  for (const g of LEVEL_GROUPS) { const vis = !inside || Math.abs(g.lv - lvCam) <= span; g.group.visible = vis && (inside || cutaway || g.lv === 1); g.batch.visible = vis && !(cutaway && g.lv >= 2); }
+  let lo = 9, hi = 0;
+  for (const g of LEVEL_GROUPS) {
+    const vis = !inside || Math.abs(g.lv - lvCam) <= span; g.group.visible = vis && (inside || cutaway || g.lv === 1); g.batch.visible = vis && !(cutaway && g.lv >= 2);
+    if (g.batch.visible && g.lv >= 2 && g.lv <= 8) { lo = Math.min(lo, g.lv); hi = Math.max(hi, g.lv); }
+  }
+  floorStack.show(lo, hi);   // L2-L8 draw from the merged stack (their per-floor batches above are no longer in the scene)
   if (!inside && cutaway) setCutaway(true);
 }
 
@@ -1047,7 +1039,7 @@ $('btnExport').onclick = () => {
 
 // ---------- night extras: lamp point lights (Tinggi), the bike headlight ----------
 function updateNightExtras(dt: number) {
-  const night = dn.night, hi = qName === 'tinggi';
+  const night = dn.night, hi = !QA_LOW;
   nightPickT -= dt;
   if (hi && night > 0.3) {
     if (nightPickT <= 0) {
@@ -1074,10 +1066,9 @@ const tmp = new THREE.Vector3();
 const lightBasis = new THREE.Matrix4(), lightBasisT = new THREE.Matrix4(), ZERO3 = new THREE.Vector3(), UP3 = new THREE.Vector3(0, 1, 0), sunNeg = new THREE.Vector3();
 /** ?qa: automated playtest starts paused (frames only advance through __kota.step), so software GL is not flooded with frames */
 const QA = new URLSearchParams(location.search).has('qa');
-let paused = QA, fixedDt = 0, skipRender = false, anaT = 0, lastDraw = 0;
+let paused = QA, fixedDt = 0, skipRender = false, anaT = 0, lastDraw = 0, drawSeq = 0;
 function frame() {
-  const now = performance.now(); const realDt = (now - last) / 1000; const dt0 = fixedDt || Math.min(realDt, 0.05); const dt = menu.paused ? 0 : dt0; last = now; elapsed += dt; const t = elapsed;
-  watchFps(Math.min(realDt, 1));
+  const now = performance.now(); const realDt = (now - last) / 1000; const dt0 = fixedDt || Math.min(realDt, 0.05); const dt = menu.paused ? 0 : dt0; last = now; elapsed += dt; const t = elapsed; watchFps(realDt);
   if (mode === 'orbit' && menu.open) {
     // title screen: slow flyover around the hotel / Kota Selatan, time of day visible
     flyA += dt0 * 0.045; const R = window.innerWidth < window.innerHeight ? 240 : 185;
@@ -1087,7 +1078,7 @@ function frame() {
     if (tween) { tween.t = Math.min(1, tween.t + dt / 1.6); const e = 1 - Math.pow(1 - tween.t, 3); camera.position.lerpVectors(tween.from, tween.to, e); controls.target.lerpVectors(tween.tf, tween.tt, e); if (tween.t >= 1) tween = null; }
     controls.update();
   }
-  { const fg = scene.fog as THREE.Fog, Qf = QUALITY[qName].fog, fn = mode === 'walk' ? Qf[0] : Math.max(Qf[0], 220), ff = mode === 'walk' ? Qf[1] : Math.max(Qf[1], 1300); if (fg.near !== fn || fg.far !== ff) { fg.near = fn; fg.far = ff; } }
+  { const fg = scene.fog as THREE.Fog, Qf = LOOK.fog, fn = mode === 'walk' ? Qf[0] : Math.max(Qf[0], 220), ff = mode === 'walk' ? Qf[1] : Math.max(Qf[1], 1300); if (fg.near !== fn || fg.far !== ff) { fg.near = fn; fg.far = ff; } }
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
   noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt);
@@ -1100,7 +1091,7 @@ function frame() {
   else { prompt.hide(); if (riding) { motors.engine.on = false; motors.engine.update(0, 0); } }
   { const tx = mode === 'walk' ? vertical.hud() : ''; if (liftInd.textContent !== tx) liftInd.textContent = tx; liftInd.classList.toggle('on', !!tx); }
   if (mode === 'walk' && noc.analyzerOn) { anaT -= dt; if (anaT <= 0) { anaT = 0.25; const inH = insideHotel(player.pos.x, player.pos.z); noc.renderAnalyzer(cityX(player.pos.x) - HOTEL_ORIGIN[0], cityZ(player.pos.z) - HOTEL_ORIGIN[1], player.pos.y + 1.2, inH ? player.level : 1, locationName(player.pos.x, player.pos.z).replace('BLD_HOTEL_NUSANTARA · ', '')); } }
-  signals.update(t); traffic.update(dt, t, mode === 'walk' ? player.pos : null); peds.update(dt, t);
+  signals.update(t); traffic.update(dt, t, mode === 'walk' ? player.pos : null, camera.position); peds.update(dt, t);
   for (const m of ND.blinkMats) { const b = (m.userData.base ??= m.emissiveIntensity) as number; m.emissiveIntensity = b * (0.88 + (Math.sin(t * 17 + b * 13) > 0.5 ? 0.25 : 0)); }
   for (const m of blinkMaterials) m.emissiveIntensity = 0.75 + Math.sin(t * 9) * 0.15 + (Math.sin(t * 23) > 0.6 ? 0.25 : 0);
   // shadows follow focus
@@ -1116,7 +1107,7 @@ function frame() {
   const inside = insideHotel(camera.position.x, camera.position.z) && camera.position.y < 30;
   interiorLight.intensity = inside ? 3 : 0; interiorLight.position.copy(camera.position).add(new THREE.Vector3(0, 1.2, 0));
   // day/night: interiors keep their indoor light level at any hour
-  gfx.update(dt || 0.016); gfx.lod(camera.position, dt || 0.016);
+  gfx.lod(camera.position, dt || 0.016);
   dn.indoor = inside && mode === 'walk'; dn.update(dt, fixedDt || Math.min(realDt, 0.1), camera.position, camera.far); hotelNpcs.update(dt, t, inside && mode === 'walk', mode === 'walk' && !inside && Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + 15), player.pos.z - wz(HOTEL_ORIGIN[1] + 10)) < 70, player.level, seat?.pc.name ?? null, player.pos); ambient.update(Math.min(realDt, 0.1), dn.hour, inside && mode === 'walk', mode === 'walk' && !menu.paused);
   if (!renderer.shadowMap.autoUpdate && lastShadowFocus.distanceToSquared(tmp) > 144) { lastShadowFocus.copy(tmp); renderer.shadowMap.needsUpdate = true; }
   updateNightExtras(dt0);
@@ -1152,13 +1143,26 @@ function frame() {
   } else { missionMarker.setTarget(null); updateWaypoint(waypoint, camera, null, null); }
   if (mode === 'walk') minimap.update(cityX(player.pos.x), cityZ(player.pos.z), hdg * Math.PI / 180, missionTarget());
   // Energy: while a panel/PC screen covers play the scene barely changes, so redraw it at ~10 fps instead of the display rate.
-  const tDraw = performance.now(), idleUi = mode === 'walk' && !fixedDt && uiBlocked();
-  if (!skipRender && (!idleUi || tDraw - lastDraw > 100)) { lastDraw = tDraw; frameCount++; renderer.info.reset(); if (quality) composer.render(); else renderer.render(scene, camera); }
+  // Pause menu: the world is frozen (dt = 0), so ~4 fps is enough and the shadow map only refreshes once a second (a time
+  // preset picked in the menu still shows within a second). Title flyover: the shadow box stays on the hotel and the camera
+  // is ~200 m out, so the shadow map refreshes every second frame (a one-frame lag there is a few cm of car shadow).
+  const tDraw = performance.now(), idleUi = mode === 'walk' && !fixedDt && uiBlocked(), frozen = idleUi && menu.paused;
+  if (!skipRender && (!idleUi || tDraw - lastDraw > (frozen ? 250 : 100))) {
+    lastDraw = tDraw; frameCount++; renderer.info.reset();
+    // The shadow map is rendered at most once per drawn frame: with the AO pass on, its normal pre-pass is a second
+    // renderer.render() and used to redraw every shadow caster a second time each frame (identical result, wasted).
+    const sm = renderer.shadowMap, auto = sm.autoUpdate, title = mode === 'orbit' && menu.open && !fixedDt;
+    const skipShadow = (frozen && drawSeq % 4 !== 0) || (title && drawSeq % 2 !== 0);
+    sm.needsUpdate = auto ? !skipShadow : sm.needsUpdate; sm.autoUpdate = false;
+    drawSeq++;
+    if (quality) composer.render(); else renderer.render(scene, camera);
+    sm.autoUpdate = auto;
+  }
   if (!paused) requestAnimationFrame(frame);
 }
 
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); });
-applyQuality(qName, 'start');
+applyLook();
 $('btnGfx').style.display = 'none';
 function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
 /** Lab Praktik: point at the place the current jobsheet step happens (crimping table, rack, the student's desk, or the teacher for initials) */
@@ -1264,7 +1268,6 @@ if (QA0 || import.meta.env.DEV) (window as any).__kota = {
   bounds: () => ({ minX: 0, maxX: 400, minZ: 0, maxZ: 600 }),
   steerIn: () => riding?.steerIn ?? null,
   aiCfg, ai: () => noc.aiInfo(), nusa: () => noc.openNusa(), ask: (q: string) => noc.askNusa(q), mentorCtx: () => noc.mentorCtx(),
-  perf: () => ({ frames: frameCount, prScale, quality: qName, auto: autoQ, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
-  setQ: (n: QName) => { autoQ = false; applyQuality(n, 'start'); },
+  perf: () => ({ frames: frameCount, qaLow: QA_LOW, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),
   stats: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, colliders: colliders.length, vehicles: traffic.vehicles.length, peds: peds.peds.length }),
 };

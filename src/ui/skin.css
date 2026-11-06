@@ -354,3 +354,34 @@ body.touch.demo #noc-hud, body.touch.demo .jobsheet { top: calc(230px + env(safe
 @media (max-width: 560px) { body:has(.jobsheet) #toast { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); } }
 /* the walk hint line wraps instead of running off narrow windows */
 #hints { white-space: normal; text-align: center; max-width: min(92vw, 760px); width: max-content; }
+
+/* ---- UI polish, 4 Nov 2026 (juri3 #5-#7) ---- */
+/* Mode Juri: the tour bar explains the step, so the walk hint line under it steps aside instead of being half covered */
+body.demo #hints { display: none; }
+/* Phone lab: a toast sits clear above the touch buttons (.tbtns is 190 px tall, 18 px off the bottom) */
+@media (max-width: 560px) { body:has(.jobsheet) #toast { bottom: calc(222px + env(safe-area-inset-bottom)); } }
+/* Title screen on a phone: the footer keeps a gap from item 07; subtitle and footer stay readable over a bright sky */
+@media (orientation: portrait) and (max-width: 560px) {
+  .mn-main { margin-bottom: 18px; }
+  .mn-title { margin-top: 12px; }
+  .mn-list { margin-top: 22px; }
+  .mn-sub { display: inline-block; align-self: flex-start; padding: 4px 8px; background: rgba(14,15,17,.72); color: var(--k-tx); }
+  .mn-foot { padding-top: 6px; color: var(--k-tx2); }
+  .mn-foot span { padding: 3px 6px; background: rgba(14,15,17,.6); }
+  .mn-top .mn-tag { padding: 3px 6px; background: rgba(14,15,17,.6); }
+}
+/* Phone minimap: a small north-up map above the action buttons (portrait) or under the clock (landscape); tap = big map.
+   Hidden while a full-width lab jobsheet is open on portrait. */
+body.touch.entered #minimap:not(.big) { display: block !important; width: 104px; height: 84px; top: auto; right: calc(14px + env(safe-area-inset-right)); bottom: calc(222px + env(safe-area-inset-bottom)); border-top-width: 2px; }
+body.touch #minimap:not(.big) .mm-legend { display: none; }
+body.touch #minimap:not(.big) canvas { height: 100%; }
+body.touch.riding #minimap:not(.big) { bottom: calc(222px + env(safe-area-inset-bottom)); }
+body.touch:has(.noc-modal) #minimap:not(.big), body.touch.demo #minimap:not(.big) { display: none !important; }
+@media (orientation: portrait) { body.touch:has(.jobsheet:not([style*="none"])) #minimap:not(.big) { display: none !important; } }
+@media (orientation: landscape) and (max-height: 520px) {
+  body.touch.entered #minimap:not(.big) { width: 116px; height: 78px; bottom: auto; top: calc(96px + env(safe-area-inset-top)); }
+  body.touch #toast { max-width: min(520px, 60vw); }
+  /* lab jobsheet fills the left 40vw: the toast sits between it and the clock instead of over its header */
+  body.touch:has(.jobsheet:not([style*="none"])) #toast { left: calc(40vw + 20px); transform: none; max-width: calc(60vw - 170px); }
+}
+body.touch #minimap.big { z-index: 45; }

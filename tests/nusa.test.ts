@@ -192,3 +192,108 @@ describe('teacher recap summary (AI input is anonymous)', () => {
     expect(t).toMatch(/3 siswa/); expect(t).toMatch(/Alamat IP statis.*2\/3 siswa belum tuntas/); expect(t).not.toMatch(/Rizky|Siti|Budi/);
   });
 });
+
+// ---------------------------------------------------------------- adversarial table for the leak guard (juri3 bug #2)
+describe('anti-answer-leak guard: adversarial table', () => {
+  const g = { next: 'PC 05: atur IP sesuai surat kerja', hint: 'Bandingkan IP PC dengan subnet router ruangan.' };
+  // the active task's exact target values (static IP job) and the PC's current (wrong) address on screen
+  const task = { ...g, answer: ['192.168.30.45', '255.255.255.0', '192.168.30.1', '192.168.30.1'], current: ['192.168.10.57'] };
+  type Case = [label: string, reply: string, ctx?: typeof g & { answer?: string[]; current?: string[] }];
+  const LEAKS: Case[] = [
+    ['canonical IP / mask / gateway lines', 'Gampang! Isi saja:\nIP: 192.168.20.57\nSubnet mask: 255.255.255.0\nGateway: 192.168.20.1'],
+    ['IP + gateway + "mask biasa /24" (juri3)', 'Isi IP PC 192.168.20.57 dan gateway 192.168.20.1, mask biasa /24 ya.'],
+    ['IP + gateway on one line, no mask (juri3)', 'Set IP 192.168.20.57 gateway 192.168.20.1'],
+    ['3 CLI lines in a code block (juri3)', '```\ninterface fa0/1\nswitchport access vlan 20\nno shutdown\n```'],
+    ['comma-separated commands on one line (juri3)', 'Ketik: conf t, int fa0/1, switchport mode access, switchport access vlan 20, end'],
+    ['semicolon-separated sub-interface config', 'Ketik: interface g0/0.20; encapsulation dot1Q 20; ip address 192.168.20.1 255.255.255.0'],
+    ['"IP:" and "Gateway:" lines without a mask', 'IP: 192.168.20.57\nGateway: 192.168.20.1'],
+    ['inline /24 + gw shorthand', 'Pakai 10.10.30.25/24 gw 10.10.30.1'],
+    ['"prefix 24" mask form', 'Alamat PC 172.16.5.20, default gateway 172.16.5.1, prefix 24.'],
+    ['backtick commands chained with "lalu"', 'Jalankan `interface fa0/3` lalu `switchport access vlan 30` lalu `no shutdown`.'],
+    ['numbered NAT / ACL / route config', '1. ip nat inside source list 1 interface g0/1 overload\n2. access-list 1 permit 192.168.10.0 0.0.0.255\n3. ip route 0.0.0.0 0.0.0.0 203.0.113.1'],
+    ['router prompts in front of each line', 'R1(config)#interface g0/0\nR1(config-if)#ip address 10.0.0.1 255.255.255.252\nR1(config-if)#no shutdown'],
+    ['MikroTik commands', '/ip address add address=192.168.88.2/24 interface=ether2\n/ip route add gateway=192.168.88.1\n/ip dns set servers=8.8.8.8'],
+    ['two exact target values, no keywords', 'Jawabannya: 192.168.30.45 dan 192.168.30.1.', task],
+    ['target IP + its mask as /24', 'Pakai 192.168.30.45 dengan /24 saja.', task],
+    ['netsh static one-liner', 'netsh interface ip set address "Ethernet" static 192.168.20.57 255.255.255.0 192.168.20.1'],
+    ['gateway first, IP second, one line', 'Gateway 192.168.20.1, IP-nya 192.168.20.57.'],
+    ['VLAN create + name + range + access', 'vlan 30\nname TAMU\ninterface range fa0/1-10\nswitchport access vlan 30'],
+    ['semicolons with extra spaces and no shut', 'conf t ; interface vlan 1 ; ip address 192.168.1.2 255.255.255.0 ; no shut'],
+    ['shouting caps triple on one line', 'IP ADDRESS 192.168.20.57 SUBNET 255.255.255.0 GATEWAY 192.168.20.1'],
+    ['abbreviated IOS commands', 'Masukkan:\nint fa0/1\nsw acc vlan 20\nno sh'],
+    ['commands behind ordinal words', 'Pertama ketik interface fa0/1. Kedua switchport access vlan 20. Ketiga no shutdown.'],
+  ];
+  const HINTS: Case[] = [
+    ['coaching hint: one gateway address + one show command', 'Coba cek dulu: IP PC-mu satu subnet dengan router belum? Ping gateway 192.168.20.1, kalau RTO lihat lagi subnet mask-nya. Perintah yang membantu: show vlan brief.'],
+    ['diagnostic list (ipconfig / ping / nslookup)', 'Urutan cek:\n1. ipconfig\n2. ping 127.0.0.1\n3. ping 192.168.1.1\n4. nslookup cari.id'],
+    ['gateway concept', 'Default gateway adalah alamat router di segmen yang sama. Tanpa gateway, PC hanya bisa bicara dengan perangkat satu jaringan.'],
+    ['/24 concept', 'Subnet mask /24 artinya 24 bit pertama adalah network, jadi ada 256 alamat dengan 254 host.'],
+    ['one show command', 'Coba masuk ke interface-nya lalu cek apakah statusnya administratively down. Perintah: show ip interface brief.'],
+    ['single command hint (no shutdown)', 'Kalau port-nya shutdown, satu perintah yang kamu perlukan di mode interface adalah no shutdown.'],
+    ['two-step pointer, no config block', 'Masuk dulu ke interface fa0/5, lalu cek switchport access vlan-nya sudah benar belum.'],
+    ['VLAN concept list', '- VLAN 10: staf\n- VLAN 20: tamu\n- VLAN 30: server\nPort access hanya membawa satu VLAN.'],
+    ['APIPA explanation', 'IP 169.254.x.x artinya PC tidak dapat jawaban DHCP. Cek kabel lalu ipconfig /renew.'],
+    ['ping ladder with loopback and 8.8.8.8', 'Urutan ping: 127.0.0.1 → IP sendiri → gateway → 8.8.8.8 → cari.id.'],
+    ['repeats the PC\'s current (wrong) address only', 'IP PC-mu sekarang 192.168.10.57, sedangkan gateway ruangan ini ada di subnet 30. Network-nya beda, kan?', task],
+    ['show commands only', 'show running-config\nshow vlan brief\nshow interfaces trunk'],
+    ['current address + one gateway on one line', 'Dari PC-mu (192.168.10.57) coba ping gateway 192.168.30.1. Kalau RTO, bandingkan network-nya.', task],
+    ['trunk concept mentioning one command', 'Trunk dipakai di uplink antar switch supaya banyak VLAN lewat satu kabel; perintahnya diawali switchport mode trunk.'],
+    ['DNS concept', 'Kalau ping 8.8.8.8 bisa tapi cari.id tidak terbuka, curigai DNS. Coba nslookup cari.id.'],
+    ['network address range concept', 'Network 192.168.20.0/24 punya host .1 sampai .254; biasanya gateway di .1, tapi cek surat kerja.'],
+    ['ACL concept', 'ACL standar dibaca dari atas ke bawah dan ada deny any tersembunyi di akhir; pasang sedekat mungkin dengan tujuan.'],
+    ['steps in words, no commands', 'Langkahnya: masuk mode konfigurasi, pilih interface yang benar, atur VLAN-nya, lalu simpan. Coba susun perintahnya sendiri dulu.'],
+    ['same-network example with /24, no gateway', 'Contoh: 192.168.1.10/24 dan 192.168.1.200/24 satu network karena tiga oktet pertamanya sama.'],
+    ['one target value only (the gateway to ping)', 'Ping gateway 192.168.30.1 dulu. Kalau reply, lanjut cek DNS.', task],
+    ['compares gateway and a PC address of another subnet', 'Coba bandingkan: gateway ruangan 192.168.20.1, sedangkan IP PC-mu 192.168.10.57.'],
+    ['two-command hint (allowed: at most 2 config lines)', 'Langkah: enable, configure terminal, interface fa0/1, switchport access vlan 20.'],
+  ];
+  it.each(LEAKS)('blocks: %s', (_l, reply, c) => {
+    const r = N.guardLeak(reply, c ?? g);
+    expect(r.leak).toBe(true);
+    for (const ip of reply.match(/(?:\d{1,3}\.){3}\d{1,3}/g) ?? []) if (!['8.8.8.8', '0.0.0.0'].includes(ip)) expect(r.text).not.toContain(ip);
+    expect(r.text).toMatch(/anti-contek/);
+  });
+  it.each(HINTS)('passes: %s', (_l, reply, c) => {
+    const r = N.guardLeak(reply, c ?? g);
+    expect(r.leak).toBe(false); expect(r.text).toBe(reply);
+  });
+  it('pass rate over the whole table', () => {
+    const ok = LEAKS.filter(([, r, c]) => N.guardLeak(r, c ?? g).leak).length + HINTS.filter(([, r, c]) => !N.guardLeak(r, c ?? g).leak).length;
+    const total = LEAKS.length + HINTS.length;
+    console.log(`leak guard adversarial table: ${ok}/${total} (${LEAKS.length} leaks, ${HINTS.length} legitimate hints)`);
+    expect(total).toBeGreaterThanOrEqual(30); expect(LEAKS.length).toBeGreaterThanOrEqual(15); expect(HINTS.length).toBeGreaterThanOrEqual(15);
+    expect(ok).toBe(total);
+  });
+  it('mentorPrompt passes the task\'s target values to the guard but never to the model', async () => {
+    const c0 = ctx(); const c = { ...c0, job: { ...c0.job, answer: ['192.168.30.45', '255.255.255.0', '192.168.30.1'] } };
+    const msgs = N.mentorPrompt(c, [], 'q');
+    expect(JSON.stringify(msgs)).not.toContain('192.168.30.45');
+    N.aiCfg.provider = 'openrouter'; N.aiCfg.key = 'sk-or-v1-unit-test-key'; N.aiCfg.enabled = true; N.aiCfg.consent = true;
+    N.aiTransport.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Coba 192.168.30.45 dengan gateway di .1, prefix 24.' } }] }), { status: 200 });
+    expect(await N.chat(msgs)).not.toContain('192.168.30.45');
+  });
+});
+
+// ---------------------------------------------------------------- "Hapus semua data saya" (Settings → Privasi & data)
+describe('wipe all of my data', () => {
+  const mk = (keys: string[]) => { const m = new Map(keys.map(k => [k, 'x'])); return { m, st: { get length() { return m.size; }, key: (i: number) => [...m.keys()][i] ?? null, removeItem: (k: string) => { m.delete(k); } } }; };
+  it('removes every key the game writes (found by grepping localStorage/sessionStorage in src) and nothing else', async () => {
+    const M = await import('../src/ui/menu');
+    const local = mk(['kotaNusantara.settings.v1', 'kotaNusantara.ai.v1', 'kotaNusantara.noc.v1', 'kotaNusantara.notes.v1', 'kotaNusantara.missions.v2', '__ms_probe', 'other-app.token']);
+    const sess = mk(['kotaNusantara.ai.key', 'kotaNusantara.demoBackup', 'kn-reloaded', 'unrelated']);
+    const gone = M.wipeGameData([local.st, sess.st]);
+    expect(gone.length).toBe(9);
+    expect([...local.m.keys()]).toEqual(['other-app.token']); expect([...sess.m.keys()]).toEqual(['unrelated']);
+    // every storage key literal in src is covered by a prefix (a new key with another name must update GAME_KEY_PREFIXES)
+    const files: string[] = []; const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
+    walk(join(__dirname, '../src'));
+    const src = files.map(f => readFileSync(f, 'utf8')).join('\n');
+    const lits = [...src.matchAll(/(?:KEY|BACKUP|KEYS)\s*=\s*\[?\s*'([^']+)'/g), ...src.matchAll(/(?:local|session)Storage\.(?:get|set|remove)Item\('([^']+)'/g)].map(m => m[1]);
+    expect(lits.length).toBeGreaterThanOrEqual(6);
+    for (const k of lits) expect(M.GAME_KEY_PREFIXES.some(p => k.startsWith(p)), k).toBe(true);
+  });
+  it('survives a blocked storage', async () => {
+    const M = await import('../src/ui/menu');
+    expect(M.wipeGameData([{ get length(): number { throw new Error('SecurityError'); }, key: () => null, removeItem: () => {} }])).toEqual([]);
+  });
+});
