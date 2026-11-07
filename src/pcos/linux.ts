@@ -262,7 +262,7 @@ export class LinuxShell implements Shell {
     if (!SRV.cable) return false;
     const lab = ENVS.lab, n = parseIp(ip)!;
     if (networkOf(n, 24) === networkOf(parseIp(SRV.ip)!, 24)) return lab.hosts.some(h => h.ip === ip && !h.down) || [...ADAPTERS.values()].some(o => envOf(o.pc) === lab && live(o, lab).ip === ip);
-    for (const e of Object.values(ENVS)) if (e.id !== 'none' && e.id !== 'lab' && e.hosts.some(h => h.ip === ip && !h.down)) return e.id !== 'guest' && e.id !== 'kasir';
+    for (const e of Object.values(ENVS)) if (e.id !== 'none' && e.id !== 'lab' && !e.site && e.hosts.some(h => h.ip === ip && !h.down)) return e.id !== 'guest' && e.id !== 'kasir';
     return HOOKS.internet(lab, SRV.ip, ip, 'icmp') && (PUBLIC_DNS.includes(ip) || Object.values(INTERNET).some(v => v.ip === ip));
   }
 }

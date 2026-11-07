@@ -1,6 +1,7 @@
 // Noc: the public class (re-exported by src/game/noc.ts). Modal panels and the HUD: work board, surat kerja,
 // briefing, berita acara, work report, daily evaluation, wall board, and Pak Nusa (AI mentor + AI complaint voices).
 // State and rules: core.ts (NocCore). Physical work: workshop.ts (NocWorkshop).
+import { stageBarHtml, beritaFactCheck, ipsIn, addNet24 } from './berita';
 import { SWITCHES, live, adapterOf } from '../../pcos/net';
 import {
   aiReady,
@@ -386,35 +387,19 @@ export class Noc extends NocWorkshop {
   }
   protected stageBar(j: Job) {
     if (j.tut) return '';
-    const n = this.stage(j);
-    return `<div class="stg">${['Survei', 'Kerja', 'Uji', 'Dokumentasi'].map((x, i) => `<span class="${i < n ? 'done' : i === n ? 'cur' : ''}">${x}</span>`).join('')}</div>`;
+    return stageBarHtml(this.stage(j));
   }
   /** berita acara: written by the technician, signed, then the job closes (live state re-checked first) */
   /** a berita acara is a signed record: every IP it names must match the job's real addressing, and it must say how the work was verified */
   beritaFacts(j: Job, text: string): string {
-    const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-    const known = new Set<string>();
-    for (const src of [...j.order, ...j.log, j.detail ?? '']) for (const m of src.match(IP) ?? []) known.add(m);
+    const known = new Set<string>(ipsIn(...j.order, ...j.log, j.detail ?? ''));
     for (const t of j.targets) {
       const l = live(adapterOf(t.pc.name));
       for (const v of [l.ip, l.gw, ...l.dns]) if (v) known.add(v);
+      if (l.ip && l.prefix) addNet24(known, l.ip);
     }
-    for (const t of j.targets) {
-      const l = live(adapterOf(t.pc.name));
-      if (l.ip && l.prefix) {
-        const net = l.ip.split('.').slice(0, 3).join('.');
-        known.add(`${net}.0`);
-        known.add(`${net}.255`);
-      }
-    }
-    const bad = (text.match(IP) ?? []).filter(x => !known.has(x));
-    if (bad.length) {
-      const l = j.targets[0] ? live(adapterOf(j.targets[0].pc.name)) : null;
-      return `Alamat ${bad[0]} tidak cocok dengan hasil kerja di lapangan${l?.ip ? ` (${j.targets[0].pc.label}: IP ${l.ip}, gateway ${l.gw || '-'})` : ''}. Berita acara ditandatangani, jadi isinya harus sesuai fakta.`;
-    }
-    if (!/\b(ping|tes|tester|uji|diuji|dites|ipconfig|nslookup|cetak|print|browser|buka|wiremap|verifikasi|cek)\b/i.test(text))
-      return 'Tulis juga cara kamu membuktikan hasilnya (mis. LAN tester 1–8 lolos, ping gateway berhasil, situs terbuka dari PC).';
-    return '';
+    const l = j.targets[0] ? live(adapterOf(j.targets[0].pc.name)) : null;
+    return beritaFactCheck(text, known, l?.ip ? `${j.targets[0].pc.label}: IP ${l.ip}, gateway ${l.gw || '-'}` : '');
   }
   signBerita(j: Job, text: string): string {
     if (j.status === 'closed') return 'Sudah ditutup.';

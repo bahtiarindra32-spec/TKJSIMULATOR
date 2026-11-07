@@ -225,6 +225,19 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - NPC padat: pemain tidak bisa menembus NPC, dan NPC yang berjalan berhenti kalau jalannya dihalangi pemain.
 - Ngobrol dengan NPC: dekati lalu tekan **F**. Tiap NPC punya nama dan peran (resepsionis, satpam, tamu, karyawan, teknisi gedung). Saat ada tugas, mereka bicara sesuai tugas: resepsionis/satpam memberi tahu pelapor dan lantai, karyawan yang PC-nya bermasalah menceritakan gejalanya lalu minggir, tamu mengeluh soal Wi-Fi saat ada gangguan Wi-Fi.
 
+### Fase 1: Karier lapangan (7 Nov 2026) — `src/data/sites.ts`, `src/world/sites.ts`, `src/game/field/`
+- **Empat tempat baru di kota** (bisa dimasuki, jaringannya ikut simulasi): Kantor Nusa Teknik (papan order, lemari material, meja kerja, motor kantor), Rumah Kel. Hendra (ONT ISP + router Wi-Fi mode AP, laptop, smart TV), Kos Mawar (2 lantai, tangga, 6 kamar, router + AP per lantai, laptop penghuni), Warnet Sinar (rak dinding: switch 16 port + patch panel, 8 PC + PC kasir). Tiap tempat punya subnet dan jalur ISP sendiri, terpisah dari hotel.
+- **Terbuka setelah pangkat Teknisi Junior** (XP + lulus uji kompetensi magang hotel). Kak Rani memberi tahu lewat notifikasi; sebelum itu papan order menjelaskan syaratnya.
+- **Papan order**: 2–4 order per hari kerja, dari 8 jenis pekerjaan yang terikat ke perangkat nyata: ganti router Wi-Fi mati (SSID/WPA2/sandi sesuai permintaan pelanggan), smart TV tidak dapat internet (pool DHCP ONT penuh/terbalik), kabel ONT → router putus, AP lantai 2 kos mati (kabel tercabut/konektor patah), Wi-Fi kos lemot karena kanal tumpang tindih, PC warnet tidak dapat IP (port shutdown/VLAN salah), kabel PC warnet putus, warnet lumpuh karena loop (STP mati). Gangguannya disuntik ke simulator saat order diambil.
+- **Tidak ada jalan pintas**: pemain datang sendiri ke lokasi (motor atau jalan kaki, penanda hijau + minimap), memperbaiki dengan alat yang ada (rak + console switch, halaman ONT dari laptop, kabel crimp/patch cord, panel router/AP), lalu **menguji dari perangkat pelanggan** (ping/browser di laptop/PC, menu jaringan TV). Order baru bisa ditutup kalau simulasi sehat dan sudah diuji di sana.
+- **Ekonomi**: saldo (Rp), tarif acak dalam kisaran riset per jenis pekerjaan (label "perkiraan tarif pasar"), material dipotong dari bayaran (RJ45, kabel UTP per meter, patch cord jadi, router baru) dan diambil di lemari material, bayaran mengikuti bintang (★★★ 100 %, ★★ 85 %, ★ 60 %), order yang dibatalkan/tidak selesai sampai hari ditutup kena denda 10 %.
+- **Reputasi 0–100 per jenis pelanggan** (rumah, kos, warnet): naik kalau rapi, turun kalau gagal; memengaruhi order yang muncul (pekerjaan lebih sulit butuh reputasi lebih tinggi) dan tarif.
+- **Garansi**: pekerjaan yang ditutup dengan pemeriksaan lemah (kabel crimp bukan T568B atau tidak dites, konfigurasi switch tidak di-write memory) kembali 1–2 hari kemudian sebagai order garansi (tidak dibayar, gangguan yang sama muncul lagi); dibiarkan lewat batas = reputasi turun.
+- **Berita acara + nota**: tahap Survei → Kerja → Uji → Dokumentasi seperti magang; berita acara dicek faktanya (IP yang ditulis harus nyata, harus menyebut cara uji), lalu nota memuat jasa × bintang, material, total diterima, dan perubahan reputasi.
+- **HUD**: kartu order (pelanggan, alamat, SLA, tahap, langkah berikutnya) dan chip saldo + reputasi, juga di HP (potret/lanskap tanpa tumpang tindih).
+- **Jalur karier** (magang hotel → teknisi lapangan → usaha sendiri) dan catatan singkat legalitas RT/RW Net (UU 36/1999, jalur reseller KBLI 61994 + PKS dengan ISP berizin) sebagai pengantar fase berikutnya.
+- Progres tersimpan di `kotaNusantara.field.v1` (terpisah dari save magang).
+
 ### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
 - **Izin data & API key**: AI tidak mengirim apa pun sebelum pemain/guru memilih *Setuju* di Pengaturan (yang dikirim: pertanyaan, teks surat kerja/jobsheet, konfigurasi IP simulasi; nama siswa dan nilai tidak). API key bisa disimpan *di perangkat ini* atau *sesi ini saja* untuk komputer lab bersama.
 - Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.
@@ -263,7 +276,8 @@ kota-nusantara/
 │  ├─ data/city.ts           semua koordinat jalan, zona, gedung, level hotel, anchor, spawn
 │  ├─ world/                 core, roads, buildings, hotel, props, wayfinding, interiorDressing
 │  ├─ assets/                netdevices, vehicles, people
-│  ├─ game/                  physics, traffic, motor (Motor Matic), missionSystem, missionLogic, missions, missionsF
+│  ├─ game/                  physics, traffic, motor (Motor Matic), missionSystem, missionLogic, missions, missionsF,
+│  │                         noc/ (magang hotel), field/ (karier lapangan Fase 1)
 │  ├─ ui/                    minimap, missionUI, waypoint, mission.css
 │  └─ pcos/                  net.ts (simulasi jaringan), os.ts (Jendela 11), switchcli.ts, wifi.ts,
 │                            linux.ts (srv-nusa), office.ts (printer/telepon/NAS), edge.ts (R-EDGE), term.ts, ext.ts

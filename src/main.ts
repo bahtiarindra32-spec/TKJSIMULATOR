@@ -41,6 +41,10 @@ import { PcOS } from './pcos/os';
 import { Noc } from './game/noc';
 import { Praktik } from './game/praktik';
 import { buildLabTkj, insideLab } from './world/labBuilding';
+import { buildSites, insideSite } from './world/sites';
+import { SITES, siteAt, siteById, kosFeet, KOS, FLOOR_Y, type SiteId } from './data/sites';
+import { initSiteClients, readout } from './pcos/sites';
+import { FieldWork } from './game/field/field';
 import { DemoTour } from './game/demo';
 import { encodeResult } from './game/recap';
 import { DEVICES } from './pcos/ext';
@@ -128,19 +132,28 @@ hotel.traverse(o => { const m = /^PROP_(L\d)_(PC|LAPTOP)_((?:[A-Z]+_)?\d+)$/.exe
 // the SMK practice lab building (its own rack, switch and segment; not part of the internship)
 const labB = buildLabTkj(world); labB.group.updateMatrixWorld(true);
 for (const c of labB.pcs) PCS.push({ name: c.name, label: c.label, p: new THREE.Box3().setFromObject(c.o).getCenter(new THREE.Vector3()), o: c.o });
+// Fase 1 field-work places (Kantor Nusa Teknik, rumah, kos, warnet): their PCs/laptops open PcOS like any other
+const sitesB = buildSites(world);
+for (const c of sitesB.pcs) PCS.push({ name: c.name, label: c.label, p: new THREE.Box3().setFromObject(c.o).getCenter(new THREE.Vector3()), o: c.o });
 const pcos = new PcOS();
 pcos.clock = () => dn.clock();
-pcos.objective = () => { if (praktik.run) return praktik.objective(); const j = noc.tracked(); if (!j || j.status === 'closed') return ''; return `${j.tut ? 'Tugas' : ['Survei', 'Kerja', 'Uji', 'Dokumentasi', 'Selesai'][noc.stage(j)]} · ${noc.nextHint(j)}`; };
+pcos.objective = () => { if (praktik.run) return praktik.objective(); const j = noc.tracked(); if (!j || j.status === 'closed') return field.objective(); return `${j.tut ? 'Tugas' : ['Survei', 'Kerja', 'Uji', 'Dokumentasi', 'Selesai'][noc.stage(j)]} · ${noc.nextHint(j)}`; };
 const RACK = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_SRV_NETRACK_01')!;
 const CABINET = hotelAnchorsWorld().find(a => a.name === 'ANCHOR_WS_TOOLCAB_01')!;
 initSwitches(PCS.map(c => c.name));
 initLinux();
+initSiteClients();
 // hotel-room laptops are Wi-Fi clients; guests already logged in to the captive portal
 for (const c of PCS) { const lv = +(/_L(\d)_/.exec(c.name)?.[1] ?? 1); if (lv >= 4) { registerClient(c.name, c.p.x, c.p.y, c.p.z, lv); AUTH.add(adapterOf(c.name).mac); } }
 // IDF wall racks of the office floors (one access switch + patch panel each); the player stands in front of them
 const IDFS = [2, 3, 4, 5, 6, 7, 8].map(lv => { const o = hotel.getObjectByName(`PROP_L${lv}_IDF_RACK_01`); const c = o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : new THREE.Vector3(); return { id: `IDF-L${lv}`, level: lv, x: c.x, y: c.y, z: c.z - 0.9 }; });
 const noc = new Noc(pcos, PCS.map(c => ({ name: c.name, label: c.label, x: c.p.x, y: c.p.y, z: c.p.z, level: +(/_L(\d)_/.exec(c.name)?.[1] ?? 1) })), RACK, CABINET, IDFS);
 (noc.RACKS as Record<string, unknown>).LAB = { name: 'LAB', label: 'Rak Lab Praktik TKJ · SMK Nusantara', x: labB.spots.rack.x, y: 0, z: labB.spots.rack.z, level: 1 };
+/** Fase 1: where the technician stands to use a site device (city coords; y = floor the spot is on) */
+const SITE_SPOTS = {
+  warnetRack: { X: 358.6, Z: 304.9 },
+} as const;
+(noc.RACKS as Record<string, unknown>).WARNET = { name: 'WARNET', label: 'Rak dinding Warnet Sinar · SW-WARNET', x: wx(SITE_SPOTS.warnetRack.X), y: 0, z: wz(SITE_SPOTS.warnetRack.Z), level: 1 };
 const labBoard = (() => { const c = document.createElement('canvas'); c.width = 1024; c.height = 400; const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; (labB.spots.board.material as THREE.MeshStandardMaterial).map = t; (labB.spots.board.material as THREE.MeshStandardMaterial).needsUpdate = true; return { c, t }; })();
 const drawLabBoard = (lines: string[]) => { const g = labBoard.c.getContext('2d')!; g.fillStyle = '#f4f4f0'; g.fillRect(0, 0, 1024, 400); g.fillStyle = '#2bd46b'; g.fillRect(0, 0, 1024, 10); g.fillStyle = '#13202b'; lines.forEach((l, k) => { g.font = k === 0 ? 'bold 46px sans-serif' : '30px sans-serif'; g.fillText(l.slice(0, 60), 30, 64 + (k === 0 ? 0 : 20) + k * 40); }); labBoard.t.needsUpdate = true; };
 noc.playerName = () => settings.name;
@@ -148,10 +161,27 @@ const praktik = new Praktik(noc, pcos, labB.pcs.map(c => ({ name: c.name, label:
 drawLabBoard(['LAB PRAKTIK TKJ', 'Meja guru: susun jobsheet atau masukkan kode']);
 DEVICES.push(
   { id: 'LAB_GURU', x: labB.spots.guru.x, z: labB.spots.guru.z, level: 1, r: 1.4, hint: () => praktik.run ? (praktik.run.ready ? '[F] Meja guru · minta paraf' : '[F] Meja guru · jobsheet berjalan') : '[F] Meja guru · Lab Praktik', use: () => praktik.openDesk() },
-  { id: 'LAB_TOOLS', x: labB.spots.tools.x, z: labB.spots.tools.z, level: 1, r: 1.3, hint: () => '[F] Lemari alat lab', use: () => noc.openCabinet(true) },
+  { id: 'LAB_TOOLS', x: labB.spots.tools.x, z: labB.spots.tools.z, level: 1, r: 1.3, hint: () => '[F] Lemari alat lab', use: () => noc.openCabinet(true, '') },
   { id: 'LAB_CRIMP', x: labB.spots.crimp.x, z: labB.spots.crimp.z, level: 1, r: 1.2, hint: () => '[F] Meja crimping', use: () => noc.openCrimpBench() },
   { id: 'LAB_RACK', x: labB.spots.rack.x, z: labB.spots.rack.z, level: 1, r: 1.3, hint: () => '[F] Rak lab: patch panel & SW-LAB', use: () => noc.openRack('LAB') },
 );
+// Fase 1 field work (game/field): order board + material cabinet at Kantor Nusa Teknik, device panels at the sites
+const field = new FieldWork(noc, pcos, {
+  toast: (t, ms) => toast(t, ms),
+  player: () => (mode === 'walk' ? { X: cityX(player.pos.x), Z: cityZ(player.pos.z), y: player.pos.y } : null),
+  hudOn: () => mode === 'walk' && !menu.paused && document.body.classList.contains('entered'),
+});
+{
+  const sp = (id: string, X: number, Z: number, y: number, hint: string, use: () => void, r = 1.3) => DEVICES.push({ id, x: wx(X), z: wz(Z), y, level: 1, r, hint: () => hint, use });
+  const up = KOS.upper;
+  sp('NT_PAPAN_ORDER', 55, 119.7, FLOOR_Y, '[F] Papan order Nusa Teknik', () => field.openBoard(), 1.5);
+  sp('NT_LEMARI', 51.5, 120.2, FLOOR_Y, '[F] Lemari material (alat & bahan)', () => field.openLemari(), 1.4);
+  sp('RUMAH_ONT', 115.3, 581.0, FLOOR_Y, '[F] Cek ONT & router Wi-Fi', () => field.device('ONT'));
+  sp('RUMAH_TV', 122.3, 582.6, FLOOR_Y, '[F] Smart TV · status jaringan', () => field.device('TV'));
+  sp('KOS_ROUTER', 133.0, 313.0, FLOOR_Y, '[F] Router kos (LAN ke AP)', () => field.device('KOS_ROUTER'));
+  sp('KOS_AP_LT1', 138.0, 310.1, FLOOR_Y, '[F] AP lantai 1 (plafon)', () => field.device('AP-KOS-LT1'), 1.1);
+  sp('KOS_AP_LT2', 138.0, 310.1, up, '[F] AP lantai 2 (plafon)', () => field.device('AP-KOS-LT2'), 1.1);
+}
 { // office devices (printers, desk IP phones) + NAS: positions before the static batches merge the meshes
   const pos = (n: string) => { const o = hotel.getObjectByName(n); return o ? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()) : null; };
   const printers = [2, 3].map(lv => ({ lv, c: pos(`PROP_L${lv}_PRINTER_01`) })).filter(x => x.c).map(x => ({ id: `PRN-L${x.lv}`, level: x.lv, x: x.c!.x, z: x.c!.z }));
@@ -176,15 +206,29 @@ const missions = { isModalOpen: () => false, hintFor: (_a: string | null): strin
 const waypoint = createWaypoint();
 const missionMarker = createAnchorMarker(); gameLayer.add(missionMarker.group);
 const south = buildSouth(world);   // v9: Kota Selatan (own RNG, built after the seeded systems)
+// Fase 1 lots were empty grass, but a few street-side trees stand where the kos, warnet and house now are: move those
+// instances out of the world (before the auto colliders read the trunks) so nothing grows through a room
+{
+  const m4 = new THREE.Matrix4(), w4 = new THREE.Matrix4(), p = new THREE.Vector3(), gone = new THREE.Matrix4().makeScale(0, 0, 0).setPosition(0, -500, 0);
+  const onLot = (X: number, Z: number) => SITES.some(st => [st.rect, ...st.lots].some(r => X > r.x0 - 1.8 && X < r.x1 + 1.8 && Z > r.z0 - 1.8 && Z < r.z1 + 1.8));
+  world.updateMatrixWorld(true);
+  world.traverse(o => {
+    const im = o as THREE.InstancedMesh; if (!im.isInstancedMesh || !/TREE|PALM/.test(im.name)) return;
+    let hit = false;
+    for (let k = 0; k < im.count; k++) { im.getMatrixAt(k, m4); p.setFromMatrixPosition(w4.multiplyMatrices(im.matrixWorld, m4)); if (onLot(cityX(p.x), cityZ(p.z))) { im.setMatrixAt(k, gone); hit = true; } }
+    if (hit) { im.instanceMatrix.needsUpdate = true; im.computeBoundingSphere(); }
+  });
+}
 buildAutoColliders(world); buildGrid();
 // rideable Motor Matic: flat ground boxes (asphalt 0.02, kerbs 0.17, sidewalks 0.15, parking slabs) + bike-only walls
 const motors = new Motors(gameLayer);
-buildGroundBoxes(['FASE_A_JALAN', 'FASE_B_TANAH_ZONA', 'FASE_E_PROPERTI_JALAN', 'PARKIR_MOTOR_01', 'FASE_F_KOTA_SELATAN'].map(n => world.getObjectByName(n)!).filter(Boolean), o => o.name === 'JPO_01' || o.name === 'ZONE_OVERLAY');
+buildGroundBoxes(['FASE_A_JALAN', 'FASE_B_TANAH_ZONA', 'FASE_E_PROPERTI_JALAN', 'PARKIR_MOTOR_01', 'FASE_F_KOTA_SELATAN', 'FASE1_LOKASI'].map(n => world.getObjectByName(n)!).filter(Boolean), o => o.name === 'JPO_01' || o.name === 'ZONE_OVERLAY');
 {
   const hb = { x0: wx(HOTEL_ORIGIN[0]), x1: wx(HOTEL_ORIGIN[0] + 30), z0: wz(HOTEL_ORIGIN[1]), z1: wz(HOTEL_ORIGIN[1] + 20) };
   motors.walls.push({ minX: hb.x0 - 0.1, maxX: hb.x1 + 0.1, minZ: hb.z0 - 0.1, maxZ: hb.z1 + 0.1, minY: -1, maxY: 40 }); // no riding into the hotel (lobby, lift, stairs)
   const jpo = world.getObjectByName('JPO_01');
   for (const st of jpo?.children ?? []) { const q = st.userData.stair; if (q) motors.walls.push({ minX: q.x0, maxX: q.x1, minZ: q.z0, maxZ: q.z1, minY: -1, maxY: 8 }); }
+  for (const s of SITES) motors.walls.push({ minX: wx(s.rect.x0) - 0.1, maxX: wx(s.rect.x1) + 0.1, minZ: wz(s.rect.z0) - 0.1, maxZ: wz(s.rect.z1) + 0.1, minY: -1, maxY: 12 });   // no riding into the Fase 1 buildings
   for (const w of [[-210, -199.5, -160, 460], [199.5, 210, -160, 460], [-210, 210, -160, -149.5], [-210, 210, 448.2, 460]]) motors.walls.push({ minX: w[0], maxX: w[1], minZ: w[2], maxZ: w[3], minY: -1, maxY: 40 });
 }
 motors.settle();
@@ -216,6 +260,8 @@ batches.add(bakeStatic(world.getObjectByName('FASE_F_KOTA_SELATAN')!, 'BATCH_SEL
 // the practice lab and the street-name signs were drawn object by object (~590 draw calls): batch them like the hotel
 batches.add(bakeStatic(labB.group, 'BATCH_LAB_TKJ', o => /^DOOR_/.test(o.name), { max: 0.35, tier: 'in', keep: GEAR_RE }));
 batches.add(bakeStatic(world.getObjectByName('WAYFINDING')!, 'BATCH_WAYFINDING'));
+// Fase 1 places: one batch per building so each is frustum-culled as a block
+for (const s of SITES) batches.add(bakeStatic(sitesB.groups[s.id], `BATCH_${s.bld}`));   // no DETAIL split: small interiors, fewer draw calls
 // Green IT: the seven identical upper floors share one merged batch per material; cullHotel picks which floors it draws
 const floorStack = new FloorStack(['L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8'].map(n => hotelBatches.get(n)!), [2, 3, 4, 5, 6, 7, 8], 'BATCH_HOTEL_L2_L8'); batches.add(floorStack.group);
 const upperParts = ['ROOF', 'EXTERIOR'].map(n => hotelBatches.get(n)!);
@@ -413,7 +459,7 @@ window.addEventListener('keydown', e => {
   if (mode === 'walk' && (e.code === 'KeyE' || e.code === 'KeyQ') && !riding) changeFloor(e.code === 'KeyE' ? 1 : -1);
   if (mode === 'walk' && e.code === 'KeyF' && !e.repeat) interact();
   if (mode === 'walk' && e.code === 'KeyR' && !uiBlocked() && !e.repeat) { if (riding) { motors.resetToRoad(riding, rideDyn(riding)); } else noc.setAnalyzer(!noc.analyzerOn); }
-  if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) noc.openBoard();
+  if (mode === 'walk' && e.code === 'KeyT' && !missions.isModalOpen()) { if (field.hasActive() && !noc.active) field.openOrder(); else noc.openBoard(); }
   if (mode === 'walk' && e.code === 'KeyJ' && !e.repeat && !missions.isModalOpen()) { e.preventDefault(); keys.delete('KeyJ'); noc.openNusa(); }
   if (mode === 'walk' && e.code === 'KeyC' && !missions.isModalOpen() && !riding) { const m = noc.physical(nearPc?.name ?? null, nearRack()); if (m) toast(m, 5200); }
   if (mode === 'walk' && e.code === 'KeyH' && riding && !e.repeat) ambient.horn(1);
@@ -453,6 +499,8 @@ function feetHeight(x: number, z: number, prevY: number): number {
     if (player.level === 1 && x > wx(HOTEL_ORIGIN[0] + 23) && z > wz(HOTEL_ORIGIN[1] + 12)) return base + 0.3 * THREE.MathUtils.clamp((z - wz(HOTEL_ORIGIN[1] + 12)) / 1.2, 0, 1); // raised floor, ramp at the door
     return base;
   }
+  // Fase 1 kos: two storeys joined by a straight stair
+  { const kf = kosFeet(cityX(x), cityZ(z), prevY); if (kf !== null) return kf; }
   // JPO stairs & deck
   const jpo = world.getObjectByName('JPO_01');
   if (jpo) {
@@ -608,7 +656,7 @@ function updateSeat(dt: number) {
 }
 function nearSpot() {
   let best: ReturnType<typeof noc.spots>[number] | null = null, bd = 1e9;
-  for (const sp of noc.spots()) { const d = Math.hypot(player.pos.x - sp.x, player.pos.z - sp.z); if (sp.level === player.level && d < (sp.r ?? 1.5) && d < bd) { bd = d; best = sp; } }
+  for (const sp of noc.spots()) { if (sp.y !== undefined && Math.abs(player.pos.y - sp.y) > 1.2) continue; const d = Math.hypot(player.pos.x - sp.x, player.pos.z - sp.z); if (sp.level === player.level && d < (sp.r ?? 1.5) && d < bd) { bd = d; best = sp; } }
   // a desk phone next to a PC: whichever is closer wins
   if (best && best.r && nearPc && Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z) < bd) return null;
   return best;
@@ -720,6 +768,7 @@ function cullHotel() {
 function nearRack(): string | null {
   if (player.level === 1 && Math.hypot(player.pos.x - RACK.x, player.pos.z - RACK.z) < 2.2) return 'MDF';
   if (insideLab(player.pos.x, player.pos.z) && Math.hypot(player.pos.x - labB.spots.rack.x, player.pos.z - labB.spots.rack.z) < 1.8) return 'LAB';
+  if (insideSite(player.pos.x, player.pos.z) && Math.hypot(player.pos.x - wx(SITE_SPOTS.warnetRack.X), player.pos.z - wz(SITE_SPOTS.warnetRack.Z)) < 1.6) return 'WARNET';
   for (const d of IDFS) if (player.level === d.level && Math.hypot(player.pos.x - d.x, player.pos.z - (d.z + 0.9)) < 2.2) return d.id;
   return null;
 }
@@ -793,7 +842,7 @@ function updateWalk(dt: number) {
     camera.rotation.set(view.pitch, view.yaw, fx.roll, 'YXZ');
   } else {
     // over-the-shoulder orbit camera that stops before walls/ceilings (and stays inside the lift car)
-    const indoor = insideHotel(player.pos.x, player.pos.z);
+    const indoor = insideHotel(player.pos.x, player.pos.z) || insideSite(player.pos.x, player.pos.z);
     const inCar = vertical.ride?.kind === 'lift' && player.pos.z > wz(HOTEL_ORIGIN[1] + 12.2);
     const wantD = inCar ? 0.9 : indoor ? 2.3 : 3.6, pitch = THREE.MathUtils.clamp(view.pitch, -1.0, 0.9);
     view.head.lerp(new THREE.Vector3(player.pos.x, player.pos.y + 1.72 - 0.58 * ck, player.pos.z), view.head.distanceTo(player.pos) > 4 ? 1 : 1 - Math.exp(-dt * 18));
@@ -824,7 +873,7 @@ function updateWalk(dt: number) {
     for (const [nm, ax, az] of ANCHORS) { const d = Math.hypot(player.pos.x - wx(HOTEL_ORIGIN[0] + ax), player.pos.z - wz(HOTEL_ORIGIN[1] + az)); if (d < best) { best = d; nearAnchor = nm; } }
   }
   nearPc = null;
-  if (insideHotel(player.pos.x, player.pos.z) || insideLab(player.pos.x, player.pos.z)) {
+  if (insideHotel(player.pos.x, player.pos.z) || insideLab(player.pos.x, player.pos.z) || insideSite(player.pos.x, player.pos.z)) {
     let best = 1.5;
     for (const c of PCS) { if (Math.abs(c.p.y - (player.pos.y + 0.9)) > 1.2) continue; const d = Math.hypot(player.pos.x - c.p.x, player.pos.z - c.p.z); if (d < best) { best = d; nearPc = c; } }
     if (nearPc && nearAnchor && !noc.anchorHint(nearAnchor)) nearAnchor = null;
@@ -836,16 +885,16 @@ function updateWalk(dt: number) {
   if (ride) hint = '';
   else if (nb) { hint = '[F] Naik motor'; at = new THREE.Vector3(nb.pos.x, nb.pos.y + 1.35, nb.pos.z); }
   else if (!sp && nearNpcNow()) { const n = nearNpcNow()!; hint = `[F] Ngobrol dengan ${n.name}`; at = n.p.root.position.clone().setY(n.p.root.position.y + (n.kind === 'type' ? 1.45 : 1.9)); }
-  else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
+  else if (sp) { hint = sp.hint; at = new THREE.Vector3(sp.x, sp.y !== undefined ? sp.y + 1.6 : LEVELS[sp.level - 1].elev + LEVELS[sp.level - 1].h - 0.4, sp.z); }
   else if (dr && !(nearAnchor && noc.anchorHint(nearAnchor)) && (!nearPc || Math.hypot(dr.cx - player.pos.x, dr.cz - player.pos.z) < Math.hypot(nearPc.p.x - player.pos.x, nearPc.p.z - player.pos.z))) { hint = dr.want ? '[F] Tutup pintu' : '[F] Buka pintu'; at = new THREE.Vector3(dr.cx, dr.y0 + 1.45, dr.cz); if (inVertical(player.pos.x, player.pos.z)) hint += atLift() ? ' · [E] Panggil lift (pilih lantai)' : ' · [E] Naik tangga · [Q] Turun tangga'; }
   else {
     const rk = nearRack(), nh = noc.hintAt(nearPc?.name ?? null, rk);
     const vert = inVertical(player.pos.x, player.pos.z) && insideHotel(player.pos.x, player.pos.z);
     const main = nearPc && !nearAnchor ? `[F] Nyalakan ${nearPc.label}` : nearAnchor ? (noc.anchorHint(nearAnchor) ?? `[F] ${MISSIONS[nearAnchor]?.title ?? nearAnchor}`) : vert ? (atLift() ? '[E] Panggil lift (pilih lantai)' : '[E] Naik tangga · [Q] Turun tangga') : '';
-    hint = (nh ? nh + ' · ' : '') + main;
+    hint = [nh, main].filter(Boolean).join(' · ');
     if (nearPc && !nearAnchor) at = nearPc.p.clone().setY(nearPc.p.y + 0.35);
     else if (nearAnchor) { const a = ANCHORS.find(x => x[0] === nearAnchor)!; at = new THREE.Vector3(wx(HOTEL_ORIGIN[0] + a[1]), player.pos.y + 1.5, wz(HOTEL_ORIGIN[1] + a[2])); }
-    else if (rk) { const d = IDFS.find(x => x.id === rk); at = d ? new THREE.Vector3(d.x, player.pos.y + 1.5, d.z + 0.9) : null; }
+    else if (rk) { const d = IDFS.find(x => x.id === rk); at = d ? new THREE.Vector3(d.x, player.pos.y + 1.5, d.z + 0.9) : rk === 'WARNET' ? new THREE.Vector3(wx(SITE_SPOTS.warnetRack.X), FLOOR_Y + 1.7, wz(SITE_SPOTS.warnetRack.Z - 1.4)) : null; }
     else if (vert) at = player.pos.x > wx(HOTEL_ORIGIN[0] + 19) ? new THREE.Vector3(wx(HOTEL_ORIGIN[0] + 21), player.pos.y + 1.15, wz(HOTEL_ORIGIN[1] + 11.9)) : new THREE.Vector3(wx(HOTEL_ORIGIN[0] + 17), player.pos.y + 1.6, wz(HOTEL_ORIGIN[1] + 12));
   }
   $('hudHint').textContent = hint;
@@ -1010,6 +1059,7 @@ const ZONE_LABEL: Record<string, string> = { LOBI: 'Lobi', LOUNGE: 'Lounge', IT_
 function zoneLabel(id: string) { const k = id.replace(/^L\d_/, ''); const r = /^ROOM_(\d+)$/.exec(k); return r ? `Kamar ${r[1]}` : ZONE_LABEL[k] ?? k.replace(/_/g, ' ').toLowerCase(); }
 function locationName(x: number, z: number): string {
   if (insideLab(x, z)) return 'SMK Nusantara · Lab Praktik TKJ';
+  { const st = siteAt(cityX(x), cityZ(z)); if (st) return st.id === 'kos' ? `${st.label} · Lantai ${player.pos.y > KOS.upper - 1 ? 2 : 1}` : st.label; }
   if (insideHotel(x, z)) { const zn = zoneAt(x, z, player.level); return `Nusantara Tech · Lantai ${player.level}${zn ? ' · ' + zoneLabel(zn) : ''}`; }
   const X = cityX(x), Z = cityZ(z);
   for (const r of ROADS) {
@@ -1081,7 +1131,7 @@ function frame() {
   { const fg = scene.fog as THREE.Fog, Qf = LOOK.fog, fn = mode === 'walk' ? Qf[0] : Math.max(Qf[0], 220), ff = mode === 'walk' ? Qf[1] : Math.max(Qf[1], 1300); if (fg.near !== fn || fg.far !== ff) { fg.near = fn; fg.far = ff; } }
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
-  noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt);
+  noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt); field.update(dt);
   if (nocWall && (nocWallT -= dt0) <= 0) { nocWallT = 1; if (player.level === 1 && Math.hypot(player.pos.x - nocWall.mesh.getWorldPosition(_nwp).x, player.pos.z - _nwp.z) < 25) { noc.drawWall(nocWall.g, dn.clock()); nocWall.tex.needsUpdate = true; } }
   hintIdle = keys.size > 0 && !uiBlocked() ? hintIdle + dt0 : hintIdle; document.body.classList.toggle('hints-off', hintIdle > 20);
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
@@ -1135,6 +1185,10 @@ function frame() {
       const same = player.level === tk.pc.level, fy = tk.pc.y - 1.0;
       missionMarker.setTarget(same ? { x: tk.pc.x, z: tk.pc.z, y: fy } : null); missionMarker.update(t);
       updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: tk.pc.x, z: tk.pc.z, y: fy + 1.3 }, { label: same ? `${tk.id} · ${tk.pc.label}` : `${tk.pc.level > player.level ? 'Naik' : 'Turun'} ke Lantai ${tk.pc.level} · ${tk.id}`, avoid: sidePanel() });
+    } else if (field.target() && !uiBlocked()) {
+      const ft = field.target()!, fy = ft.y;
+      missionMarker.setTarget({ x: wx(ft.X), z: wz(ft.Z), y: fy }); missionMarker.update(t);
+      updateWaypoint(waypoint, camera, { x: player.pos.x, z: player.pos.z }, { x: wx(ft.X), z: wz(ft.Z), y: fy + 1.3 }, { label: ft.label, avoid: sidePanel() });
     } else {
     const tgt = cur.targetPos && !missions.isModalOpen() ? { x: cur.targetPos.x, z: cur.targetPos.z, y: cur.targetY } : null;
     missionMarker.setTarget(tgt); missionMarker.update(t);
@@ -1167,7 +1221,7 @@ $('btnGfx').style.display = 'none';
 function lampMatI() { return (lampLights.length, (world.getObjectByName('LAMPU_LENGAN_GANDA_HEAD') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial | undefined)?.emissiveIntensity ?? -1; }
 /** Lab Praktik: point at the place the current jobsheet step happens (crimping table, rack, the student's desk, or the teacher for initials) */
 /** the left-side panel currently on screen (lab jobsheet or work card), so the waypoint never hides under it */
-const sidePanel = () => [document.querySelector('.jobsheet'), document.getElementById('noc-hud')].find(e => e instanceof HTMLElement && e.offsetWidth > 0) as HTMLElement | undefined;
+const sidePanel = () => [document.querySelector('.jobsheet'), document.getElementById('noc-hud'), document.getElementById('field-hud')].find(e => e instanceof HTMLElement && e.offsetWidth > 0) as HTMLElement | undefined;
 const labPcPos = new Map<string, THREE.Vector3>();
 function labTarget(): { x: number; z: number; y: number; label: string } | null {
   const R = praktik.run; if (!R) return null;
@@ -1180,7 +1234,7 @@ function labTarget(): { x: number; z: number; y: number; label: string } | null 
   const v = labPcPos.get(pc.name) ?? new THREE.Box3().setFromObject(pc.o).getCenter(new THREE.Vector3()); labPcPos.set(pc.name, v);  // the PC group sits at the origin; its parts carry the position
   return { x: v.x, z: v.z, y: fy, label: R.label };
 }
-function missionTarget(): { x: number; z: number } | null { const lt = labTarget(); if (lt) return { x: cityX(lt.x), z: cityZ(lt.z) }; const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
+function missionTarget(): { x: number; z: number } | null { const lt = labTarget(); if (lt) return { x: cityX(lt.x), z: cityZ(lt.z) }; const tk = noc.tracked(); if (tk) return { x: cityX(tk.pc.x), z: cityZ(tk.pc.z) }; const ft = field.target(); if (ft) return { x: ft.X, z: ft.Z }; const c = missions.current(); return c.targetPos ? { x: cityX(c.targetPos.x), z: cityZ(c.targetPos.z) } : null; }
 
 goView('overview', true);
 applySettings();
@@ -1266,6 +1320,19 @@ if (QA0 || import.meta.env.DEV) (window as any).__kota = {
   daynight: { get: () => ({ hour: dn.hour, night: dn.night, label: dn.label(), clock: dn.clock(), auto: dn.auto, exposure: renderer.toneMappingExposure, shadowAuto: renderer.shadowMap.autoUpdate, hemi: hemi.intensity, dir: dir.intensity, lamp: lampMatI() }), set: (h: number) => { dn.setHour(h); dn.apply(camera.position, camera.far); }, next: () => dn.next(), preset: (id: PresetId) => dn.goTo(id) },
   menu: { open: () => menu.open, paused: () => menu.paused, started: () => started, show: () => showMenu(), pause: () => openPause(), resume: () => resumeGame(), mainMenu: () => { menu.pause(false); if (mode === 'walk') exitWalk(); showMenu(); } },
   bounds: () => ({ minX: 0, maxX: 400, minZ: 0, maxZ: 600 }),
+  /** QA: Fase 1 places (entry anchors are the teleport targets) */
+  sites: () => SITES.map(s => ({ id: s.id, bld: s.bld, anchor: s.anchor, inside: s.inside, park: s.park, rect: s.rect })),
+  goSite: (id: SiteId, where: 'anchor' | 'inside' = 'anchor') => { const s = siteById(id); const a = where === 'anchor' ? s.anchor : s.inside; if (riding) forceDismount(); player.pos.set(wx(a.X), FLOOR_Y, wz(a.Z)); player.level = 1; player.yaw = a.yaw; player.vy = 0; },
+  readout: (id: string) => readout(id),
+  env: (id: string) => ENVS[id as keyof typeof ENVS], swDirty: (n: string) => SWITCHES.find(s => s.name === n)?.dirty ?? null,
+  /** QA: Fase 1 field work (orders, saldo, reputasi, garansi) */
+  field: {
+    state: () => field.qa(), unlock: () => { field.qaUnlock = true; }, offer: (tpl: string, seed = 7) => field.qaOffer(tpl as never, seed), accept: (id: string) => field.accept(id),
+    endDay: () => field.endDay(), board: () => field.openBoard(), order: () => field.openOrder(), device: (id: string) => field.device(id), lemari: () => field.openLemari(), career: () => field.openCareer(), sign: (t: string) => field.sign(t), target: () => field.target(), obj: field,
+  },
+  /** QA: what the camera sees at a screen point (NDC -1..1); raycasts the named originals (baked ones included) */
+  pick: (nx: number, ny: number) => { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(nx, ny), camera); return rc.intersectObject(world, true).slice(0, 4).map(h => { let o: THREE.Object3D | null = h.object; while (o && !o.name) o = o.parent; return [o?.name ?? '?', o?.parent?.name ?? '', +h.distance.toFixed(2), +(h.point.x + 200).toFixed(2), +(h.point.z + 150).toFixed(2), +h.point.y.toFixed(2)]; }); },
+  sitePcs: () => PCS.filter(c => /^PROP_(RUMAH|KOS|WARNET)_/.test(c.name)).map(c => ({ name: c.name, x: c.p.x + 200, y: c.p.y, z: c.p.z + 150 })),
   steerIn: () => riding?.steerIn ?? null,
   aiCfg, ai: () => noc.aiInfo(), nusa: () => noc.openNusa(), ask: (q: string) => noc.askNusa(q), mentorCtx: () => noc.mentorCtx(),
   perf: () => ({ frames: frameCount, qaLow: QA_LOW, pr: renderer.getPixelRatio(), ao: quality, shadows: renderer.shadowMap.enabled, far: camera.far }),

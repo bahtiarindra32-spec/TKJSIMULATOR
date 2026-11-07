@@ -22,7 +22,9 @@ export interface ExtFault {
 }
 export const EXT: Record<string, ExtFault> = {};
 /** devices outside PCs that the player uses with F (printers, phones, server racks) */
-export interface WorldDevice { id: string; x: number; z: number; level: number; r?: number; hint: () => string; use: () => void }
+export interface WorldDevice { id: string; x: number; z: number; level: number; r?: number; hint: () => string; use: () => void;
+  /** floor height the device is used from (Fase 1 kos has two storeys outside the hotel level system) */
+  y?: number }
 export const DEVICES: WorldDevice[] = [];
 /** Installation work orders owned by the infrastructure modules. The device starts in its real "fresh out of the box /
  *  not configured yet" state; the order closes when the configuration is right, the clients are healthy and the player

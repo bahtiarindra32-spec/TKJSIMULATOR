@@ -1,5 +1,5 @@
 // Small shared helpers of the NOC work board: random picks, DOM shortcuts, formatting and address math.
-import { panelOf, outletId, poolProblem, parseIp, ipStr, networkOf, ADAPTERS, live, type Env } from '../../pcos/net';
+import { panelOf, swOutlet, poolProblem, parseIp, ipStr, networkOf, ADAPTERS, live, type Env } from '../../pcos/net';
 
 export const pick = <T>(a: T[], r = Math.random) => a[Math.floor(r() * a.length)];
 export const shuffle = <T>(a: T[], r = Math.random) => {
@@ -28,7 +28,7 @@ export const esc = (s: string) => s.replace(/[&<>]/g, c => ESC[c] ?? c);
 /** Wall label of a wired desk: true = printed and correct, false = missing/wrong, null = not a wired desk. */
 export const wallOk = (pc: string) => {
   const q = panelOf(pc);
-  return q ? q.pp.label.toUpperCase() === outletId(q.sw.level, q.pp.n) : null;
+  return q ? q.pp.label.toUpperCase() === swOutlet(q.sw, q.pp.n) : null;
 };
 /** free addresses left in a DHCP pool */
 export const poolSpace = (env: Env) => {

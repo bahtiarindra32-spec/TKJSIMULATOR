@@ -46,11 +46,13 @@ flowchart LR
 | Folder | Isi | Catatan |
 |---|---|---|
 | `src/data/city.ts` | Jalan, persil, gedung, lantai hotel, nama objek sesuai brief (ROAD_, ZONE_, BLD_, PROP_, ANCHOR_) | Satu sumber kebenaran untuk tata kota |
+| `src/data/sites.ts` | Fase 1: Kantor Nusa Teknik, rumah, kos, warnet (posisi gedung, PC, AP, tangga kos, subnet) | Dibaca oleh `world/sites.ts`, `pcos/net.ts`, `pcos/wifi.ts`, `pcos/sites.ts`, `main.ts` |
 | `src/world/` | Pembangun dunia: jalan, gedung, hotel 8 lantai, Kota Selatan, siang-malam, detail tambahan (`hiDetail.ts`) | Mesh statis digabung per material oleh `core.ts` supaya draw call rendah |
 | `src/assets/` | Kendaraan, perangkat jaringan, orang (skinning di shader) | Geometri dibuat sekali per varian lalu dipakai bersama |
 | `src/pcos/net.ts` | Simulasi jaringan berkabel: outlet → patch panel → port switch, VLAN, trunk, loop, DHCP, DNS, ping, routing | Murni TypeScript, diuji di `tests/net.test.ts` |
 | `src/pcos/` lainnya | Wi-Fi, server Linux, perangkat kantor, router edge, OS PC tiruan, CLI switch, terminal | Semua yang dilihat pemain (ipconfig, ping, nslookup) dihitung dari state simulasi, bukan naskah |
 | `src/game/noc.ts` | Pekerjaan: surat kerja (kontrak) dan tiket shift, injeksi gangguan nyata, verifikasi, laporan kerja, XP/pangkat | Pekerjaan hanya selesai kalau jaringan benar-benar sehat **dan** sudah diuji dari perangkatnya |
+| `src/game/field/` | Fase 1 karier lapangan: templat order (`templates.ts`), uang & reputasi (`economy.ts`), papan order/garansi/hari kerja (`orders.ts`), save `kotaNusantara.field.v1` (`save.ts`), gangguan di simulator (`sim.ts`), kontroler UI (`field.ts`) | Logika murni diuji di `tests/field.test.ts`; memakai ulang modal, meja crimp, rak/console, tahap kerja dan cek berita acara (`noc/berita.ts`) dari magang |
 | `src/ai/nusa.ts` | Pak Nusa: mentor AI, keluhan pelanggan AI, umpan balik catatan tiket, mesin offline | Lihat bagian AI |
 | `src/ui/` | Menu utama, pengaturan, kontrol sentuh, peta | DOM biasa, font sistem |
 | `src/main.ts` | Loop game, input, kamera, interaksi, penghubung semua modul | Hook QA di `window.__kota` |

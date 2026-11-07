@@ -91,10 +91,14 @@ export abstract class NocWorkshop extends NocCore {
     if (name === 'ANCHOR_SRV_RACK_01' && this.edgeOpen) return '[F] Router edge R-EDGE (console)';
     return null;
   }
-  openCabinet(lab = false) {
+  /** which cabinet title the lab-mode cabinet shows (the school lab, or Nusa Teknik's tool shelf in Fase 1) */
+  protected cabTitle = '';
+  openCabinet(lab = false, title?: string) {
     this.cabLab = lab;
+    if (title !== undefined) this.cabTitle = title;
+    else if (!lab) this.cabTitle = '';
     const box = h('div', 'noc-box');
-    box.append(h('h2', '', lab ? 'Lemari Alat · Lab Praktik TKJ' : 'Lemari Alat · Workshop TKJ'));
+    box.append(h('h2', '', lab ? this.cabTitle || 'Lemari Alat · Lab Praktik TKJ' : 'Lemari Alat · Workshop TKJ'));
     box.append(
       h(
         'p',
@@ -351,6 +355,8 @@ export abstract class NocWorkshop extends NocCore {
             () => {
               this.rj45--;
               this.rj45Used++;
+              this.onMaterial('rj45', 1);
+              if (st.end === 'a') this.onMaterial('utp', 1.5);
               st.end = st.end === 'a' ? 'b' : 'done';
               this.logAll(`Crimping: ujung ${st.end === 'b' ? 'A' : 'B'} di-crimp (${cur.join(', ')})`);
               this.openCrimpBench(st.end === 'b' ? 'Ujung A sudah di-crimp. Sekarang ujung B.' : 'Kedua ujung sudah di-crimp. Tes dulu sebelum dipakai.');
@@ -477,6 +483,7 @@ export abstract class NocWorkshop extends NocCore {
               this.noCord.delete(pc);
               a.cable = true;
               a.broken = false;
+              if (!this.cables.length) this.onMaterial('patch', 1);
               this.useCord(pc);
               bounce(a);
               this.logAll(`${this.pcLabel(pc)}: patch cord dipasang outlet ${outletOf(pc)} → PC`, pc);
@@ -539,6 +546,7 @@ export abstract class NocWorkshop extends NocCore {
             this.inv.patch--;
             a.broken = false;
             a.cable = true;
+            if (!this.cables.length) this.onMaterial('patch', 1);
             this.useCord(pc);
             bounce(a);
             if (wasted && job) job.wrong++;
@@ -695,10 +703,10 @@ export abstract class NocWorkshop extends NocCore {
         h(
           'div',
           'swhead',
-          `<b>${sw.name}</b> <small>${sw.level === 0 ? 'C2960-24TT · Lab Praktik SMK' : `${sw.level >= 4 ? 'C2960X-48FPD (PoE+)' : 'C2960X-48'} · Lantai ${sw.level}`} · ${sw.ip}${sw.level === 0 ? ' · gateway: router-praktik 192.168.70.1' : sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`,
+          sw.model ? `<b>${sw.name}</b> <small>${sw.model} · ${sw.ip}</small>` : `<b>${sw.name}</b> <small>${sw.level === 0 ? 'C2960-24TT · Lab Praktik SMK' : `${sw.level >= 4 ? 'C2960X-48FPD (PoE+)' : 'C2960X-48'} · Lantai ${sw.level}`} · ${sw.ip}${sw.level === 0 ? ' · gateway: router-praktik 192.168.70.1' : sw.uplink ? ' · uplink fiber ke MDF' : ' · inti (MDF): uplink fiber dari IDF L2 & L3 di modul SFP'}</small>`,
         ),
       );
-      card.append(h('div', 'pp-title', `Patch panel ${sw.level === 0 ? 'PP-LAB · Cat6 24' : `PP-L${sw.level} · Cat6 48`} port`));
+      card.append(h('div', 'pp-title', `Patch panel ${sw.outPrefix ? `PP-${sw.outPrefix} · Cat6 ${sw.panel.length}` : sw.level === 0 ? 'PP-LAB · Cat6 24' : `PP-L${sw.level} · Cat6 48`} port`));
       const pp = h('div', 'ports pp');
       for (const q of sw.panel) {
         const isSel = this.sel?.sw === sw.name && this.sel.pp === q.n;
@@ -740,7 +748,7 @@ export abstract class NocWorkshop extends NocCore {
             ? 'storm'
             : inLoop
               ? 'up'
-              : (isAp ? !portLink(sw, p) : !a || !linkUp(a))
+              : (isAp || (p.peer && !p.pc) ? !portLink(sw, p) : !a || !linkUp(a))   // a router cabled to the port (peer) has link too
                 ? 'nolink'
                 : !sw.vlans.has(p.vlan)
                   ? 'inact'

@@ -9,6 +9,103 @@ real-world standard it follows, and what is deliberately not simulated. Full his
 - Every fix is physical or typed: walk to the desk/rack, plug the cable, type the IOS command, test from the PC.
   A task closes only when the network simulation is healthy and the player tested it from the device.
 
+## Fase 1: Karier lapangan (Nov 2026; chunk 1 = world + network, chunk 2 = paid field work)
+Sources: `notes/research-grow.md` §4–§5 (numbers in [n] are that file's source list). Roadmap: `notes/roadmap-grow.md`.
+- **Player fantasy.** Siswa magang at the hotel (existing internship) → **teknisi lapangan** at a small installer, Kantor
+  "Nusa Teknik" → later **usaha sendiri** (own jobs, legal reseller route). The progression order follows the design
+  suggestion in §4.1 (magang → teknisi rumah → CCTV → admin MikroTik → FO → mitra reseller ISP berizin; marked there as
+  ⚠ desain, not a sourced fact). The legal route for an own "RT/RW Net" (izin / reseller with KBLI 61994 + PKS with a
+  licensed ISP, illegal resale = sanction) follows §4.2 [48]–[53]; it is not built yet.
+- **Field-work loop** (target for the whole phase): ambil order di papan kantor → naik motor (PROP_MOTOR_06 parks at the
+  office) → survei di lokasi → kerja (cable, router, AP) → **uji dari perangkat pelanggan** (the customer's own laptop/PC,
+  same rule as the internship: a job closes only when the simulation is healthy and it was tested there) → berita acara →
+  bayaran. Pay will use the §4.1 ranges [42]–[47] (⚠ anecdotal, vendor price lists, randomised inside the range, material
+  billed separately). Chunk 1 built the places and their networks; chunk 2 the paid orders (below).
+- **Places** (data in `src/data/sites.ts`, geometry in `src/world/sites.ts`; all on empty grass lots, ≥150 m apart):
+
+| Object | Where (city X, Z of the building) | Network (why) |
+|---|---|---|
+| `BLD_NUSATEKNIK` Kantor Nusa Teknik | X 50–66, Z 118–128, west of Jl. Melati on Jl. Sudirman | none of its own: papan order, meja order, lemari material (= tool/material cabinet), meja kerja, parkir motor |
+| `BLD_RUMAH_01` Rumah Kel. Hendra | X 114–124, Z 580–592, south side of Jl. Flamboyan | GPON ONT from the ISP is the gateway, the family's Wi-Fi router runs as AP behind ONT LAN1; smart TV + laptop on Wi-Fi. A house = ONT + Wi-Fi, sometimes an extra router (§5, [14][18]). Drop fibre ends in a roset (OTP) on the wall [14]. |
+| `BLD_KOS_01` Kos Mawar, 2 lantai, 6 kamar | X 132–148, Z 304–316, north side of Jl. Anggrek | one connection shared by many rooms (§5, [11][9][51]): one router on the ground floor, one ceiling AP per floor (LAN1/LAN2), tenant laptops in Kamar 1, 2, 4, 5; Kamar 3 and 6 empty and locked |
+| `BLD_WARNET_01` Warnet Sinar | X 344–360, Z 303–317, north side of Jl. Anggrek | many wired PCs on one LAN (§5, [45][46]): router + 16-port managed switch + 24-port patch panel in a 9U wall rack, 8 gaming PCs (outlets WRN-01..08) and the cashier/billing PC (WRN-09); switch Gi1/0/16 = router LAN |
+
+- **Address plan** (`src/pcos/net.ts` ENVS `rumah`, `kos`, `warnet`; each site has its own ISP line and is isolated from
+  the hotel and from the other sites; DHCP pool .100–.199 on each):
+  - rumah `192.168.1.0/24`, gateway/DHCP/DNS = ONT `192.168.1.1`, Wi-Fi router (AP mode) `192.168.1.2`.
+  - kos `192.168.0.0/24`, router `192.168.0.1`, AP lantai 1 `.2`, AP lantai 2 `.3`.
+  - warnet `192.168.100.0/24`, router `192.168.100.1`, SW-WARNET `192.168.100.2`.
+  - These are design defaults (⚠ not from the research notes): common consumer-gear defaults for the house and kos, and a
+    warnet subnet that overlaps neither the hotel (192.168.10/20/30/70, 172.16.4/22) nor MikroTik's default
+    192.168.88.0/24 [4], which Fase 2 introduces. One simulator holds every segment, so subnets must stay unique.
+- **What the player can use now:** every laptop/PC opens Jendela (ipconfig/ping/browser from the real sim state); the
+  site routers' LAN/DHCP/DNS are configured in the existing WebKonfig router page from a site laptop (browser → gateway);
+  the warnet switch uses the existing rack card + Cisco-style console (`SwitchCli`). ONT, kos router, both APs and the TV
+  give a read-out panel computed from the simulation (LED/link/SSID/clients/IP). Wi-Fi uses the existing radio model
+  (log-distance + 10 dB per masonry wall + 18 dB per slab), with each site's own walls; site APs have their own power
+  adapter (no PoE).
+- **Kos stairs:** a straight 16-riser stair (0.2 m risers, 0.25 m treads) along the south wall; floor height comes from
+  `kosFeet()`; the upper floor is a real collider slab, so cameras and walkers respect both storeys.
+- **Not in chunk 1 (by design):** paid orders etc. (now chunk 2), legal RT/RW-net quest; MikroTik RouterOS CLI (Fase 2: hotspot/voucher for the kos [11], queues [9], warnet load balancing
+  [45][46]; until then site routers reuse the existing WebKonfig/Cisco-style tools); FTTH drop/ODP work at the house
+  (Fase 3). Site PCs are excluded from all hotel internship job pickers (`LABPC` in `noc/contracts.ts`).
+- **QA:** `tests/sites.test.ts` (devices reachable when healthy, isolation, router-port/AP cut-offs, 150 m spacing, stair
+  heights); playtest `/workspace/work/pw/qa_sites.mjs <site>` (teleport to `ANCHOR_*_ENTRY`, walk in with W, use one
+  device with F, screenshots). Hooks: `__kota.sites()`, `__kota.goSite(id)`, `__kota.readout(id)`, `__kota.pick(nx, ny)`.
+
+### Fase 1 chunk 2: paid field work (`src/game/field/`, save `kotaNusantara.field.v1`)
+- **Unlock.** Field work opens when the internship rank reaches `RANKS[1]` (Teknisi Junior = 800 XP **and** the passed
+  competency test, `noc.rankIndex() >= 1`). It is sticky in the field save; Kak Rani's toast names the office. The judge
+  tour (body.demo) never unlocks it, and `kotaNusantara.field.v1` is in `demoGuard.SAVE_KEYS`. QA: `__kota.field.unlock()`.
+- **Board.** `orders.genDay`: 2–4 offers per work day, no template twice, weight = template weight × (0.5 + rep/100).
+  A customer type below reputasi 20 stops calling; harder templates need more (`minRep`: router replacement 55, kos channel
+  50, warnet loop 55). Offers are generated once per work day (`gen`); "Tutup hari kerja" ends the day.
+- **Templates → real faults** (`sim.ts`; each is driven inject → in-game fix → healthy in `tests/field.test.ts`):
+
+| Template | Fault in the sim | Fixed with | Tested from |
+|---|---|---|---|
+| `r_router` ganti router Wi-Fi | family router (AP-RUMAH-RTR) dead (`mounted=false`) | lemari: router baru (Rp180.000), panel ONT: install, then SSID **HENDRA_HOME**, **WPA2-PSK**, old key (factory SSID/key does not join the residents' devices; mixed WPA/WPA2 works but is flagged as not what was asked) | family laptop + TV |
+| `r_tv` TV tidak dapat internet | ONT DHCP pool shrunk to 5 addresses and full, or start > end | WebKonfig on the ONT from the family laptop (browser → gateway) | TV status panel (F) |
+| `r_kabel` kabel ONT → router putus | ONT LAN1 patch removed and the plug "broken" (re-seat does nothing) | a cable from the bag: own crimp or stock patch cord | family laptop |
+| `k_ap2` AP lantai 2 mati | RTR-KOS LAN2 cable unplugged, or plug broken | re-seat, or a new cable | the upper-floor laptop that really lost Wi-Fi (Kamar 5 sometimes still limps on the ground-floor AP at −69 dBm, so the target is picked among broken ones) |
+| `k_kanal` Wi-Fi lemot | one kos AP moved onto the other's channel or ±2 of it (only variants that really break a tenant are used) | AP panel: channel survey + set channel | the affected tenant laptop |
+| `w_port` PC warnet tidak dapat IP | its Gi port on SW-WARNET shutdown, or access VLAN 99/50 | rack → console: `no shutdown` / `switchport access vlan 1`, `write memory` | that PC |
+| `w_kabel` kabel ke PC putus | the PC's patch cord broken | [C] cable check: LAN tester, replace cord | that PC |
+| `w_loop` semua PC putus | loop cable between two free ports + `no spanning-tree` | rack: pull the loop cable, console: `spanning-tree mode rapid-pvst`, `write memory` | a booth PC (all booths + kasir must be healthy) |
+
+  Skipped (not modelled by the sim, not faked): "tambah kamar ke jaringan" (rooms 3/6 have no client device and the kos
+  router has no per-room config to change), FTTH drop/ODP faults (Fase 3), MikroTik hotspot/queues (Fase 2).
+- **Closing rule** (same as the internship): every target device healthy, the primary device(s) tested there (ping/browser
+  event from that PcOS, or the TV status panel), the template's root cause gone (`rootProblem`), then berita acara
+  (`noc/berita.ts beritaFactCheck`, shared with the internship: IPs must be ones the job involved, must name the test).
+  Stars = shared `jobStars` (SLA incl. the ride, collateral devices of that site, wasted cable, weak check / unsaved config).
+- **Money** (`economy.ts`). Tarif = research range (§4.1 [42]: crimping RJ45 Rp50–100 rb/titik for cable jobs, instalasi
+  router + konfigurasi dasar Rp150–300 rb for the rest), position `0.15 + 0.6·r + (rep−50)/250`, rounded to Rp5.000.
+  Pay = tarif × (★★★ 1 · ★★ 0,85 · ★ 0,6) − material used. Material unit prices are rounded retail listings seen Nov 2026
+  (⚠ perkiraan, not live): RJ45 Cat6 Rp1.000/pcs (eceran Rp1.000–1.250, biggo.id), UTP Cat6 Rp5.000/m (Rp4.500–6.000/m,
+  swalayankomputer.com, tokopedia), patch cord jadi 1 m Rp15.000 (Vention Cat6 ~Rp14.900, monotaro.id), router N300
+  Rp180.000 (TL-WR840N Rp162–229 rb, blibli.com). A crimped cable uses 2 RJ45 + 1,5 m UTP. Star factors, denda 10 % of the
+  tarif for a dropped/unfinished order, and reputasi steps (+6/+3/−2 per ★★★/★★/★, −8 failed, −3 when a garansi
+  callback is opened, +2 when it is done, −10 when it is ignored) are **design numbers**, not research.
+- **Garansi.** A weak check at closing (crimped cable not T568B on both ends or never tested; SW-WARNET left `dirty`)
+  schedules a callback 1–2 days later (`planGaransi`). It re-creates the same fault (`redo`: same port/PC/variant;
+  "listrik padam" for an unsaved config, "putus-putus" for a sloppy cable), pays nothing, and must be taken by its due
+  day. The w_loop STP-not-saved case is scored but has no callback (a reverted STP flag alone breaks nothing).
+- **Restore.** A healthy snapshot of the three sites is taken at boot; accepting an order first restores that site,
+  cancelling/failing restores it ("teknisi lain yang menyelesaikan"). An order in progress is not resumed after a reload
+  (it returns to the board, no penalty), like the internship's day.
+- **Shared with the internship, not duplicated:** modal (`noc.present`), crimp bench (now reports RJ45/UTP use via
+  `noc.onMaterial`), tool cabinet (titled for Nusa Teknik), PC cable check [C], rack card + `SwitchCli`, stage bar, berita
+  acara check, `jobStars`. Wi-Fi join now also compares the key (`wifi.joins`); hotel APs have no key, so nothing changed there.
+- **Story ladder + legal teaser** (board → "Jalur karier"): magang hotel → teknisi lapangan Nusa Teknik → usaha sendiri
+  (next phase), plus the §4.2 facts only (UU 36/1999 Ps. 11(1); max 10 years per Ps. 47 jo. 11(1) as amended by UU
+  6/2023; reported fine up to Rp1,5 miliar; legal route = ISP licence or reseller KBLI 61994 via OSS + PKS with a licensed
+  ISP, Permenkominfo 13/2019 & 3/2021; 150 illegal providers acted on 2023–Mar 2024), labelled "catatan edukasi, bukan
+  nasihat hukum". No new numbers.
+- **QA.** `tests/field.test.ts` (23); playtest `/workspace/work/pw/qa_field.mjs unlock|order|garansi|shots|phone|phoneL`.
+  Hooks: `__kota.field.{state,unlock,offer,accept,endDay,board,order,device,lemari,career,sign,target}`, `__kota.env(id)`,
+  `__kota.swDirty(name)`.
+
 ## Lab Praktik: VLSM, inter-VLAN routing, ACL (Nov 2026)
 - Goal: cover the grade-11 core that was missing (subnetting/VLSM, router-on-a-stick, inter-VLAN firewall).
 - VLSM (`src/game/vlsm.ts`): a /24 inside 192.168.71–99 (the lab NAT list covers 192.168.0.0/16), four needs.

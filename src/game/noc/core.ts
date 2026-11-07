@@ -97,6 +97,24 @@ export abstract class NocCore {
       a.broken = !judge(c).works;
     } else this.cordOf.delete(pc);
   }
+  /** Fase 1 field work: materials used (RJ45 per crimped end, UTP metres per new cable, stock patch cords). Default: no-op. */
+  onMaterial: (kind: 'rj45' | 'utp' | 'patch', n: number) => void = () => {};
+  /** the crimped cable sitting at this desk (null = a stock patch cord or nothing) */
+  cordAt(pc: string): Cable | null {
+    return this.cordOf.get(pc) ?? null;
+  }
+  /** crimped cables in the bag (they are used before stock patch cords) */
+  get bagCables() {
+    return this.cables.length;
+  }
+  /** field work: take one cable from the bag for a device port (a crimped cable first, else a stock patch cord); null = bag empty */
+  takeCable(): { cable: Cable | null } | null {
+    if (this.inv.patch < 1) return null;
+    this.inv.patch--;
+    const c = this.cables.shift() ?? null;
+    if (!c) this.onMaterial('patch', 1);
+    return { cable: c };
+  }
   protected modal: HTMLElement | null = null;
   protected cli: SwitchCli | null = null;
   protected pendingReport: Job[] = [];
@@ -314,8 +332,8 @@ export abstract class NocCore {
     return { name: `SPOT-${ap.id}`, label: `Bracket plafon ${ap.id} · koridor L${ap.level}`, x: w.x, y: w.y - 1.6, z: w.z, level: ap.level };
   }
   /** places in the world the board owns besides PCs/racks (AP mount brackets); main shows the prompt and calls useSpot */
-  spots(): { id: string; x: number; z: number; level: number; hint: string; r?: number }[] {
-    const out: { id: string; x: number; z: number; level: number; hint: string; r?: number }[] = [];
+  spots(): { id: string; x: number; z: number; level: number; hint: string; r?: number; y?: number }[] {
+    const out: { id: string; x: number; z: number; level: number; hint: string; r?: number; y?: number }[] = [];
     for (const j of this.openJobs()) {
       const ap = this.jobAp(j);
       if (ap && !ap.mounted) {
@@ -323,7 +341,7 @@ export abstract class NocCore {
         out.push({ id: ap.id, x: w.x, z: w.z, level: ap.level, hint: `[F] Pasang AP di bracket plafon (${ap.id})` });
       }
     }
-    for (const d of DEVICES) out.push({ id: d.id, x: d.x, z: d.z, level: d.level, hint: d.hint(), r: d.r });
+    for (const d of DEVICES) out.push({ id: d.id, x: d.x, z: d.z, level: d.level, hint: d.hint(), r: d.r, y: d.y });
     return out;
   }
   useSpot(id: string) {

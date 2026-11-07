@@ -134,6 +134,10 @@ export class PcOS {
   private acct(): [string, string] {
     const host = (this.cur?.a.host ?? '').toUpperCase();
     if (/^LAB|PRAK/.test(host)) return ['siswa', 'Siswa TKJ'];
+    if (/^KOS-/.test(host)) return ['penghuni', 'Penghuni kos'];
+    if (/^RUMAH-/.test(host)) return ['keluarga', 'Keluarga Hendra'];
+    if (/^WARNET-01-KASIR/.test(host)) return ['kasir', 'Kasir warnet'];
+    if (/^WARNET-/.test(host)) return ['member', 'Member warnet'];
     if (/WORKSHOP|NOC|TEKNISI/.test(host)) return ['teknisi', 'Teknisi IT'];
     if (/TAMU|GUEST|LAPTOP|LT-/.test(host)) return ['tamu', 'Tamu'];
     return ['staf', 'Staf Kantor'];
@@ -887,7 +891,7 @@ export class PcOS {
       const { c, a, ap, q } = this.wifiState(); if (!c) return;
       if (!a.enabled) { body.append(h('p', { class: 'muted' }, 'Adapter Wi-Fi dimatikan. Aktifkan di Network Connections.')); return; }
       const seen = new Map<string, Heard>();
-      for (const x of heardAt(c.lx, c.lz, c.y, c.level)) if (!seen.has(x.ap.ssid)) seen.set(x.ap.ssid, x);
+      for (const x of heardAt(c.lx, c.lz, c.y, c.level, c.site)) if (!seen.has(x.ap.ssid)) seen.set(x.ap.ssid, x);
       if (!seen.size) body.append(h('p', { class: 'muted' }, 'No Wi-Fi networks found.'));
       for (const [ssid, x] of seen) {
         const mine = c.want === ssid && !!ap;
@@ -918,7 +922,7 @@ export class PcOS {
     }
     if (verb.startsWith('show network')) {
       if (!a.enabled) return '\nThe wireless local area network interface is powered down and doesn\'t support the requested operation.\n';
-      const all = heardAt(c.lx, c.lz, c.y, c.level), bssid = verb.includes('bssid');
+      const all = heardAt(c.lx, c.lz, c.y, c.level, c.site), bssid = verb.includes('bssid');
       const ssids = [...new Set(all.map(x => x.ap.ssid))];
       let o = `\nInterface name : Wi-Fi\nThere are ${ssids.length} networks currently visible.\n`;
       ssids.forEach((ss, i) => {
@@ -933,7 +937,7 @@ export class PcOS {
     if (verb.startsWith('connect')) {
       const nm = /name=("?)([^"]+)\1/i.exec(raw.join(' '))?.[2];
       if (!nm) return '\nThe syntax supplied for this command is not valid. Check help for the correct syntax.\n\nUsage: connect [name=]<string> [[ssid=]<string>] [[interface=]<string>]\n';
-      if (!heardAt(c.lx, c.lz, c.y, c.level).some(x => x.ap.ssid === nm && !x.ap.ext)) return `\nThere is no profile "${nm}" assigned to the specified interface.\n`;
+      if (!heardAt(c.lx, c.lz, c.y, c.level, c.site).some(x => x.ap.ssid === nm && !x.ap.ext)) return `\nThere is no profile "${nm}" assigned to the specified interface.\n`;
       this.wifiConnect(nm); return '\nConnection request was completed successfully.\n';
     }
     return '\nThe following commands are available:\n\nconnect        - Connects to a wireless network.\ndisconnect     - Disconnects from a wireless network.\nshow interfaces - Shows a list of the wireless LAN interfaces on the system.\nshow networks  - Shows a list of networks visible on the system (mode=bssid).\n';
@@ -974,7 +978,7 @@ export class PcOS {
         return;
       }
       if (page === 'client') {
-        const rows = [...CLIENTS.values()].filter(c => !floor || c.level === floor).map(c => { const ap = servingAp(c.pc), q = ap ? quality(c.pc) : null; const mac = adapterOf(c.pc).mac; return h('tr', {}, h('td', {}, `Kamar ${c.room}`), h('td', {}, ap ? ap.id : '— (tidak terhubung)'), h('td', {}, q ? `${q.rssi} dBm` : '-'), h('td', {}, q ? String(q.ch) : '-'), h('td', {}, !q ? '-' : q.busy ? `Interferensi kanal (${q.cciAp?.id} ${q.cci} dBm)` : q.weak ? 'Sinyal lemah' : 'Baik'), h('td', {}, AUTH.has(mac) ? 'Login' : '')); });
+        const rows = [...CLIENTS.values()].filter(c => !c.site && (!floor || c.level === floor)).map(c => { const ap = servingAp(c.pc), q = ap ? quality(c.pc) : null; const mac = adapterOf(c.pc).mac; return h('tr', {}, h('td', {}, `Kamar ${c.room}`), h('td', {}, ap ? ap.id : '— (tidak terhubung)'), h('td', {}, q ? `${q.rssi} dBm` : '-'), h('td', {}, q ? String(q.ch) : '-'), h('td', {}, !q ? '-' : q.busy ? `Interferensi kanal (${q.cciAp?.id} ${q.cci} dBm)` : q.weak ? 'Sinyal lemah' : 'Baik'), h('td', {}, AUTH.has(mac) ? 'Login' : '')); });
         main.append(h('h3', {}, 'Klien terhubung'), this.floorSel(floor, f => { floor = f; render(); }), h('table', {}, h('tr', {}, h('th', {}, 'Klien'), h('th', {}, 'AP'), h('th', {}, 'RSSI'), h('th', {}, 'Kanal'), h('th', {}, 'Kualitas'), h('th', {}, '')), ...rows));
         return;
       }
@@ -1021,7 +1025,7 @@ export class PcOS {
       const ids = ['if', 'addr', 'dhcp', 'dns', 'routes'];
       const main = h('main', {}, h('h3', {}, `RuteOS WebKonfig · ${r.name}`));
       wrap.append(h('div', { class: 'wf' }, h('aside', {}, ...nav.map((x, i) => h('div', { class: ids[i] === page ? 'on' : '', style: { cursor: 'pointer' }, onclick: () => { page = ids[i]; render(); } }, x))), main));
-      if (page === 'if') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Type'), h('th', {}, 'Running')), h('tr', {}, h('td', {}, 'ether1-isp'), h('td', {}, 'Ethernet'), h('td', {}, 'R')), h('tr', {}, h('td', {}, this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`), h('td', {}, this.wl ? 'Wireless' : 'VLAN'), h('td', {}, 'R'))));
+      if (page === 'if') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Type'), h('th', {}, 'Running')), h('tr', {}, h('td', {}, 'ether1-isp'), h('td', {}, 'Ethernet'), h('td', {}, 'R')), h('tr', {}, h('td', {}, env.site ? 'bridge-lan' : this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`), h('td', {}, this.wl ? 'Wireless' : 'VLAN'), h('td', {}, 'R'))));
       if (page === 'routes') main.append(h('table', {}, h('tr', {}, h('th', {}, 'Dst. Address'), h('th', {}, 'Gateway'), h('th', {}, 'Distance')), h('tr', {}, h('td', {}, '0.0.0.0/0'), h('td', {}, '100.64.12.1 (ether1-isp)'), h('td', {}, '1')), h('tr', {}, h('td', {}, `${env.net}/${env.prefix}`), h('td', {}, `vlan${env.vlan}-lan (connected)`), h('td', {}, '0'))));
       if (page === 'addr') {
         const a1 = inp(`${r.ip}/${env.prefix}`, '170px'); a1.name = 'lan-addr';
@@ -1036,7 +1040,7 @@ export class PcOS {
           this.emit('cfg', { kind: 'lan', env: env.id, ip: m[1], prefix: p });
           render();
         };
-        main.append(h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${r.ip}/${env.prefix}`), h('td', {}, env.net), h('td', {}, this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`)), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
+        main.append(h('table', {}, h('tr', {}, h('th', {}, 'Address'), h('th', {}, 'Network'), h('th', {}, 'Interface')), h('tr', {}, h('td', {}, `${r.ip}/${env.prefix}`), h('td', {}, env.net), h('td', {}, env.site ? 'bridge-lan' : this.wl ? 'wlan-tamu' : `vlan${env.vlan}-lan`)), h('tr', {}, h('td', {}, '100.64.12.2/30'), h('td', {}, '100.64.12.0'), h('td', {}, 'ether1-isp'))),
           h('p', {}, h('b', {}, 'Ubah alamat LAN')), row('Address', a1), h('button', { class: 'btn', name: 'apply-addr', onclick: apply }, 'Apply'), out,
           h('p', { class: 'fnote' }, 'Mengubah alamat LAN memindahkan subnet seluruh segmen ini. PC yang memakai alamat lama akan terputus sampai disesuaikan.'));
       }

@@ -1,6 +1,7 @@
 // North-up minimap (M toggles the large map). City coords: X east 0..CITY_W, Z south 0..CITY_D (v9: 400 x 600).
 import { ROADS, ROAD_SPEC, ZONES, TOWERS, TOWERS_S, HOTEL_ORIGIN, CITY_W, CITY_D } from '../data/city';
 import { streetLabel } from '../world/wayfinding';
+import { SITES } from '../data/sites';
 
 const ZONE_FILL: Record<string, string> = { park: '#3f6b3a', plaza: '#5d6670', paving: '#6c6258', dirt: '#6b5b45', kampung: '#7a5a44', lot: '#4c4f46' };
 
@@ -42,6 +43,11 @@ export class Minimap {
     // v9 landmarks in the south district
     g.font = 'bold 13px Arial'; g.fillStyle = '#e8f5e9';
     for (const [t, x, z] of [['LAPANGAN', 124, 404], ['MASJID', 340, 380], ['TAMAN DAHLIA', 116, 524], ['SMK NUSANTARA', 236, 550], ['LAB TKJ', 242, 489], ['KAMPUNG C', 14, 386], ['KAMPUNG D', 14, 506]] as [string, number, number][]) g.fillText(t, x * s, z * s);
+    // Fase 1 field-work places: building block + label
+    for (const st of SITES) {
+      const r = st.rect; g.fillStyle = st.id === 'nusateknik' ? '#f0c02e' : '#4fc3ff'; g.fillRect(r.x0 * s, r.z0 * s, (r.x1 - r.x0) * s, (r.z1 - r.z0) * s);
+      g.font = 'bold 13px Arial'; g.fillStyle = '#ffffff'; g.strokeStyle = '#13202b'; g.lineWidth = 3; const tx = r.x0 * s, ty = r.z0 * s - 8; g.strokeText(st.map, tx, ty); g.fillText(st.map, tx, ty);
+    }
     g.fillStyle = '#d0693f'; g.font = 'bold 22px Arial'; g.fillText('U', CITY_W * s - 22, 18);
   }
   /** px, pz in city coords; heading radians (0 = north, clockwise); target city coords */

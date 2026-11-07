@@ -4,7 +4,8 @@
 // DHCP server and DNS forwarder. Laptops on L4-L8 use the guest Wi-Fi. Everything the player sees in
 // ipconfig/ping/nslookup/browser is computed from this state, so faults and fixes are real, not scripted.
 import { parseIp, ipStr, prefixToMask, networkOf, broadcastOf, parseMask } from '../game/missionLogic';
-import { APS, servingAp, quality, AUTH, setApOnlineFn, type Ap } from './wifi';
+import { APS, SITE_APS, servingAp, quality, AUTH, setApOnlineFn, type Ap } from './wifi';
+import { SITE_PCS, SITE_TV, SITE_AP_DEFS } from '../data/sites';
 
 export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string; down?: boolean }
 /** Pluggable services (Linux DNS server, edge router) so the sim stays one source of truth. */
@@ -18,7 +19,7 @@ export const HOOKS = {
   /** Lab Praktik: routing between the lab's VLANs on R-LAB (subinterfaces + ACL); null = not a lab route, use the default path */
   labRoute: (_env: Env, _src: string, _dst: string): PingRes | null => null,
 };
-export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'none' | `v${number}`;
+export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'rumah' | 'kos' | 'warnet' | 'none' | `v${number}`;
 export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
 export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
 export interface Env {
@@ -29,6 +30,8 @@ export interface Env {
   leases: Map<string, string>;
   /** who hands out leases on this segment when it is not the router itself (lab: srv-nusa 192.168.10.5) */
   dhcpServer?: string;
+  /** Fase 1 customer site (rumah/kos/warnet): its own building, its own ISP line, isolated from the hotel and from each other */
+  site?: string;
 }
 
 const mkEnv = (id: EnvId, vlan: number, label: string, net: string, prefix: number, suffix: string, adapter: string, wireless: boolean, hosts: Host[], pool: [number, number], lease: number): Env => {
@@ -65,12 +68,32 @@ export const ENVS: Record<EnvId, Env> = {
     { ip: '192.168.70.2', name: 'sw-lab', mac: '00-1e-7a-70-00-02', ttl: 255 },
     { ip: '192.168.70.10', name: 'srv-jobsheet', mac: '52-54-00-70-00-0a', ttl: 64, web: 'server' },
   ], [100, 150], 8),
+  // ---- Fase 1 customer sites (own ISP line each; see DESIGN.md › Fase 1 for the address plan)
+  // House: the ISP's GPON ONT is the gateway/DHCP; the family's Wi-Fi router runs as an access point behind ONT LAN1
+  rumah: mkEnv('rumah', 1, 'Rumah Kel. Hendra (ONT NusaFiber)', '192.168.1.0', 24, '', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
+    { ip: '192.168.1.1', name: 'ont-nusafiber', mac: '9c-a2-f4-01-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.1.2', name: 'router-hendra', mac: 'b0-4e-26-01-00-02', ttl: 64 },
+  ], [100, 199], 24),
+  // Kos: one SOHO router on the ground floor (LAN1/LAN2 -> one ceiling AP per floor)
+  kos: mkEnv('kos', 1, 'Kos Mawar (router + 2 AP)', '192.168.0.0', 24, '', 'Intel(R) Wi-Fi 6 AX201 160MHz', true, [
+    { ip: '192.168.0.1', name: 'router-kos', mac: '50-c7-bf-00-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.0.2', name: 'ap-kos-lt1', mac: 'c4-6e-1f-00-00-02', ttl: 64 },
+    { ip: '192.168.0.3', name: 'ap-kos-lt2', mac: 'c4-6e-1f-00-00-03', ttl: 64 },
+  ], [100, 199], 24),
+  // Warnet: router + one 16-port managed switch in a small wall rack; 8 gaming PCs and the cashier PC wired
+  warnet: mkEnv('warnet', 1, 'Warnet Sinar (LAN kabel)', '192.168.100.0', 24, '', 'Realtek PCIe GbE Family Controller', false, [
+    { ip: '192.168.100.1', name: 'router-warnet', mac: '48-8f-5a-64-00-01', ttl: 64, web: 'router' },
+    { ip: '192.168.100.2', name: 'sw-warnet', mac: '00-1e-7a-64-00-02', ttl: 255 },
+  ], [100, 199], 24),
   none: {
     id: 'none', vlan: -1, label: 'Tidak ada jaringan (VLAN tanpa router)', net: '169.254.0.0', prefix: 16, gateway: '', dns: [], dhcp: null,
     dnsSrv: { allow: false, upstream: [], records: [] }, suffix: '', hosts: [], internet: false, adapter: 'Intel(R) Ethernet Connection I219-LM', wireless: false, leases: new Map(),
   },
 };
 ENVS.lab.dhcp!.lease = 24;
+for (const id of ['rumah', 'kos', 'warnet'] as const) ENVS[id].site = id;
+/** segment the PC reaches (hotel envs never match a site switch and the other way round) */
+const hotelEnvs = () => Object.values(ENVS).filter(e => !e.site);
 
 /** The router of a segment (first host). */
 export const routerOf = (env: Env) => env.hosts.find(h => h.web === 'router') ?? null;
@@ -106,13 +129,23 @@ export interface Switch {
   panel: PanelPort[]; uplink: Uplink | null; upPort: Port; loop: [number, number] | null; rack: string;
   /** spanning tree (Catalyst default: on). Off + a loop cable = broadcast storm; on = the loop port is blocked */
   stpOff?: boolean;
+  /** Fase 1 customer-site device (ONT, SOHO router LAN, warnet switch): its untagged ports reach this site's env */
+  site?: EnvId;
+  /** wall-outlet label prefix used instead of L<level> (e.g. WRN for the warnet) */
+  outPrefix?: string;
+  /** model line shown on the rack card */
+  model?: string;
+  /** the port cabled to the site router; shut it (or unplug it) and the whole site loses its gateway */
+  routerPort?: number;
 }
 export const SWITCHES: Switch[] = [];
 const PANEL_OF = new Map<string, { sw: Switch; pp: PanelPort }>();
 export const portName = (n: number) => `Gi1/0/${n}`;
 export const outletId = (lv: number, n: number) => `${lv === 0 ? 'LAB' : `L${lv}`}-${String(n).padStart(2, '0')}`;
 /** The real identifier of a desk's outlet (= its patch-panel port). */
-export const outletOf = (pc: string) => { const p = PANEL_OF.get(pc); return p ? outletId(p.sw.level, p.pp.n) : '-'; };
+/** the label a wall outlet of this switch's panel should carry */
+export const swOutlet = (sw: Switch, n: number) => (sw.outPrefix ? `${sw.outPrefix}-${String(n).padStart(2, '0')}` : outletId(sw.level, n));
+export const outletOf = (pc: string) => { const p = PANEL_OF.get(pc); return p ? swOutlet(p.sw, p.pp.n) : '-'; };
 /** What is printed on the wall plate ('' when the label is missing). */
 export const wallLabel = (pc: string) => PANEL_OF.get(pc)?.pp.label ?? '';
 export const panelOf = (pc: string) => PANEL_OF.get(pc) ?? null;
@@ -171,22 +204,57 @@ export function initSwitches(pcNames: string[]) {
     Object.assign(sw.ports[23], { desc: 'KE-R-LAB-Gi0/0', peer: 'R-LAB Gi0/0', shutdown: false });   // Gi1/0/24: cable to the lab router
     repatch(sw); SWITCHES.push(sw);
   }
+  initSiteSwitches(pcNames);
+}
+/** Fase 1 customer sites: the ONT's LAN ports (house), the SOHO router's LAN ports (kos) and the warnet's 16-port switch */
+function initSiteSwitches(pcNames: string[]) {
+  const mk = (name: string, site: EnvId, ip: string, n: number, panel: number, model: string, rack: string, outPrefix: string): Switch => {
+    const sw: Switch = { name, level: -1, ip, ports: [], vlans: new Map([[1, 'default']]), dirty: false, panel: [], uplink: null, upPort: { n: n + 1, pc: null, shutdown: true, vlan: 1, desc: '' }, loop: null, rack, site, outPrefix, model };
+    for (let k = 1; k <= n; k++) sw.ports.push({ n: k, pc: null, shutdown: false, vlan: 1, desc: '', poe: false });
+    for (let k = 1; k <= panel; k++) sw.panel.push({ n: k, pc: null, label: '', patch: null, hang: false });
+    return sw;
+  };
+  const wire = (sw: Switch, dev: string, pp: number, port: number, desc: string) => { const q = sw.panel[pp - 1]; q.pc = dev; q.label = swOutlet(sw, pp); q.patch = port; sw.ports[port - 1].desc = desc; PANEL_OF.set(dev, { sw, pp: q }); };
+  // house: ONT NF-609 LAN1-4 + its internal WLAN (port 5); the family router (AP mode) hangs on LAN1
+  const ont = mk('ONT-RUMAH', 'rumah', '192.168.1.1', 5, 5, 'NusaFiber NF-609 GPON ONT · LAN1-4 + WLAN', 'RUMAH', 'ONT-LAN');
+  // kos: SOHO router LAN1-4; LAN1 -> AP lantai 1, LAN2 -> AP lantai 2
+  const kos = mk('RTR-KOS', 'kos', '192.168.0.1', 4, 4, 'Router SOHO 4×LAN · LAN1/LAN2 ke AP tiap lantai', 'KOS', 'KOS-LAN');
+  for (const d of SITE_AP_DEFS) { const sw = d.sw === ont.name ? ont : kos; wire(sw, d.id, d.port, d.port, d.id); }
+  // warnet: 16-port managed switch, a 24-port patch panel; outlets WRN-01..08 = booths, WRN-09 = cashier; Gi1/0/16 = router LAN
+  const wr = mk('SW-WARNET', 'warnet', '192.168.100.2', 16, 24, 'NusaSwitch SG-1016M · 16 port · Warnet Sinar · gateway: router-warnet 192.168.100.1', 'WARNET', 'WRN');
+  const pcs = pcNames.filter(p => /^PROP_WARNET_01_/.test(p)).sort((a, b) => (/KASIR/.test(a) ? 1 : 0) - (/KASIR/.test(b) ? 1 : 0) || a.localeCompare(b));
+  pcs.forEach((pc, i) => wire(wr, pc, i + 1, i + 1, /KASIR/.test(pc) ? 'KASIR-BILLING' : `PC-${String(i + 1).padStart(2, '0')}`));
+  Object.assign(wr.ports[15], { desc: 'KE-ROUTER-LAN', peer: 'router-warnet ether2' });
+  wr.routerPort = 16;
+  for (const sw of [ont, kos, wr]) { repatch(sw); SWITCHES.push(sw); }
+}
+/** Wi-Fi clients at the customer sites (laptops and the smart TV) */
+const SITE_WIFI = new Set<string>([...SITE_PCS.filter(p => p.wifi).map(p => p.name), SITE_TV.name]);
+/** which segment an untagged frame on this switch port lands in */
+function segEnv(sw: Switch, port: Port): Env {
+  if (sw.site) {
+    if (port.vlan !== 1 || !sw.vlans.has(1)) return ENVS.none;
+    if (sw.routerPort) { const rp = sw.ports[sw.routerPort - 1]; if (rp.shutdown || !rp.peer) return ENVS.none; }
+    return ENVS[sw.site];
+  }
+  return hotelEnvs().find(e => e.vlan === port.vlan && e.id !== 'none' && !e.wireless) ?? ENVS.none;
 }
 /** The switch port a PC reaches right now through its outlet + patch cord (null = not patched). */
 export function portOf(pc: string) {
   const q = PANEL_OF.get(pc); if (!q || !q.pp.patch) return null;
   return { sw: q.sw, port: q.sw.ports[q.pp.patch - 1] };
 }
-export const isWireless = (pc: string) => /_L[4-8]_/.test(pc);
+export const isWireless = (pc: string) => /_L[4-8]_/.test(pc) || SITE_WIFI.has(pc);
 /** the switch port an AP is patched to (null = no patch cord) */
 export function apPort(ap: Ap) { return portOf(ap.id); }
 /** PoE delivered and patched: the AP boots */
-export function apPowered(ap: Ap) { const p = apPort(ap); return !!p && ap.mounted && !p.port.shutdown && p.port.poe !== false; }
+/** site APs (house router, kos ceiling APs) have their own power adapter; hotel APs need PoE from the switch */
+export function apPowered(ap: Ap) { const p = apPort(ap); return !!p && ap.mounted && !p.port.shutdown && (p.port.poe !== false || !!ap.site); }
 setApOnlineFn(apPowered);
 /** Is there a link on this switch port (a PC NIC, or a powered AP)? */
 export function portLink(sw: Switch, p: Port): boolean {
   if (!p.pc) return !!p.peer && !p.shutdown;
-  if (p.pc.startsWith('AP-')) { const ap = APS.find(a => a.id === p.pc); return !!ap && ap.mounted && p.poe !== false && !p.shutdown; }
+  if (p.pc.startsWith('AP-')) { const ap = APS.find(a => a.id === p.pc) ?? SITE_APS.find(a => a.id === p.pc); return !!ap && ap.mounted && (p.poe !== false || !!ap.site) && !p.shutdown; }
   const a = ADAPTERS.get(p.pc); return !!a && a.cable && !a.broken && !p.shutdown;
 }
 /** A cable between two ports of the same switch while spanning tree is off: broadcast storm (with STP on, one port goes blocking). */
@@ -205,7 +273,8 @@ export function envOf(pc: string): Env {
     const ap = servingAp(pc); if (!ap) return ENVS.none;
     const p = apPort(ap); if (!p) return ENVS.none;
     if (!p.sw.vlans.has(p.port.vlan) || stormOn(p.sw) || !uplinkCarries(p.sw, p.port.vlan)) return ENVS.none;
-    return Object.values(ENVS).find(e => e.vlan === p.port.vlan && e.id !== 'none') ?? ENVS.none;
+    if (p.sw.site) return segEnv(p.sw, p.port);
+    return hotelEnvs().find(e => e.vlan === p.port.vlan && e.id !== 'none') ?? ENVS.none;
   }
   const q = PANEL_OF.get(pc);
   if (!q) return /_L[2-3]_/.test(pc) ? ENVS.office : ENVS.lab;
@@ -215,7 +284,7 @@ export function envOf(pc: string): Env {
   if (stormOn(p.sw)) return ENVS.none;                          // broadcast storm: nothing gets through
   if (!uplinkCarries(p.sw, p.port.vlan)) return ENVS.none;      // routers live behind the MDF
   if (p.sw.name === 'SW-LAB') return HOOKS.labVlan(p.port.vlan) ?? ENVS.none;   // lab VLANs exist only where R-LAB routes them
-  return Object.values(ENVS).find(e => e.vlan === p.port.vlan && !e.wireless) ?? ENVS.none;
+  return segEnv(p.sw, p.port);
 }
 /** Legacy name kept for callers that only need the default segment. */
 export function envForPc(name: string): EnvId { return envOf(name).id; }
@@ -348,6 +417,8 @@ export function onSegment(l: Live, env: Env, self?: Adapter) {
 
 /** Resolve a name like Windows' resolver (configured DNS servers in order). */
 /** null = NXDOMAIN, 'timeout' = no server answered, 'servfail' = a server answered SERVFAIL (e.g. its zone failed to load). */
+/** Internet access of a segment: the hotel goes through R-EDGE (HOOKS.internet); each customer site has its own ISP line */
+const inet = (env: Env, src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80') => (env.site ? env.internet : HOOKS.internet(env, src, dst, p));
 export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: string } | null | 'timeout' | 'servfail' {
   const n = name.toLowerCase().replace(/\.$/, '');
   if (parseIp(n) !== null) return { ip: n, via: '' };
@@ -359,7 +430,7 @@ export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: 
     const hk = HOOKS.dns.get(d); if (hk) { const x = hk(n, a, env); return x && typeof x === 'object' ? { ip: x.ip, via: d } : x; }
     const r = routerOf(env);
     if (r && d === r.ip) { const x = routerAnswer(env, n, l.ip); if (x === 'refused') continue; return x === null ? null : x === 'timeout' ? 'timeout' : { ip: x.ip, via: d }; }
-    if (PUBLIC_DNS.includes(d)) { if (!HOOKS.internet(env, l.ip, d, 'udp53')) continue; return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null; }
+    if (PUBLIC_DNS.includes(d)) { if (!inet(env, l.ip, d, 'udp53')) continue; return INTERNET[n] ? { ip: INTERNET[n].ip, via: d } : null; }
   }
   return 'timeout';
 }
@@ -373,7 +444,7 @@ export function routerAnswer(env: Env, n: string, srcIp: string): { ip: string }
   const host = env.hosts.find(h => h.name === short);
   if (host) return { ip: host.ip };
   const up = env.dnsSrv.upstream.find(u => PUBLIC_DNS.includes(u));
-  if (!up || !HOOKS.internet(env, srcIp, up, 'udp53')) return 'timeout';
+  if (!up || !inet(env, srcIp, up, 'udp53')) return 'timeout';
   return INTERNET[n] ? { ip: INTERNET[n].ip } : null;
 }
 /** One ICMP echo from this adapter to an IP. */
@@ -407,7 +478,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   if (!seg || !gwHost || gwHost.web !== 'router') return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
   const lr = HOOKS.labRoute(env, l.ip, target); if (lr) return lr;
-  for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && inEnv(target, e)) {
+  for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && (e.site ?? '') === (env.site ?? '') && inEnv(target, e)) {
     const h = e.hosts.find(x => x.ip === target && !x.down);
     const mgmt = env.id === 'lab' && h?.web === 'router';                                          // IT/NOC (lab segment) may manage every router
     if (!h || (!mgmt && (env.id === 'guest' || e.id === 'guest' || env.id === 'kasir' || e.id === 'kasir'))) return { kind: 'timeout' };    // guest & POS segments are firewalled
@@ -415,7 +486,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   }
   if (!env.internet) return { kind: 'timeout' };
   if (env.id === 'guest' && !AUTH.has(a.mac)) return { kind: 'timeout' };
-  if (!HOOKS.internet(env, l.ip, target, 'icmp')) return { kind: 'timeout' };          // captive portal: no internet before login
+  if (!inet(env, l.ip, target, 'icmp')) return { kind: 'timeout' };          // captive portal: no internet before login
   const known = PUBLIC_DNS.includes(target) || Object.values(INTERNET).some(v => v.ip === target);
   if (!known) return { kind: 'timeout' };
   return { kind: 'reply', ip: target, ttl: target.startsWith('8.8') || target.startsWith('142.') ? 117 : 56, ms: () => 14 + Math.round(Math.random() * 18) };
@@ -423,7 +494,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
 
 export function hopsTo(a: Adapter, env: Env, target: string): string[] {
   const l = live(a, env);
-  const internal = Object.values(ENVS).some(e => e.id !== 'none' && inEnv(target, e));
+  const internal = Object.values(ENVS).some(e => e.id !== 'none' && (e.site ?? '') === (env.site ?? '') && inEnv(target, e));
   if (networkOf(parseIp(target)!, l.prefix || 32) === networkOf(parseIp(l.ip || '0.0.0.0')!, l.prefix || 32)) return [target];
   if (internal) return [env.gateway, target];
   return [env.gateway, '10.20.0.1', '180.252.1.17', '61.5.115.9', '72.14.215.85', target];

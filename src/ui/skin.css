@@ -385,3 +385,9 @@ body.touch:has(.noc-modal) #minimap:not(.big), body.touch.demo #minimap:not(.big
   body.touch:has(.jobsheet:not([style*="none"])) #toast { left: calc(40vw + 20px); transform: none; max-width: calc(60vw - 170px); }
 }
 body.touch #minimap.big { z-index: 45; }
+
+/* Fase 1 site read-outs (ONT, router, AP, TV) and the Nusa Teknik order board: plain key/value table */
+.noc-box table.ro { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font: 13px/1.35 var(--k-ui); }
+.noc-box table.ro th, .noc-box table.ro td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--k-line); vertical-align: top; }
+.noc-box table.ro th { color: var(--k-tx2); font-weight: 600; white-space: nowrap; width: 1%; }
+.noc-box table.ro td { color: var(--k-tx); font-family: var(--k-mono); font-size: 12.5px; }

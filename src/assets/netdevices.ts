@@ -381,14 +381,14 @@ const earSlots = (p: Painter, H: number) => { for (const u of [0.0088, RACK_EAR_
 // ---------- switch ----------
 /** port rect (panel u from viewer-left, v from bottom) on the 0.436 switch face */
 function swPort(i: number) { const col = Math.floor(i / 2), row = i % 2; return { u: 0.118 + col * 0.0145 + (col >= 6 ? 0.007 : 0), v: row === 0 ? 0.0232 : 0.0072, w: 0.0128, h: 0.0128, flip: row === 0 }; }
-function switchPanel(managed: boolean) {
-  return decalMat(managed ? 'sw_m' : 'sw_u', 0.436, U1H, 4200, p => {
+function switchPanel(managed: boolean, nPorts = 24) {
+  return decalMat((managed ? 'sw_m' : 'sw_u') + (nPorts === 24 ? '' : String(nPorts)), 0.436, U1H, 4200, p => {
     const dark = managed; const H = U1H;
     plateBg(p, dark ? '#25282c' : '#c7ccd1');
     p.rect(0, H - 0.0012, 0.436, 0.0012, dark ? '#3a3e44' : '#e2e5e8');
     const txt = dark ? '#e9ecef' : '#1c2024', sub = dark ? '#9aa3ab' : '#4b535a';
     p.text('NusaSwitch', 0.006, 0.0265, 0.0058, txt, 'left', 'bold');
-    p.text(managed ? 'SG-2428M' : 'SG-1024D', 0.006, 0.0195, 0.0036, sub, 'left', 'bold');
+    p.text(nPorts === 16 ? 'SG-1016M' : managed ? 'SG-2428M' : 'SG-1024D', 0.006, 0.0195, 0.0036, sub, 'left', 'bold');
     p.text(managed ? 'L2+ Managed' : 'Unmanaged', 0.006, 0.0138, 0.0028, sub, 'left', 'normal');
     p.rect(0.006, 0.0085, 0.044, 0.0009, '#2b8fd6');
     const sys: [string, string][] = [['PWR', '#3dff6a'], ['SYS', '#3dff6a'], ['FAN', managed ? '#3dff6a' : '#3dff6a']];
@@ -399,8 +399,8 @@ function switchPanel(managed: boolean) {
       p.circle(0.096, 0.011, 0.0011, '#060606'); p.text('RST', 0.096, 0.0057, 0.0022, sub, 'center', 'bold');
     }
     // port block frames
-    for (const [u0, u1] of [[0.1155, 0.2075], [0.2145, 0.3065]]) p.rrect(u0, 0.0055, u1 - u0, 0.0328, 0.0008, dark ? '#16181b' : '#9da4ab');
-    for (let i = 0; i < 24; i++) {
+    for (const [u0, u1] of nPorts === 16 ? [[0.1155, 0.2075], [0.2145, 0.2455]] : [[0.1155, 0.2075], [0.2145, 0.3065]]) p.rrect(u0, 0.0055, u1 - u0, 0.0328, 0.0008, dark ? '#16181b' : '#9da4ab');
+    for (let i = 0; i < nPorts; i++) {
       const q = swPort(i); p.rj45(q.u, q.v, q.w, q.h, q.flip);
       const lv = q.flip ? q.v + q.h + 0.0012 : q.v - 0.0011;
       const link = rnd() < 0.9, act = link && rnd() < 0.55;
@@ -412,17 +412,17 @@ function switchPanel(managed: boolean) {
     p.text('SFP 25-28', 0.334, 0.0372, 0.0026, sub, 'center', 'bold');
     for (let c = 0; c < 2; c++) for (let r = 0; r < 2; r++) { const u = 0.318 + c * 0.0168, v = r ? 0.0072 : 0.0218; p.sfp(u, v, 0.0148, 0.0118); p.led(u + 0.0074, r ? v - 0.001 : v + 0.0128, 0.0007, '#38ff5c', c + r < 2, true); }
     // legend + model badge
-    p.text(managed ? '24-Port Gigabit' : '24-Port Gigabit', 0.428, 0.0302, 0.0032, txt, 'right', 'bold');
+    p.text(`${nPorts}-Port Gigabit`, 0.428, 0.0302, 0.0032, txt, 'right', 'bold');
     p.text(managed ? 'Managed Switch' : 'Desktop/Rack Switch', 0.428, 0.0252, 0.0026, sub, 'right', 'normal');
     p.led(0.364, 0.0135, 0.0008, '#38ff5c', true, true); p.text('1000M LINK/ACT', 0.3665, 0.0127, 0.0022, sub, 'left', 'bold');
     p.led(0.364, 0.0085, 0.0008, '#ffb020', true, true); p.text('10/100M', 0.3665, 0.0077, 0.0022, sub, 'left', 'bold');
     p.text('PoE+', 0.428, 0.0077, 0.0026, '#f0a020', 'right', 'bold');
   }, { metal: 0.35, rough: 0.5, emi: 1.4 });
 }
-function switchParts(managed = true) {
-  return cached('switch24_' + managed, b => {
+function switchParts(managed = true, nPorts = 24) {
+  return cached('switch24_' + managed + (nPorts === 24 ? '' : '_' + nPorts), b => {
     const D = 0.25;
-    rackChassis(b, 1, D, switchPanel(managed), { body: managed ? MT.chassis : MT.chassisLight });
+    rackChassis(b, 1, D, switchPanel(managed, nPorts), { body: managed ? MT.chassis : MT.chassisLight });
     // rear: power inlet + fan grille
     b.box(MT.black, 0.17, 0.008, 0.0006, 0.028, 0.02, 0.0015);
     b.cyl(MT.hole, -0.15, 0.0218, 0.0005, 0.016, 0.0012, 'z', 20);
@@ -430,6 +430,10 @@ function switchParts(managed = true) {
 }
 export function switch24(name: string, managed = true) {
   return inst(name, switchParts(managed), { kind: 'switch24', size: [RACK_EAR_W, U1H, 0.25], frontZ: -0.25, u: 1, managed });
+}
+/** 16-port managed variant (small sites: warnet) */
+export function switch16(name: string) {
+  return inst(name, switchParts(true, 16), { kind: 'switch16', size: [RACK_EAR_W, U1H, 0.25], frontZ: -0.25, u: 1, managed: true });
 }
 
 // ---------- router ----------

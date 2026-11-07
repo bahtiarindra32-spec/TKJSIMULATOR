@@ -7,13 +7,15 @@ import type { AABB } from '../world/core';
 import { queryColliders } from './physics';
 import { makeRideableMotor, MOTOR_STEER_AXIS, MOTOR_WHEELBASE, MOTOR_ZF, MOTOR_ZR, type RideMotor } from '../assets/vehicles';
 
-/** parked spots (city coords). 01-03: the motor row in front of the hotel, next to the player spawn. 04-05: hotel car park. */
+/** parked spots (city coords). 01-03: the motor row in front of the hotel, next to the player spawn. 04-05: hotel car park. 06: Nusa Teknik. */
 export const BIKE_SPOTS = [
   { id: 'PROP_MOTOR_01', X: 241.5, Z: 165, yaw: 0, color: '#b3121b' },
   { id: 'PROP_MOTOR_02', X: 242.5, Z: 165, yaw: 0, color: '#f1f1ef' },
   { id: 'PROP_MOTOR_03', X: 243.5, Z: 165, yaw: 0, color: '#1f3f8a' },
   { id: 'PROP_MOTOR_04', X: 276.5, Z: 199.5, yaw: Math.PI, color: '#111214' },
   { id: 'PROP_MOTOR_05', X: 277.7, Z: 199.5, yaw: Math.PI, color: '#6c7176' },
+  // 06: the technician's bike at the Kantor Nusa Teknik parking (Fase 1 field work)
+  { id: 'PROP_MOTOR_06', X: 64.5, Z: 132.6, yaw: 0, color: '#1f5f8b' },
 ];
 
 export const VMAX = 85 / 3.6;          // top speed 85 km/h

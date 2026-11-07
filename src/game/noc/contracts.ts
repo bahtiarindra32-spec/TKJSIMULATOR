@@ -133,7 +133,8 @@ export interface Tut {
 }
 
 /** PCs of the SMK practice lab building: never part of internship jobs */
-export const LABPC = /^PROP_LAB_/;
+/** PCs that are never internship (hotel) job targets: the SMK practice lab and the Fase 1 customer sites */
+export const LABPC = /^PROP_(LAB|RUMAH|KOS|WARNET|NUSATEKNIK)_/;
 export const DAY_PHASES = [
   { name: 'Pagi', what: 'satu surat kerja instalasi' },
   { name: 'Siang', what: 'shift helpdesk, beberapa tiket' },
