@@ -1131,7 +1131,7 @@ export abstract class NocCore {
       );
     }
     if (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') this.logAll(`${lbl}: ping ${e.detail.name || e.detail.target} berhasil`, e.pc);
-    if (e.type === 'portal') this.logAll(`${lbl}: login captive portal (kamar ${e.detail?.room ?? '?'})`, e.pc);
+    if (e.type === 'portal') this.logAll(e.detail?.ros ? `${lbl}: login hotspot MikroTik (user ${e.detail.user})` : `${lbl}: login captive portal (kamar ${e.detail?.room ?? '?'})`, e.pc);
     if (e.type === 'browse')
       this.logAll(
         `${lbl}: buka ${String(e.detail.url)

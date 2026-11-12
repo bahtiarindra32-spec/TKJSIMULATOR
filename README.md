@@ -17,7 +17,7 @@ Simulator jaringan komputer 3D di browser untuk siswa SMK Teknik Komputer dan Ja
 | Siswa | Dunia 3D tempat setiap pekerjaan dilakukan secara fisik: ambil alat di lemari, jalan ke rak, pasang patch cord, console ke switch, uji dari PC. Tanpa kuis: pekerjaan selesai hanya kalau jaringan simulasi benar-benar sehat dan diuji dari perangkat. |
 | Guru | Lab Praktik: susun jobsheet jadi kode 6–8 karakter tanpa server, siswa mengerjakan, checkpoint dinilai otomatis dari simulator, paraf guru ber-PIN, lembar hasil format UKK (Sangat Kompeten…Belum Kompeten), CSV, cetak A4, rekap kelas dari kode hasil. |
 
-Materi yang benar-benar disimulasikan: kabel terstruktur TIA-568 dan crimping T568B, IPv4 statis/DHCP, DNS, VLAN dan trunk 802.1Q, STP, VLSM, routing antar-VLAN (router-on-a-stick), ACL extended, NAT/PAT dua ISP dengan route-map, IP SLA + track failover, server Linux (isc-dhcp-server, bind9, apache2), printer jaringan, telepon IP dengan voice VLAN dan PoE, NAS SMB, Wi-Fi (kanal, sinyal). Daftar lengkap: [FITUR.md](FITUR.md).
+Materi yang benar-benar disimulasikan: kabel terstruktur TIA-568 dan crimping T568B, IPv4 statis/DHCP, DNS, VLAN dan trunk 802.1Q, STP, VLSM, routing antar-VLAN (router-on-a-stick), ACL extended, NAT/PAT dua ISP dengan route-map, IP SLA + track failover, server Linux (isc-dhcp-server, bind9, apache2), printer jaringan, telepon IP dengan voice VLAN dan PoE, NAS SMB, Wi-Fi (kanal, sinyal), MikroTik RouterOS (Winbox/terminal, DHCP, NAT, simple queue, hotspot + user profile) di Lab Praktik dan order lapangan warnet/kos. Daftar lengkap: [FITUR.md](FITUR.md).
 
 ## Mode Juri (tur 5 menit)
 

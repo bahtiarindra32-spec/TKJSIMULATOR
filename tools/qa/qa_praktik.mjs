@@ -3,6 +3,7 @@ import { boot } from './qa_lib.mjs';
 const ph = process.argv[2] ?? 'run';
 const Q = await boot({ v: 1, xp: 1234, shifts: 2, closed: 5, slaMet: 5, seq: 9, contracts: 3, stars: 12, days: 2, streak: 1, best: 25, day: null, seen: ['tutor'], mastery: { tutor: { ok: 1, miss: 0 } } });
 const { p, K, step, go, press, openPc, openCmd, cmd, cmdText, closePc, closeWins, browser, ipv4, modalText, mclick, shot, errs } = Q;
+const dbl = sel => K(s => document.querySelector(s).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), sel);
 const out = {};
 const S = () => K(() => window.__kota.praktik.state());
 const spot = async k => { const s = await K(k => window.__kota.labSpots()[k], k); for (const [dx, dz] of [[0.6, 0], [-0.6, 0], [0, 0.6], [0, -0.6], [0.5, 0.5]]) { await go(s[0] + dx, s[1] + dz, 1); const hint = await K(() => window.__kota.state().hint); if (/Meja guru|Lemari alat lab|Meja crimping|Rak lab/.test(hint)) return hint; } return null; };
@@ -21,6 +22,43 @@ try {
     await go(249.5, 500, 1, Math.PI / 2); await step(4); await shot('lab_in'); await go(240, 500, 1, -Math.PI / 2); await step(4); await shot('lab_in2');
     console.log('  loc', await K(() => window.__kota.state().loc));
     out.look = /Lab Praktik/.test(await K(() => window.__kota.state().loc)) ? 'OK' : 'FAIL';
+  } else if (ph === 'mikrotik') {
+    // Fase 2 chunk B2b: teacher sheet with only the MikroTik step, student at the lab PC, Winbox terminal, client test, paraf
+    const sl = ms => p.waitForTimeout(ms);
+    console.log('  guru', await spot('guru')); await press('f'); await mclick('lab-teacher');
+    for (const id of ['crimp', 'desk', 'static', 'mikrotik']) await K(id => { const c = document.querySelector(`.noc-modal input[name=lab-${id}]`); const want = id === 'mikrotik'; if (c.checked !== want) { c.checked = want; c.dispatchEvent(new Event('change')); } }, id);
+    const code = await K(() => document.querySelector('.noc-modal .lab-code b')?.dataset.code); console.log('  code', code);
+    await mclick('lab-try'); await p.fill('.noc-modal input[name=lab-name]', 'Rina Wulandari XI TKJ 2'); await mclick('lab-start');
+    let s = await S(); const M = s.P.mt; console.log('  start', JSON.stringify({ step: s.step, desk: s.desk, mt: M, checks: s.checks.map(c => +c.ok).join('') }));
+    out.before = s.checks.every(c => !c.ok) ? 'OK' : 'FAIL';
+    const pc = s.pc;
+    console.log('  at pc', await goPcL(pc)); await openPc(pc);
+    const term = async (lines, wait = 90) => { await p.click('#pcos .rosterm .swin'); for (const l of lines) { await p.keyboard.type(l); await p.keyboard.press('Enter'); await sl(wait); } };
+    await dbl('#pcos .di[title="Winbox"]'); await sl(300);
+    const nb = await K(() => [...document.querySelectorAll('#pcos .wbx-list tr.wbx-n')].map(r => r.innerText.replace(/\s+/g, ' ').trim())); console.log('  neighbors', JSON.stringify(nb));
+    await p.click('#pcos .wbx-list tr.wbx-n'); await sl(80); await p.click('#pcos button[name=wbx-connect]'); await sl(250);
+    console.log('  head', await K(() => document.querySelector('#pcos .wbx-head')?.innerText));
+    await p.click('#pcos button[name=wbx-newterm]'); await sl(150);
+    await term([`/system identity set name=${M.identity}`, `/ip address add address=${M.wan}/24 interface=ether1`, `/ip route add gateway=192.168.70.1`, '/ip dns set servers=8.8.8.8 allow-remote-requests=yes', `/ip address add address=${M.lanGw}/24 interface=ether2`]);
+    // DHCP server through the official wizard [8]: interface, space, gateway, pool (typed), dns, lease
+    await term(['/ip dhcp-server setup', 'ether2', '', '', `${M.poolFrom}-${M.poolTo}`, M.lanGw, ''], 120);
+    await term(['/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade', '/ip dhcp-server print']);
+    console.log('  term', (await K(() => document.querySelector('#pcos .rosterm .swout')?.textContent.slice(-500)))?.replace(/\n+/g, ' / '));
+    await K(() => window.__kota.praktik.tick()); s = await S(); console.log('  after base', s.checks.map(c => `${+c.ok}${c.label.slice(0, 16)}`).join(' | '));
+    // client side: renew, read the address, ping the internet
+    await openCmd(); await cmd('ipconfig /renew', 2500); await cmd('ping 8.8.8.8', 4500);
+    const cip = await K(pc => window.__kota.adapter(pc).lease?.ip ?? '', pc); console.log('  client ip', cip, (await K(() => document.querySelector('#pcos .cmd')?.innerText.slice(-260)))?.replace(/\n+/g, ' / '));
+    await K(() => document.querySelector('#pcos .cmd')?.closest('.win')?.querySelector('.cb.x')?.click()); await sl(150);   // close Command Prompt, back to WinBox
+    await term([`/queue simple add name=klien target=${cip}/32 max-limit=${M.qUp}/${M.qDown}`, `/system backup save name=${M.backup}`, '/queue simple print']);
+    await browser('http://www.google.com', 800);
+    await K(() => window.__kota.praktik.tick()); s = await S(); console.log('  after client', s.checks.map(c => +c.ok).join(''), 'ready', s.ready);
+    await closeWins(); await closePc(); await step(3);
+    // paraf at the teacher desk (real F + button)
+    console.log('  guru', await spot('guru')); await press('f'); await mclick('lab-paraf'); await step(2);
+    const res = await modalText(); console.log('  result', res?.slice(0, 500));
+    const csv = await K(() => window.__kota.praktik.last?.csv ?? ''); console.log('  csv lines', csv.split('\r\n').length);
+    const back = await K(pc => window.__kota.praktik.state() === null && !document.querySelector('.jobsheet:not([style*="none"])') ? window.__kota.adapter(pc) && 1 : 0, pc);
+    out.mikrotik = out.before === 'OK' && /Sangat Kompeten/.test(res ?? '') && csv.split('\r\n').length === 1 + 11 && back ? 'OK' : 'FAIL';
   } else {
     console.log('  guru', await spot('guru')); await press('f'); console.log('  desk', (await modalText())?.slice(0, 120));
     await mclick('lab-teacher');

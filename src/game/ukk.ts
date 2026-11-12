@@ -17,7 +17,9 @@ export type Predikat = 'Sangat Kompeten' | 'Kompeten' | 'Cukup Kompeten' | 'Belu
 export interface UkkResult { predikat: Predikat; nilai: number; coreOk: number; coreOf: number; supOk: number; supOf: number; untested: number }
 
 /** supporting (pendukung) criteria: tidiness and documentation that do not stop the network from working */
-const PENDUKUNG = /^Label outlet|^Nama VLAN|disimpan|write memory|^Deskripsi port|^K3: alat dikembalikan/i;
+// MikroTik step (Fase 2): the router identity is naming/documentation like a VLAN name (⚠ inferred: UKK sheets [12][13]
+// list identity as a task but do not say whether it is a core element); the .backup file matches "disimpan".
+const PENDUKUNG = /^Label outlet|^Nama VLAN|disimpan|write memory|^Deskripsi port|^K3: alat dikembalikan|^Identity router/i;
 export const isCore = (label: string) => !PENDUKUNG.test(label);
 
 export function ukkGrade(steps: UkkStep[], totalMs: number, minutes: number): UkkResult {

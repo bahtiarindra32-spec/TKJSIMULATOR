@@ -4,12 +4,15 @@
 import { SITE_PCS, SITE_TV, SITE_AP_DEFS, SITE_WIFI_KEY, KOS, FLOOR_Y, type SiteId } from '../data/sites';
 import { ENVS, SWITCHES, adapterOf, envOf, live, healthy, apPowered, portLink, routerOf } from './net';
 import { registerClient, SITE_APS, CLIENTS, servingAp, quality } from './wifi';
+import { initSiteRouters, siteRouter } from './siterouters';
+import { wanStatus, identity } from './routeros';
 
 /** desk-top height of a site PC/laptop (city floor 1 or the kos upper floor) */
 export const deskY = (floor: 1 | 2) => (floor === 2 ? KOS.upper : FLOOR_Y) + 0.78;
 
 /** register every site laptop and the TV as Wi-Fi clients (world = city - (200,150)); call after initSwitches */
 export function initSiteClients() {
+  initSiteRouters();
   for (const p of SITE_PCS) if (p.wifi) registerClient(p.name, p.X - 200, deskY(p.floor), p.Z - 150, p.floor, { site: p.site, ssid: ssidOf(p.site), key: keyOf(p.site) });
   registerClient(SITE_TV.name, SITE_TV.X - 200, SITE_TV.y, SITE_TV.Z - 150, SITE_TV.floor, { site: SITE_TV.site, ssid: ssidOf(SITE_TV.site), key: keyOf(SITE_TV.site) });
   for (const id of [...SITE_PCS.map(p => p.name), SITE_TV.name]) adapterOf(id);
@@ -41,7 +44,13 @@ export function readout(id: string): Readout {
   if (id === 'RUMAH_ROUTER') return { title: 'Router Wi-Fi keluarga (mode access point)', rows: [['Kabel', 'LAN router ↔ LAN1 ONT'], ['Wi-Fi', apLine('AP-RUMAH-RTR')], ['Alamat', '192.168.1.2 (manajemen)']], note: 'Mode AP: DHCP dan NAT tetap di ONT, router hanya memancarkan Wi-Fi.' };
   if (id === 'KOS_ROUTER') {
     const r = sw('RTR-KOS'); const port = (n: number) => (r && portLink(r, r.ports[n - 1]) ? 'link' : 'tidak ada link');
-    return { title: 'Router kos · lantai 1 (dinding ruang bersama)', rows: [['WAN', 'kabel ke modem ISP · internet aktif'], ['LAN1', `${port(1)} → AP lantai 1`], ['LAN2', `${port(2)} → AP lantai 2`], ['LAN3-4', 'kosong'], ['Gateway', `${ENVS.kos.gateway}/${ENVS.kos.prefix}`], ['Wi-Fi bawaan', 'dimatikan pemilik (diganti AP per lantai)']], note: 'Konfigurasi LAN/DHCP lewat browser laptop penghuni ke alamat gateway.' };
+    const d = siteRouter('kos'); const w = d ? wanStatus(d) : null;
+    return {
+      title: `MikroTik hAP lite (RB941-2nD) · ${d ? identity(d) : 'router kos'} · lantai 1 (dinding ruang bersama)`,
+      rows: [['ether1 (WAN)', w?.ok ? 'kabel ke modem ISP · internet aktif' : `kabel ke modem ISP · ${w?.why ?? 'tidak ada internet'}`], ['ether2', `${port(1)} → AP lantai 1`], ['ether3', `${port(2)} → AP lantai 2`], ['ether4', 'kosong'],
+        ['Gateway', `${ENVS.kos.gateway}/${ENVS.kos.prefix} (bridge-lan)`], ['Wi-Fi bawaan', 'wlan1 dimatikan pemilik (diganti AP per lantai)']],
+      note: 'RouterOS: konfigurasi lewat Winbox/terminal (DHCP server, DNS, NAT masquerade ke ether1).',
+    };
   }
   if (id.startsWith('AP-')) { const d = SITE_AP_DEFS.find(x => x.id === id)!; return { title: `${d.label} · ${id}`, rows: [['Status', apLine(id)], ['Kabel', `${d.sw} port ${d.port}`]], note: 'AP mendapat daya dari adaptor di dekatnya; datanya lewat kabel LAN ke router.' }; }
   if (id === 'TV') {

@@ -6,6 +6,8 @@ import { SWITCHES, ENVS, adapterOf, healthy, live, patchCord, bounce, releaseLea
 import { SITE_APS, quality, type Ap, type WifiSec, type TxPower } from '../../pcos/wifi';
 import { SITE_PCS, SITE_TV, SITE_WIFI_KEY } from '../../data/sites';
 import { judge, type Cable } from '../crimp';
+import { resetSiteRouter } from '../../pcos/siterouters';
+import { injectRos, rosProblem, isRosTpl, type RosJob } from './simros';
 import type { Cust, FieldTplId } from './types';
 
 export const sw = (n: string): Switch => SWITCHES.find(s => s.name === n)!;
@@ -33,6 +35,10 @@ export interface Injected {
   targets: Target[];
   /** where the fault sits (port, pc, AP) — also what a garansi callback needs to re-create it */
   data: Record<string, string | number>;
+  /** Fase 2 MikroTik order: graded from the site router's configuration state */
+  ros?: RosJob;
+  /** per-order values for the order letter (vouchers, limits, ISP data) */
+  lines?: string[];
 }
 const T = (pc: string, primary: boolean): Target => ({ pc, label: deviceLabel(pc), primary });
 const pickOf = <X>(a: X[], r: () => number) => a[Math.floor(r() * a.length)];
@@ -53,6 +59,10 @@ export const portParts = (k: string) => {
  */
 export function inject(tpl: FieldTplId, r: () => number, redo?: Record<string, string | number>): Injected | null {
   const R = (variant: string, detail: string, targets: Target[], data: Record<string, string | number>): Injected => ({ tpl, variant, detail, targets, data });
+  if (isRosTpl(tpl)) {
+    const x = injectRos(tpl, r);
+    return x && { tpl, variant: x.variant, detail: x.detail, targets: x.targets.map(t => T(t.pc, t.primary)), data: x.data, ros: x.ros, lines: x.lines };
+  }
   if (tpl === 'r_router') {
     const a = ap('AP-RUMAH-RTR');
     a.mounted = false;
@@ -169,6 +179,7 @@ export function inject(tpl: FieldTplId, r: () => number, redo?: Record<string, s
 // ---------------------------------------------------------------- checks
 /** root cause still present beyond device health ('' = fixed) */
 export function rootProblem(i: Injected): string {
+  if (i.ros) return rosProblem(i.ros, i.targets.find(t => t.primary)?.pc);
   if (i.tpl === 'r_router') {
     const a = ap('AP-RUMAH-RTR');
     if (!a.mounted) return 'router Wi-Fi belum diganti';
@@ -245,6 +256,8 @@ export function restoreSites(snap: SiteSnap, only?: Cust) {
     e.dnsSrv.allow = x.dnsAllow;
     e.dnsSrv.upstream = [...x.upstream];
   }
+  // the MikroTik site routers go back to the customer configuration (before the clients re-lease)
+  for (const site of ['kos', 'warnet'] as const) if (!only || only === site) resetSiteRouter(site);
   for (const x of snap.ads) {
     if (only && custOfName(x.pc) !== only) continue;
     const a = adapterOf(x.pc);

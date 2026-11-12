@@ -238,6 +238,19 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - **Jalur karier** (magang hotel → teknisi lapangan → usaha sendiri) dan catatan singkat legalitas RT/RW Net (UU 36/1999, jalur reseller KBLI 61994 + PKS dengan ISP berizin) sebagai pengantar fase berikutnya.
 - Progres tersimpan di `kotaNusantara.field.v1` (terpisah dari save magang).
 
+### Fase 2: MikroTik di Lab Praktik (12 Nov 2026) — `src/game/labmt.ts`
+- **Router MikroTik hAP lite** di rak dinding tembok timur, samping rak lab. ether1 (WAN) ke jaringan lab 192.168.70.0/24, ether2 (LAN) di-patch ke outlet meja siswa selama langkah MikroTik.
+- **Langkah baru "Router MikroTik: konfigurasi dasar (paket UKK)"**: mulai dari router reset tanpa konfigurasi, siswa membuka Winbox di PC meja (Neighbors › connect lewat MAC › New Terminal) lalu mengerjakan identity, IP WAN + default route, DNS + allow-remote-requests, IP LAN, DHCP server, NAT masquerade, simple queue untuk PC klien, uji dari PC (ping 8.8.8.8 + buka situs), dan backup. 11 checkpoint dibaca dari kondisi router dan PC, bukan dari ketikan.
+- **Langkah opsional "Hotspot MikroTik + user"**: hotspot di LAN, user + password, rate-limit di user profile, lalu login di halaman hotspot dari PC.
+- **Soal beda tiap siswa** (dari kode + nama): subnet LAN, identity, IP WAN, pool DHCP, batas queue, user hotspot.
+- **Kode jobsheet** tetap kompatibel: kode lama 6/7/8 karakter tetap terbuka; kode dengan langkah MikroTik 7 karakter (9 karakter kalau pakai PIN paraf). Rekap kelas menerima kode hasil langkah baru.
+- **Penilaian UKK**: identity router dan file backup = pendukung, sisanya kriteria utama.
+
+### Fase 2: MikroTik di lapangan (12 Nov 2026) — `src/pcos/routeros/`, `src/game/field/simros.ts`
+- **Mesin RouterOS 7**: CLI dengan path `/ip …`, `print`/`export`, wizard DHCP server dan hotspot, simple queue, firewall filter + NAT, user hotspot + profile rate-limit, backup. Ikut simulasi jaringan; order dinilai dari kondisi router dan hasil uji, bukan dari ketikan.
+- **Router di tempat lapangan**: RB951Ui-2HnD di Warnet Sinar, hAP lite di Kos Mawar. Dari PC/laptop pelanggan: Winbox (Neighbors › connect lewat MAC › New Terminal), WebFig di browser, halaman login hotspot, dan speedtest.cari.id yang menunjukkan batas yang benar-benar berlaku.
+- **Empat order baru** (terbuka per reputasi): hotspot voucher warnet dengan rate-limit (uji login voucher dari PC), simple queue per kamar kos (uji speedtest dari laptop penghuni), limit kamar tidak jalan karena rule fasttrack, internet warnet mati setelah router direset.
+
 ### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
 - **Izin data & API key**: AI tidak mengirim apa pun sebelum pemain/guru memilih *Setuju* di Pengaturan (yang dikirim: pertanyaan, teks surat kerja/jobsheet, konfigurasi IP simulasi; nama siswa dan nilai tidak). API key bisa disimpan *di perangkat ini* atau *sesi ini saja* untuk komputer lab bersama.
 - Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.

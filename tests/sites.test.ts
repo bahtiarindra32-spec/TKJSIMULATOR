@@ -6,6 +6,8 @@ import { CLIENTS, servingAp } from '../src/pcos/wifi';
 import { initSiteClients, readout } from '../src/pcos/sites';
 import { SITE_PCS, SITE_TV, SITES, KOS, kosFeet, FLOOR_Y } from '../src/data/sites';
 import { LABPC } from '../src/game/noc/contracts';
+import { siteRouter, refreshSiteRouters } from '../src/pcos/siterouters';
+import { RosCli, identity, wanStatus, rosOwner } from '../src/pcos/routeros';
 
 const HOTEL = ['PROP_L1_PC_01', 'PROP_L2_PC_01', 'PROP_L2_PC_02'];
 const ALL = [...HOTEL, ...SITE_PCS.map(p => p.name)];
@@ -51,7 +53,7 @@ describe('Fase 1 sites: healthy by default', () => {
   it('device read-outs come from the live state', () => {
     expect(readout('ONT').rows.find(r => r[0] === 'LAN1')![1]).toMatch(/^hijau/);
     expect(readout('TV').rows.find(r => r[0] === 'Internet')![1]).toBe('tersambung');
-    expect(readout('KOS_ROUTER').rows.find(r => r[0] === 'LAN2')![1]).toMatch(/^link/);
+    expect(readout('KOS_ROUTER').rows.find(r => r[0] === 'ether3')![1]).toMatch(/^link/);
   });
 });
 
@@ -97,5 +99,54 @@ describe('Fase 1 sites: layout data', () => {
     expect(kosFeet(s.x1 - 0.01, z, 3)).toBeCloseTo(KOS.upper, 1);
     expect(kosFeet(134, 306, KOS.upper)).toBe(KOS.upper);
     expect(kosFeet(134, 306, FLOOR_Y)).toBe(FLOOR_Y);
+  });
+});
+
+describe('Fase 2: warnet and kos routers are MikroTik RouterOS', () => {
+  beforeEach(fresh);
+  it('the warnet router is an RB951Ui-2HnD and the kos router a hAP lite, each running its site LAN', () => {
+    const w = siteRouter('warnet')!, k = siteRouter('kos')!;
+    expect(w.model.id).toBe('RB951Ui-2HnD'); expect(k.model.id).toBe('RB941-2nD');
+    expect(identity(w)).toMatch(/^WARNET-/); expect(identity(k)).toMatch(/^KOS-/);
+    expect(rosOwner(ENVS.warnet)).toBe(w); expect(rosOwner(ENVS.kos)).toBe(k);
+    expect(wanStatus(w).ok).toBe(true); expect(wanStatus(k).ok).toBe(true);
+  });
+  it('clients get their DHCP lease from the RouterOS server and reach the internet', () => {
+    for (const pc of ['PROP_WARNET_01_PC_01', 'PROP_WARNET_01_KASIR_PC', 'PROP_KOS_01_LAPTOP_K1', 'PROP_KOS_01_LAPTOP_K5']) {
+      const a = adapterOf(pc), l = live(a);
+      expect(l.ok, pc).toBe(true);
+      expect(a.lease!.server, pc).toBe(envOf(pc).gateway);
+      expect(ping(a, envOf(pc), '8.8.8.8', true).kind, pc).toBe('reply');
+      expect(healthy(a), pc).toBe(true);
+    }
+    // the router's lease table shows the clients
+    const out = new RosCli(siteRouter('warnet')!).run('/ip dhcp-server lease print');
+    expect(out).toContain(live(adapterOf('PROP_WARNET_01_PC_01')).ip);
+  });
+  it('/ip address print on each router shows the site gateway', () => {
+    expect(new RosCli(siteRouter('warnet')!).run('/ip address print')).toMatch(/192\.168\.100\.1\/24\s+192\.168\.100\.0\s+bridge-lan/);
+    expect(new RosCli(siteRouter('kos')!).run('/ip address print')).toMatch(/192\.168\.0\.1\/24\s+192\.168\.0\.0\s+bridge-lan/);
+    expect(new RosCli(siteRouter('kos')!).run('/ip dhcp-server print')).toMatch(/dhcp-lan\s+bridge-lan\s+pool-lan/);
+  });
+  it('disabling the NAT masquerade rule breaks the internet of that site only', () => {
+    const c = new RosCli(siteRouter('warnet')!);
+    expect(c.run('/ip firewall nat disable [find action=masquerade]')).toBe('');
+    const w = adapterOf('PROP_WARNET_01_PC_02');
+    expect(ping(w, envOf(w.pc), '8.8.8.8', true).kind).toBe('timeout');
+    expect(healthy(w)).toBe(false);
+    expect(ping(w, envOf(w.pc), '192.168.100.1', true).kind).toBe('reply');   // the LAN still works
+    expect(healthy(adapterOf('PROP_KOS_01_LAPTOP_K1'))).toBe(true);
+    c.run('/ip firewall nat enable [find action=masquerade]');
+    expect(healthy(w)).toBe(true);
+  });
+  it('the router sees its LAN: ether2 runs while the switch uplink is up and it pings a booth PC', () => {
+    const c = new RosCli(siteRouter('warnet')!);
+    const ip = live(adapterOf('PROP_WARNET_01_PC_04')).ip;
+    expect(c.run(`/ping ${ip} count=1`)).toMatch(/received=1/);
+    expect(c.run('/interface print')).toMatch(/ RS\s+ether2 /);
+    expect(c.run('/interface print')).toMatch(/ S\s+ether3 /);
+    SWITCHES.find(s => s.name === 'SW-WARNET')!.ports[15].shutdown = true;
+    refreshSiteRouters();
+    expect(c.run('/interface print')).toMatch(/ S\s+ether2 /);
   });
 });

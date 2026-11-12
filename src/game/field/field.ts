@@ -17,6 +17,8 @@ import { FIELD_TPLS, CUSTOMER } from './templates';
 import { rp, payout, applyRep, repEventForStars, denda, MAT_LABEL, MAT_UNIT, PRICE, STAR_PAY } from './economy';
 import { openDay, closeDay, planGaransi, pushNota, repLine } from './orders';
 import { loadField, writeField } from './save';
+import { rosTestEvent, isRosTpl } from './simros';
+import { rosNeedsLogin } from '../../pcos/routeros';
 import { inject, rootProblem, cableWeak, snapshotSites, restoreSites, ok, sw, ap, siteDevices, deviceLabel, portParts, NEW_ROUTER, TV, type Injected, type Target, type SiteSnap } from './sim';
 import { CUST_LABEL, noMat, type Order, type Mat, type FieldSave, type Nota, type Cust } from './types';
 import './field.css';
@@ -149,6 +151,8 @@ export class FieldWork {
       return 'Pelanggan menelepon lagi: masalahnya sudah beres sendiri. Order dibatalkan tanpa denda.';
     }
     o.status = 'active';
+    // a MikroTik order carries its own values (vouchers, limits, ISP data) onto the order letter
+    for (const l of inj.lines ?? []) if (!o.lines.includes(l)) o.lines.push(l);
     const tg = new Set(inj.targets.map(t => t.pc));
     this.act = {
       o, inj, targets: inj.targets.map(t => ({ ...t, ok: false, tested: false })), surveyed: false, docReady: false, age: 0, mat: noMat(), wrong: 0,
@@ -194,7 +198,11 @@ export class FieldWork {
     if (e.type === 'browse') this.log(`${deviceLabel(e.pc)}: buka ${String(e.detail?.url ?? '').replace(/^https?:\/\//, '')}`);
     if (e.type === 'cfg' && e.detail?.kind === 'dhcp') this.log(`WebKonfig ${e.detail.env}: DHCP ${e.detail.on ? `${e.detail.start}–${e.detail.end}` : 'dimatikan'}`);
     if (!t) return;
-    const test = (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') || e.type === 'browse';
+    if (e.type === 'speed') this.log(`${deviceLabel(e.pc)}: tes kecepatan ${(e.detail.down / 1e6).toFixed(1)}/${(e.detail.up / 1e6).toFixed(1)} Mbps (download/upload)${e.detail.bypassed ? ', antrean dilewati FastTrack' : ''}`);
+    let test = (e.type === 'ping' && e.detail?.ok && e.detail?.target !== '127.0.0.1') || e.type === 'browse';
+    // queue orders: only the speed-test page showing the ordered limit counts as the customer-device test
+    const rt = a.inj.ros && t.primary ? rosTestEvent(a.inj.ros, e.type, e.detail) : null;
+    if (rt !== null) test = rt && !this.problem();
     if (test && ok(t.pc)) {
       t.ok = true;
       t.tested = true;
@@ -277,6 +285,8 @@ export class FieldWork {
     const bad = a.targets.filter(t => !t.ok);
     if (bad.length || pr) {
       const t = a.o.tpl;
+      if (isRosTpl(t) && pr.startsWith('uji login')) return `Uji dari ${a.targets.find(x => x.primary)?.label ?? 'PC uji'}: buka situs, login hotspot pakai salah satu voucher.`;
+      if (isRosTpl(t)) return `${pr ? `${pr} · ` : ''}Konfigurasi router MikroTik lewat Winbox / WebFig dari ${a.targets.find(x => x.primary)?.label ?? 'PC pelanggan'}.`;
       if (t === 'r_router') {
         const r = ap('AP-RUMAH-RTR');
         if (!r.mounted) return this.bag.router ? 'Pasang router baru di dekat ONT [F].' : 'Bawa router baru: ambil di lemari material Nusa Teknik.';
@@ -293,6 +303,8 @@ export class FieldWork {
       return `Perbaiki: ${bad[0]?.label ?? pr} belum normal.`;
     }
     const un = a.targets.find(t => t.primary && !t.tested);
+    if (un && a.inj.ros?.speed) return `Uji dari ${un.label}: buka speedtest.cari.id, hasilnya harus sesuai batas order.`;
+    if (un && a.inj.ros?.vouchers) return `Uji dari ${un.label}: buka situs, login hotspot pakai salah satu voucher.`;
     if (un) return un.pc === TV ? 'Uji: cek menu jaringan smart TV [F] (harus tersambung internet).' : `Uji dari ${un.label}: buka PC [F], ping / buka situs.`;
     return 'Tunggu…';
   }
@@ -622,7 +634,8 @@ export class FieldWork {
     const a = this.act!;
     const o = a.o;
     const slaOk = a.age <= FIELD_TPLS[o.tpl].sla;
-    const collateral = a.snap.filter(n => !ok(n));
+    // a PC that only waits on the hotspot login page (the order put a hotspot on its LAN) is not broken
+    const collateral = a.snap.filter(n => !ok(n) && !rosNeedsLogin(n));
     const weak = this.weakness();
     const unsaved = o.tpl === 'w_loop' && sw('SW-WARNET').dirty;
     const stars = jobStars({ slaMet: slaOk, collateral: collateral.length, wrong: a.wrong, swDirty: !!weak || unsaved });
@@ -701,8 +714,8 @@ export class FieldWork {
     if (id === 'ONT') this.routerSection(box, out);
     if (id === 'ONT') this.portSection(box, out, 'ONT-RUMAH:1', 'LAN1 ONT → router Wi-Fi');
     if (id === 'KOS_ROUTER') {
-      this.portSection(box, out, 'RTR-KOS:1', 'LAN1 → AP lantai 1');
-      this.portSection(box, out, 'RTR-KOS:2', 'LAN2 → AP lantai 2');
+      this.portSection(box, out, 'RTR-KOS:1', 'ether2 → AP lantai 1');
+      this.portSection(box, out, 'RTR-KOS:2', 'ether3 → AP lantai 2');
     }
     if (id.startsWith('AP-KOS')) this.channelSection(box, out, id);
     box.append(out);

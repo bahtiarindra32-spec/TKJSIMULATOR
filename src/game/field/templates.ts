@@ -17,8 +17,10 @@ export interface FieldTpl {
   weight: number;
   /** complaint lines (customer voice); the generator picks one opener */
   say: string[];
-  /** what the customer asks for (fixed lines) */
+  /** what the customer asks for (fixed lines; a MikroTik order adds its per-order values when it is taken) */
   ask: string[];
+  /** Fase 2: the job is done on the site's MikroTik router (graded from its configuration state) */
+  ros?: boolean;
 }
 
 /** customer per site: who calls and where to go (fictional addresses on the real map streets) */
@@ -30,6 +32,7 @@ export const CUSTOMER: Record<Cust, { who: string; address: string; place: strin
 
 const CRIMP = 'Crimping RJ45 Rp50–100 rb/titik [42]';
 const ROUTER = 'Instalasi router + konfigurasi dasar Rp150–300 rb [42]';
+const HOTSPOT = 'Setting hotspot MikroTik + voucher Rp250–700 rb [44]';
 
 export const FIELD_TPLS: Record<FieldTplId, FieldTpl> = {
   r_router: {
@@ -71,6 +74,28 @@ export const FIELD_TPLS: Record<FieldTplId, FieldTpl> = {
     id: 'w_loop', cust: 'warnet', title: 'Semua PC warnet putus', tarif: [150_000, 300_000], tarifSrc: ROUTER, minRep: 55, sla: 1100, weight: 0.8,
     say: ['Semua PC putus, lampu switch kedip-kedip cepat semua. Tadi ada yang merapikan kabel di rak.', 'Warnet lumpuh total sejak rak dirapikan. Semua lampu switch berkedip.'],
     ask: ['Cari penyebabnya di rak (switch SG-1016M) dan pulihkan jaringan.', 'Spanning-tree switch harus aktif lagi dan konfigurasi disimpan. Uji dari PC booth.'],
+  },
+  // ---- Fase 2: MikroTik (warnet RB951Ui-2HnD, kos hAP lite). Reputasi gates only (no extra rank: field work itself is
+  // the Fase 1 unlock); the minimums are design numbers (DESIGN.md › Fase 2 orders).
+  w_hotspot: {
+    id: 'w_hotspot', cust: 'warnet', title: 'Pasang hotspot voucher MikroTik', tarif: [250_000, 700_000], tarifSrc: HOTSPOT, minRep: 60, sla: 1500, weight: 0.8, ros: true,
+    say: ['Saya mau jual voucher internet per jam. Pelanggan login dulu sebelum main, kecepatannya dibatasi per voucher.', 'Mulai minggu depan warnet pakai sistem voucher. Tolong pasang login hotspot di router MikroTik-nya.'],
+    ask: ['Pasang hotspot MikroTik di LAN warnet (interface bridge-lan, gateway tetap 192.168.100.1/24) lewat Winbox/WebFig dari PC warnet.', 'Buat user hotspot (voucher) sesuai daftar di bawah, semua memakai satu user profile dengan batas kecepatan yang diminta.', 'Uji login pakai salah satu voucher dari PC booth yang ditunjuk, lalu buka situs.'],
+  },
+  k_queue: {
+    id: 'k_queue', cust: 'kos', title: 'Bagi bandwidth per kamar (simple queue)', tarif: [150_000, 300_000], tarifSrc: ROUTER, minRep: 50, sla: 1300, weight: 0.9, ros: true,
+    say: ['Satu penghuni download terus, yang lain jadi lemot. Saya mau tiap kamar dapat jatah yang sama.', 'Internet kos sering habis dipakai satu-dua kamar. Tolong dibatasi per kamar di router.'],
+    ask: ['Buat simple queue di router kos (hAP lite) untuk laptop tiap kamar yang tercantum, satu queue per kamar (target = alamat laptop itu).', 'Batas kecepatan per kamar sesuai di bawah (upload/download dari sisi penghuni).', 'Uji dari laptop penghuni yang ditunjuk: buka speedtest.cari.id, hasilnya harus sesuai batas.'],
+  },
+  k_fasttrack: {
+    id: 'k_fasttrack', cust: 'kos', title: 'Limit per kamar tidak jalan', tarif: [150_000, 300_000], tarifSrc: ROUTER, minRep: 55, sla: 1200, weight: 0.8, ros: true,
+    say: ['Teknisi sebelumnya sudah pasang limit per kamar, tapi penghuni masih bisa download kencang sekali. Limitnya seperti tidak ada.', 'Katanya sudah dibatasi per kamar, tapi speedtest penghuni tetap penuh. Tolong dicek routernya.'],
+    ask: ['Cari kenapa simple queue di router kos tidak membatasi. Jangan ubah batas per kamar yang sudah disepakati.', 'Uji dari laptop penghuni yang ditunjuk: buka speedtest.cari.id, hasilnya harus sesuai batas.'],
+  },
+  w_reset: {
+    id: 'w_reset', cust: 'warnet', title: 'Internet warnet mati setelah router direset', tarif: [150_000, 300_000], tarifSrc: ROUTER, minRep: 50, sla: 1300, weight: 0.9, ros: true,
+    say: ['Tadi keponakan saya tekan lama tombol reset di router. Sekarang PC dapat IP aneh 192.168.88 dan semuanya tidak bisa internet.', 'Router warnet ke-reset waktu listrik naik-turun dan ada yang pencet tombol reset. Semua PC tidak bisa internet.'],
+    ask: ['Kembalikan konfigurasi router MikroTik warnet seperti sebelum reset (Winbox/WebFig dari PC warnet).', 'Data dari ISP & catatan teknisi lama ada di bawah. Kalau di router masih ada file backup, boleh dipakai.', 'Uji dari PC booth yang ditunjuk; PC lain juga harus normal lagi.'],
   },
 };
 

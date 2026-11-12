@@ -12,6 +12,7 @@ import { vlsmCase, vlsmKey, vlsmCheck, type Plan, type Row } from './vlsm';
 import { aiReady, chat } from '../ai/nusa';
 import { recapAiPanel } from '../ai/recapAi';
 import { ukkGrade, ukkCsv, isCore, type UkkStep } from './ukk';
+import { mtParams, freshLabMt, dropLabMt, labMt, mtChecks, hsChecks, mtSolution, typeLines, LABMT_GW, type MtParams } from './labmt';
 import type { Noc } from './noc';
 import type { PcOS } from '../pcos/os';
 
@@ -22,10 +23,12 @@ const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) >>> 0; let t = 
 const GW = '192.168.70.1', SRV = '192.168.70.10';
 /** checkpoints per step (for steps never reached, so the score still counts them) */
 /** (+1 on the last step of a sheet: the K3 tools check) */
-const CHECKN: Record<LabStepId, number> = { crimp: 5, desk: 6, static: 6, dhcp: 5, vlan: 5, vlsm: 8, intervlan: 10, acl: 5, dns: 3, trouble: 3 };
+const CHECKN: Record<LabStepId, number> = { crimp: 5, desk: 6, static: 6, dhcp: 5, vlan: 5, vlsm: 8, intervlan: 10, acl: 5, dns: 3, trouble: 3, mikrotik: 11, mthotspot: 5 };
 
 type Fault = 'kabel' | 'port' | 'ip' | 'gw' | 'dns';
-interface Params { desk: number; host: number; swPort: number; poolStart: number; dnsName: string; faults: Fault[]; vl: Plan; guru: number }
+interface Params { desk: number; host: number; swPort: number; poolStart: number; dnsName: string; faults: Fault[]; vl: Plan; guru: number;
+  /** MikroTik steps (labmt.ts): own seeded stream, so older sheets keep their cases */
+  mt: MtParams }
 interface Check { label: string; ok: boolean }
 interface StepRes { step: LabStepId; got: number; of: number; ms: number; done: boolean; checks: Check[] }
 interface Run { spec: LabSpec; code: string; name: string; pc: string; label: string; P: Params; i: number; t0: number; st0: number; res: StepRes[]; ping: boolean; browse: string[]; best: Check[]; ready?: boolean;
@@ -65,6 +68,26 @@ const SHEET: Record<LabStepId, { tujuan: string; alat: string; k3: string; langk
       `Uji dari PC Meja ${P.desk}: ping ${A.gIp} harus gagal, http://192.168.70.10 harus terbuka. Simpan (write memory).`]; } },
   dns: { tujuan: 'Membuat record DNS lokal agar server bisa dibuka dengan nama.', alat: 'PC meja praktik, browser.', k3: 'Jangan menghapus record milik orang lain.',
     langkah: P => [`Login router lab (http://${GW}) › DNS: tambah record A ${P.dnsName} → ${SRV}.`, `Pastikan DNS PC ${GW} (otomatis dari DHCP sudah benar).`, `Buka http://${P.dnsName} di browser PC.`] },
+  mikrotik: { tujuan: 'Mengonfigurasi router MikroTik dari kondisi reset sampai klien LAN bisa internet, dengan DHCP server, NAT dan bandwidth klien dibatasi (pola paket UKK).',
+    alat: 'Router MikroTik hAP lite (RB941-2nD) di rak samping rak lab, PC meja praktik dengan Winbox. ether1 = WAN ke jaringan lab, ether2 = LAN (outlet meja kamu sudah di-patch ke ether2).',
+    k3: 'Jangan mencabut kabel ether1 (jaringan lab dipakai meja lain). Catat konfigurasi sebelum mengubah; simpan backup di akhir.',
+    langkah: P => { const M = P.mt; return [
+      'Router sudah di-reset tanpa konfigurasi bawaan (no-defaults). Buka Winbox › tab Neighbors › connect lewat MAC, login admin tanpa password › New Terminal.',
+      `Identity: ${M.identity}.`,
+      `WAN ether1: IP ${M.wan}/24, default route gateway ${LABMT_GW}, DNS server 8.8.8.8 dengan allow-remote-requests=yes.`,
+      `LAN ether2: IP ${M.lanGw}/24. DHCP server di LAN: pool ${M.poolFrom}-${M.poolTo}, gateway dan DNS ${M.lanGw} (boleh /ip dhcp-server setup).`,
+      'NAT: srcnat masquerade keluar ether1.',
+      `PC: IPv4 otomatis (DHCP), ipconfig /renew. Simple queue khusus PC klien (target = IP PC, lihat ipconfig atau /ip dhcp-server lease print): max-limit ${M.qUp}/${M.qDown} (upload/download).`,
+      'Uji dari PC: ping 8.8.8.8 dan buka satu situs internet di browser.',
+      `Simpan: /system backup save name=${M.backup}.`]; } },
+  mthotspot: { tujuan: 'Membuat hotspot (captive portal) di LAN router MikroTik dengan user dan batas kecepatan per user.',
+    alat: 'Router MikroTik hAP lite, PC meja praktik dengan Winbox dan browser.', k3: 'Jangan menghapus konfigurasi WAN/NAT yang sudah jalan. Uji login dari PC klien, bukan dari router.',
+    langkah: P => { const M = P.mt; return [
+      `Router sudah terkonfigurasi dasar: LAN ether2 ${M.lanGw}/24 dengan DHCP dan NAT. Login Winbox seperti langkah sebelumnya.`,
+      'Jalankan /ip hotspot setup di interface LAN (ether2, atau bridge-nya kalau ether2 masuk bridge). Alamat hotspot = alamat LAN.',
+      `Buat user profile dengan rate-limit ${M.hsRate} (rx/tx dari sisi router: upload/download klien).`,
+      `Buat user hotspot ${M.hsUser} password ${M.hsPass} dengan profile itu.`,
+      `Uji dari PC: buka situs di browser › halaman login hotspot › login ${M.hsUser} › situs terbuka.`]; } },
   trouble: { tujuan: 'Menemukan dan memperbaiki gangguan jaringan pada PC meja praktik.', alat: 'LAN tester, kabel console + laptop, PC.', k3: 'Periksa fisik dulu, baru konfigurasi.',
     langkah: () => ['PC meja tidak bisa membuka server lab. Ada 2 penyebab.', 'Periksa lampu link dan kabel [C], ipconfig, ping gateway, nslookup.', 'Perbaiki tiap penyebab, lalu buka http://192.168.70.10 dari PC.'] },
 };
@@ -196,7 +219,7 @@ export class Praktik {
   openStudent(code = '', msg = '') {
     const box = h('div', 'noc-box labs');
     box.append(h('h2', '', 'Mulai Praktik'));
-    const ci = h('input', 'mono') as HTMLInputElement; ci.name = 'lab-code'; ci.maxLength = 7; ci.placeholder = 'KODE6'; ci.value = code;
+    const ci = h('input', 'mono') as HTMLInputElement; ci.name = 'lab-code'; ci.maxLength = 9; ci.placeholder = 'KODE6'; ci.value = code;
     const ni = h('input') as HTMLInputElement; ni.name = 'lab-name'; ni.maxLength = 40; ni.placeholder = 'Nama lengkap · kelas'; if (!ni.value) ni.value = this.noc.playerName();
     for (const x of [ci, ni]) x.addEventListener('keydown', e => e.stopPropagation());
     const f = h('div', 'lab-form'); f.append(h('label', '', 'Kode dari guru'), ci, h('label', '', 'Nama'), ni); box.append(f);
@@ -221,7 +244,7 @@ export class Praktik {
     const desk = Math.floor(r() * this.pcs.length) + 1;
     const pool: Fault[] = ['kabel', 'port', 'ip', 'gw', 'dns'];
     const f1 = pool[Math.floor(r() * pool.length)]; const rest = pool.filter(x => x !== f1 && !(f1 === 'ip' && x === 'gw') && !(f1 === 'gw' && x === 'ip'));
-    const P: Params = { desk, host: 20 + Math.floor(r() * 30), swPort: 13 + Math.floor(r() * 8), poolStart: 100 + 10 * Math.floor(r() * 4), dnsName: `${['server', 'jobsheet', 'elearning', 'ujian'][Math.floor(r() * 4)]}.praktik.lan`, faults: [f1, rest[Math.floor(r() * rest.length)]], vl: vlsmCase(seed), guru: (desk % this.pcs.length) + 1 };
+    const P: Params = { desk, host: 20 + Math.floor(r() * 30), swPort: 13 + Math.floor(r() * 8), poolStart: 100 + 10 * Math.floor(r() * 4), dnsName: `${['server', 'jobsheet', 'elearning', 'ujian'][Math.floor(r() * 4)]}.praktik.lan`, faults: [f1, rest[Math.floor(r() * rest.length)]], vl: vlsmCase(seed), guru: (desk % this.pcs.length) + 1, mt: mtParams(seed) };
     const pc = this.pcs[desk - 1];
     this.reset();
     this.run = { spec, code, name, pc: pc.name, label: `Meja ${desk}`, P, i: 0, t0: performance.now(), st0: performance.now(), res: [], ping: false, browse: [], best: [], rows: [], pings: new Map() };
@@ -232,7 +255,7 @@ export class Praktik {
     this.render(); this.board();
   }
   /** stop a run without a result sheet (Mode Juri switching stops) */
-  abort() { if (!this.run) return; this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board(); }
+  abort() { if (!this.run) return; dropLabMt(); this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board(); }
   /** the lab as the technician left it last night: every desk patched, DHCP on, VLAN 70, no records */
   reset() {
     const sw = this.sw(); const env = ENVS.prak;
@@ -241,13 +264,21 @@ export class Praktik {
     sw.panel.forEach((pp, i) => { pp.patch = pp.pc ? i + 1 : null; pp.hang = false; pp.label = pp.pc ? outletOf(pp.pc) || pp.label : ''; });
     sw.panel.forEach(pp => { if (pp.pc) pp.label = `LAB-${String(pp.n).padStart(2, '0')}`; });
     sw.ports.forEach(p => { p.trunk = undefined; });
-    repatch(sw); resetLabRouter();
+    repatch(sw); resetLabRouter(); dropLabMt();
     env.dhcp = { start: '192.168.70.100', end: '192.168.70.150', gw: GW, dns: [GW], lease: 8 }; env.dnsSrv.records = []; env.leases.clear();
     for (const p of this.pcs) { this.noc.labSetCord(p.name, true); const a = adapterOf(p.name); Object.assign(a, { dhcp: true, dnsAuto: true, ip: '', mask: '', gw: '', dns1: '', dns2: '', broken: false, enabled: true, cable: true }); bounce(a); }
   }
   private setup() {
     const R = this.run!, P = R.P, id = R.spec.steps[R.i], a = adapterOf(R.pc), sw = this.sw(), q = panelOf(R.pc)!;
     R.ping = false; R.browse = []; R.st0 = performance.now(); R.best = [];
+    // the MikroTik steps patch the desk outlet to ether2 of the lab hAP lite; any other step puts it back on SW-LAB
+    if (id !== 'mikrotik' && id !== 'mthotspot') dropLabMt();
+    if (id === 'mikrotik') { R.pings.clear(); Object.assign(a, { dhcp: true, dnsAuto: true }); freshLabMt(P.mt, R.pc); bounce(a); }
+    if (id === 'mthotspot') {
+      R.pings.clear();
+      // a sheet that starts here (or after another step) gets the router as a finished mikrotik step leaves it
+      if (R.spec.steps[R.i - 1] !== 'mikrotik' || !labMt()) { Object.assign(a, { dhcp: true, dnsAuto: true }); typeLines(freshLabMt(P.mt, R.pc), mtSolution(P.mt)); bounce(a); }
+    }
     if (id === 'crimp') this.noc.labSetCord(R.pc, false);
     if (id === 'desk') { q.pp.patch = null; q.pp.label = ''; const p = sw.ports[P.swPort - 1]; p.shutdown = true; p.vlan = 1; p.desc = ''; repatch(sw); bounce(a); }
     if (id === 'static') { a.dhcp = true; a.dnsAuto = true; bounce(a); }
@@ -320,6 +351,8 @@ export class Praktik {
         { label: 'Konfigurasi router disimpan (write memory)', ok: !LABR.dirty && nIn !== null },
       ];
     }
+    if (id === 'mikrotik') return mtChecks(labMt(), R.pc, P.mt, { pings: R.pings, browse: R.browse });
+    if (id === 'mthotspot') return hsChecks(labMt(), R.pc, P.mt, { pings: R.pings, browse: R.browse });
     if (id === 'dns') { const rec = ENVS.prak.dnsSrv.records.find(r => r.name === P.dnsName);
       return [{ label: `Record A ${P.dnsName} → ${SRV}`, ok: rec?.ip === SRV }, { label: `DNS PC ${GW}`, ok: L.dns.includes(GW) }, { label: `http://${P.dnsName} terbuka di browser PC`, ok: !!rec && rec.ip === SRV && L.dns.includes(GW) && R.browse.some(u => u.includes(P.dnsName)) }]; }
     const fx: Check[] = P.faults.map(f => f === 'kabel' ? { label: 'Gangguan fisik di meja diperbaiki', ok: a.cable } : f === 'port' ? { label: 'Port switch meja aktif lagi', ok: !port?.shutdown } : f === 'ip' ? { label: 'Alamat IP kembali di jaringan 192.168.70.0/24', ok: inNet } : f === 'gw' ? { label: `Gateway kembali ${GW}`, ok: L.gw === GW } : { label: `DNS kembali ${GW}`, ok: L.dns.includes(GW) });
@@ -372,7 +405,7 @@ export class Praktik {
   finish(early: boolean) {
     const R = this.run; if (!R) return;
     if (early) { const cs = this.checks(); R.res.push({ step: R.spec.steps[R.i], got: cs.filter(c => c.ok).length, of: cs.length, ms: performance.now() - R.st0, done: false, checks: cs }); for (let k = R.i + 1; k < R.spec.steps.length; k++) R.res.push({ step: R.spec.steps[k], got: 0, of: CHECKN[R.spec.steps[k]] + (k === R.spec.steps.length - 1 ? 1 : 0), ms: 0, done: false, checks: [] }); }
-    this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board();
+    this.run = null; clearInterval(this.timer); this.panel.style.display = 'none'; this.board(); dropLabMt(); bounce(adapterOf(R.pc));
     const total = performance.now() - R.t0, over = R.spec.minutes > 0 && total > R.spec.minutes * 60000;
     const got = R.res.reduce((s, r) => s + r.got, 0), of = R.res.reduce((s, r) => s + r.of, 0);
     const steps: UkkStep[] = R.res.map(r => ({ name: LAB_STEPS.find(x => x.id === r.step)!.name, checks: r.checks, ms: r.ms, done: r.done, planned: r.of }));

@@ -218,3 +218,62 @@
   #pcos .pc-obj { left: 8px; transform: none; max-width: calc(100% - 190px); white-space: normal; font-size: 11.5px; }
   #pcos .tbi.search { display: none; }
 }
+
+/* ---- MikroTik (Fase 2): Winbox, WebFig, hotspot login. Flat, square, no gradients. */
+#pcos .rosterm.swcli { height: 100%; border-radius: 0; border: 0; }
+#pcos .rosterm .swbar { background: #d4d4d4; font-size: 12px; }
+#pcos .wbx { display: flex; flex-direction: column; height: 100%; background: #ececec; font: 12px Tahoma, Verdana, "Segoe UI", sans-serif; color: #111; }
+#pcos .wbx-form { display: flex; gap: 14px; padding: 12px 14px 6px; align-items: flex-start; }
+#pcos .wbx-fields { flex: 1; display: grid; gap: 6px; }
+#pcos .wbx-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; }
+#pcos .wbx-row span { text-align: right; padding-right: 8px; }
+#pcos .wbx-row input { height: 24px; border: 1px solid #a9a9a9; background: #fff; padding: 0 6px; font: 12px ui-monospace, Consolas, monospace; min-width: 0; }
+#pcos .wbx-btns { display: grid; gap: 6px; padding-top: 1px; }
+#pcos .wbx-btns .btn { min-width: 96px; }
+#pcos .wbx-msg { min-height: 18px; padding: 0 14px 0 114px; color: #b00020; }
+#pcos .wbx-tabs { display: flex; align-items: flex-end; gap: 8px; padding: 4px 14px 0; border-bottom: 1px solid #b9b9b9; }
+#pcos .wbx-tabs div { padding: 5px 14px; background: #fff; border: 1px solid #b9b9b9; border-bottom: 0; }
+#pcos .wbx-tabs .btn { margin: 0 0 4px auto; padding: 2px 12px; }
+#pcos .wbx-list { flex: 1; overflow: auto; background: #fff; margin: 0 14px; border: 1px solid #b9b9b9; border-top: 0; }
+#pcos .wbx-list table { border-collapse: collapse; width: 100%; }
+#pcos .wbx-list th { position: sticky; top: 0; background: #e2e2e2; font-weight: 400; text-align: left; padding: 4px 8px; border-bottom: 1px solid #b9b9b9; border-right: 1px solid #cfcfcf; }
+#pcos .wbx-list td { padding: 4px 8px; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+#pcos .wbx-list tr.wbx-n { cursor: default; }
+#pcos .wbx-list tr.wbx-n:hover { background: #eef3fa; }
+#pcos .wbx-list tr.sel { background: #cfe0f5; }
+#pcos .wbx-list td.wbx-empty { font-family: inherit; color: #555; white-space: normal; padding: 14px 8px; }
+#pcos .wbx-foot { padding: 6px 14px 8px; color: #555; }
+#pcos .wbx-head { padding: 5px 10px; background: #dcdcdc; border-bottom: 1px solid #b9b9b9; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pcos .wbx-sess { flex: 1; display: flex; min-height: 0; }
+#pcos .wbx-menu { width: 168px; flex: none; background: #f4f4f4; border-right: 1px solid #b9b9b9; display: flex; flex-direction: column; padding: 6px 0; }
+#pcos .wbx-mi { text-align: left; background: transparent; border: 0; padding: 6px 12px; font: inherit; cursor: pointer; color: #111; }
+#pcos .wbx-mi:hover { background: #dde7f3; }
+#pcos .wbx-note { padding: 8px 12px; color: #666; line-height: 1.4; }
+#pcos .wbx-dc { margin-top: auto; color: #8a1c1c; }
+#pcos .wbx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
+#pcos .wbx-hint { margin: auto; color: #666; }
+#pcos .wfg { height: 100%; display: flex; flex-direction: column; background: #f1f1f1; font: 13px Verdana, Arial, sans-serif; color: #222; }
+#pcos .wfg-login { width: 300px; margin: 70px auto 0; background: #fff; border: 1px solid #c8c8c8; padding: 22px 24px; display: flex; flex-direction: column; }
+#pcos .wfg-brand { font-size: 22px; font-weight: 700; color: #293f5a; }
+#pcos .wfg-sub { color: #666; font-size: 12px; margin: 2px 0 16px; font-family: ui-monospace, Consolas, monospace; }
+#pcos .wfg-login label { font-size: 12px; color: #444; margin-top: 6px; }
+#pcos .wfg-login input { height: 28px; border: 1px solid #b4b4b4; padding: 0 8px; font: inherit; margin: 3px 0 4px; }
+#pcos .wfg-login .btn { margin-top: 10px; align-self: flex-start; min-width: 90px; }
+#pcos .wfg-msg { color: #b00020; min-height: 18px; margin-top: 8px; font-size: 12px; }
+#pcos .wfg-top { background: #293f5a; color: #fff; padding: 7px 12px; font-size: 12px; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pcos .wfg-body { flex: 1; display: flex; min-height: 0; }
+#pcos .wfg-body aside { width: 170px; flex: none; background: #e3e6ea; border-right: 1px solid #c8c8c8; padding: 6px 0; }
+#pcos .wfg-body aside div { padding: 6px 14px; }
+#pcos .wfg-body aside div.on { background: #293f5a; color: #fff; }
+#pcos .wfg-body aside p { padding: 8px 14px; margin: 0; color: #666; font-size: 11px; line-height: 1.4; }
+#pcos .wfg-body main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; }
+#pcos .hsp { height: 100%; background: #eef0f2; display: flex; justify-content: center; align-items: flex-start; font: 13px Verdana, Arial, sans-serif; color: #222; }
+#pcos .hs-box { width: 300px; margin-top: 70px; background: #fff; border: 1px solid #c4c8cc; padding: 22px 24px; display: flex; flex-direction: column; }
+#pcos .hs-title { font-size: 18px; font-weight: 700; color: #2b3b4f; }
+#pcos .hs-box p { margin: 6px 0 12px; color: #444; }
+#pcos .hs-box label { font-size: 12px; color: #555; margin-top: 4px; }
+#pcos .hs-box input { height: 28px; border: 1px solid #b4b4b4; padding: 0 8px; font: inherit; margin: 3px 0 4px; }
+#pcos .hs-box .btn { margin-top: 10px; align-self: flex-start; min-width: 80px; }
+#pcos .hs-box table td { padding: 2px 8px 2px 0; }
+#pcos .hs-msg { color: #b00020; min-height: 18px; margin-top: 8px; font-size: 12px; }
+#pcos .hs-foot { margin-top: 14px; color: #888; font-size: 11px; }

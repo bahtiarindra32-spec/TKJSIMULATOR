@@ -14,7 +14,7 @@ export const rr = (a: number, b: number) => a + rand() * (b - a);
 export const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
 
 // ---------- canvas textures ----------
-function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
+export function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const g = c.getContext('2d')!; draw(g);
   const t = new THREE.CanvasTexture(c);

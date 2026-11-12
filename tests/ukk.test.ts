@@ -6,6 +6,14 @@ describe('UKK-style grading', () => {
     expect(isCore('Label outlet LAB-04')).toBe(false); expect(isCore('Nama VLAN 70 = PRAKTIK')).toBe(false);
     expect(isCore('Konfigurasi switch disimpan (write memory)')).toBe(false); expect(isCore('Uji dari PC: ping 192.168.70.1 berhasil')).toBe(true);
   });
+  it('MikroTik step: identity and backup are supporting, the rest core', () => {
+    expect(isCore('Identity router = R-MAWAR-12')).toBe(false); expect(isCore('Konfigurasi disimpan: file ukk-12.backup')).toBe(false);
+    for (const l of ['IP WAN ether1 192.168.70.210/24', 'NAT srcnat masquerade keluar ether1', 'Simple queue klien (target IP klien) max-limit 2M/4M', 'Uji klien: ping 8.8.8.8 berhasil & situs internet terbuka']) expect(isCore(l)).toBe(true);
+    const all = (ok: boolean[]) => step(['Identity router = R-X', 'IP WAN ether1 a', 'NAT srcnat masquerade keluar ether1', 'Konfigurasi disimpan: file ukk-1.backup'].map((l, i) => [l, ok[i]] as [string, boolean]));
+    expect(ukkGrade([all([true, true, true, true])], 600000, 60).predikat).toBe('Sangat Kompeten');
+    expect(ukkGrade([all([false, true, true, true])], 600000, 60).predikat).toBe('Kompeten');
+    expect(ukkGrade([all([true, true, false, true])], 600000, 60).predikat).toBe('Belum Kompeten');
+  });
   it('any failed core criterion is Belum Kompeten, capped below 61', () => {
     const g = ukkGrade([step([['IP 192.168.70.34', true], ['Uji dari PC: ping', false], ['Label outlet LAB-01', true]])], 600000, 60);
     expect(g.predikat).toBe('Belum Kompeten'); expect(g.nilai).toBeLessThan(61);

@@ -6,7 +6,9 @@ export type Cust = 'rumah' | 'kos' | 'warnet';
 export const CUSTS: Cust[] = ['rumah', 'kos', 'warnet'];
 export const CUST_LABEL: Record<Cust, string> = { rumah: 'Rumah', kos: 'Kos', warnet: 'Warnet' };
 
-export type FieldTplId = 'r_router' | 'r_tv' | 'r_kabel' | 'k_ap2' | 'k_kanal' | 'w_port' | 'w_kabel' | 'w_loop';
+export type FieldTplId = 'r_router' | 'r_tv' | 'r_kabel' | 'k_ap2' | 'k_kanal' | 'w_port' | 'w_kabel' | 'w_loop'
+  /** Fase 2: MikroTik orders on the site routers (state-graded with routeros checkState) */
+  | 'w_hotspot' | 'k_queue' | 'k_fasttrack' | 'w_reset';
 
 export interface Order {
   id: string;

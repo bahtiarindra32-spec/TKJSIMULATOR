@@ -7,7 +7,9 @@ import { parseIp, ipStr, prefixToMask, networkOf, broadcastOf, parseMask } from 
 import { APS, SITE_APS, servingAp, quality, AUTH, setApOnlineFn, type Ap } from './wifi';
 import { SITE_PCS, SITE_TV, SITE_AP_DEFS } from '../data/sites';
 
-export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string; down?: boolean }
+export interface Host { ip: string; name: string; mac: string; ttl: number; web?: string; down?: boolean;
+  /** a MikroTik RouterOS device (routeros/netsim.ts) answers at this address: its firewall input chain applies */
+  ros?: string }
 /** Pluggable services (Linux DNS server, edge router) so the sim stays one source of truth. */
 export const HOOKS = {
   /** a DNS server at this IP answers itself (undefined = not this server) */
@@ -18,8 +20,22 @@ export const HOOKS = {
   labVlan: (_vlan: number): Env | null => (_vlan === 70 ? ENVS.prak : null),
   /** Lab Praktik: routing between the lab's VLANs on R-LAB (subinterfaces + ACL); null = not a lab route, use the default path */
   labRoute: (_env: Env, _src: string, _dst: string): PingRes | null => null,
+  // ---- Fase 2 MikroTik RouterOS devices (src/pcos/routeros/netsim.ts). Every default is a no-op, so the other envs are untouched.
+  /** the segment of a PC cabled/associated straight to a RouterOS port (null = not on a RouterOS device) */
+  envFor: (_pc: string): Env | null => null,
+  /** link light of such a PC (null = not on a RouterOS device) */
+  linkFor: (_pc: string): boolean | null => null,
+  /** RouterOS verdict for a segment it owns: forward (client → internet: hotspot, filter, masquerade), input (client → router),
+   *  router (the router's own upstream, e.g. its DNS forwarder). null = not a RouterOS segment */
+  gate: (_env: Env, _src: string, _dst: string, _p: 'icmp' | 'udp53' | 'tcp80', _kind: 'forward' | 'input' | 'router'): boolean | null => null,
+  /** RouterOS routing to its own other addresses / its other segments / the ISP gateway (null = default path) */
+  rosRoute: (_env: Env, _src: string, _dst: string): PingRes | null => null,
+  /** segments that are not in ENVS (RouterOS LANs) whose leases are released on a link bounce too */
+  extraEnvs: (): Env[] => [],
+  /** a Fase 1 site segment run by a RouterOS device: refresh it from the device before it is used */
+  envSync: (_env: Env): void => {},
 };
-export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'rumah' | 'kos' | 'warnet' | 'none' | `v${number}`;
+export type EnvId = 'lab' | 'office' | 'guest' | 'kasir' | 'prak' | 'rumah' | 'kos' | 'warnet' | 'none' | `v${number}` | `ros-${string}`;
 export interface DhcpCfg { start: string; end: string; gw: string; dns: string[]; lease: number }
 export interface DnsCfg { allow: boolean; upstream: string[]; records: { name: string; ip: string }[] }
 export interface Env {
@@ -110,6 +126,8 @@ export const INTERNET: Record<string, { ip: string; web: string }> = {
   'smk.sch.id': { ip: '103.55.12.7', web: 'school' }, 'www.smk.sch.id': { ip: '103.55.12.7', web: 'school' },
   'youtube.com': { ip: '142.250.4.190', web: 'blocked' }, 'www.youtube.com': { ip: '142.250.4.190', web: 'blocked' },
   'dns.google': { ip: '8.8.8.8', web: 'search' }, 'one.one.one.one': { ip: '1.1.1.1', web: 'search' },
+  // ⚠ design: the in-game speed test (Fase 2 queue orders); real technicians use public speed-test sites the same way
+  'speedtest.cari.id': { ip: '103.10.20.40', web: 'speedtest' },
 };
 export const PUBLIC_DNS = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1'];
 
@@ -217,14 +235,15 @@ function initSiteSwitches(pcNames: string[]) {
   const wire = (sw: Switch, dev: string, pp: number, port: number, desc: string) => { const q = sw.panel[pp - 1]; q.pc = dev; q.label = swOutlet(sw, pp); q.patch = port; sw.ports[port - 1].desc = desc; PANEL_OF.set(dev, { sw, pp: q }); };
   // house: ONT NF-609 LAN1-4 + its internal WLAN (port 5); the family router (AP mode) hangs on LAN1
   const ont = mk('ONT-RUMAH', 'rumah', '192.168.1.1', 5, 5, 'NusaFiber NF-609 GPON ONT · LAN1-4 + WLAN', 'RUMAH', 'ONT-LAN');
-  // kos: SOHO router LAN1-4; LAN1 -> AP lantai 1, LAN2 -> AP lantai 2
-  const kos = mk('RTR-KOS', 'kos', '192.168.0.1', 4, 4, 'Router SOHO 4×LAN · LAN1/LAN2 ke AP tiap lantai', 'KOS', 'KOS-LAN');
+  // kos: the LAN ports of the hAP lite (Fase 2: ether1 = WAN, ether2-4 = LAN bridge); port n = ether(n+1):
+  // LAN1/ether2 -> AP lantai 1, LAN2/ether3 -> AP lantai 2, LAN3/ether4 spare
+  const kos = mk('RTR-KOS', 'kos', '192.168.0.1', 3, 3, 'MikroTik hAP lite RB941-2nD · ether2/ether3 ke AP tiap lantai', 'KOS', 'KOS-LAN');
   for (const d of SITE_AP_DEFS) { const sw = d.sw === ont.name ? ont : kos; wire(sw, d.id, d.port, d.port, d.id); }
   // warnet: 16-port managed switch, a 24-port patch panel; outlets WRN-01..08 = booths, WRN-09 = cashier; Gi1/0/16 = router LAN
-  const wr = mk('SW-WARNET', 'warnet', '192.168.100.2', 16, 24, 'NusaSwitch SG-1016M · 16 port · Warnet Sinar · gateway: router-warnet 192.168.100.1', 'WARNET', 'WRN');
+  const wr = mk('SW-WARNET', 'warnet', '192.168.100.2', 16, 24, 'NusaSwitch SG-1016M · 16 port · Warnet Sinar · gateway: MikroTik WARNET-01 192.168.100.1', 'WARNET', 'WRN');
   const pcs = pcNames.filter(p => /^PROP_WARNET_01_/.test(p)).sort((a, b) => (/KASIR/.test(a) ? 1 : 0) - (/KASIR/.test(b) ? 1 : 0) || a.localeCompare(b));
   pcs.forEach((pc, i) => wire(wr, pc, i + 1, i + 1, /KASIR/.test(pc) ? 'KASIR-BILLING' : `PC-${String(i + 1).padStart(2, '0')}`));
-  Object.assign(wr.ports[15], { desc: 'KE-ROUTER-LAN', peer: 'router-warnet ether2' });
+  Object.assign(wr.ports[15], { desc: 'KE-ROUTER-LAN', peer: 'WARNET-01 ether2' });
   wr.routerPort = 16;
   for (const sw of [ont, kos, wr]) { repatch(sw); SWITCHES.push(sw); }
 }
@@ -233,9 +252,10 @@ const SITE_WIFI = new Set<string>([...SITE_PCS.filter(p => p.wifi).map(p => p.na
 /** which segment an untagged frame on this switch port lands in */
 function segEnv(sw: Switch, port: Port): Env {
   if (sw.site) {
+    const e = ENVS[sw.site]; HOOKS.envSync(e);
     if (port.vlan !== 1 || !sw.vlans.has(1)) return ENVS.none;
     if (sw.routerPort) { const rp = sw.ports[sw.routerPort - 1]; if (rp.shutdown || !rp.peer) return ENVS.none; }
-    return ENVS[sw.site];
+    return e;
   }
   return hotelEnvs().find(e => e.vlan === port.vlan && e.id !== 'none' && !e.wireless) ?? ENVS.none;
 }
@@ -268,6 +288,7 @@ export function uplinkCarries(sw: Switch, vlan: number) {
 
 /** Which segment a PC is on right now. */
 export function envOf(pc: string): Env {
+  const ros = HOOKS.envFor(pc); if (ros) return ros;
   if (isWireless(pc)) {
     // a laptop gets the VLAN of the switch port its AP is plugged into (the SSID is bridged to it)
     const ap = servingAp(pc); if (!ap) return ENVS.none;
@@ -311,6 +332,7 @@ export function adapterOf(pc: string) { return ADAPTERS.get(pc) ?? newAdapter(pc
 
 /** Physical layer: is there a link light on the NIC? */
 export function linkUp(a: Adapter) {
+  const ros = HOOKS.linkFor(a.pc); if (ros !== null) return ros;
   if (isWireless(a.pc)) return !!servingAp(a.pc);
   if (!PANEL_OF.has(a.pc)) return a.cable && !a.broken;
   const p = portOf(a.pc);
@@ -325,7 +347,7 @@ export function bounce(a: Adapter) {
   a.lease = undefined; a.arp.clear();
 }
 export function releaseLease(a: Adapter) {
-  for (const e of Object.values(ENVS)) if (e.leases.get(a.mac) === a.lease?.ip) e.leases.delete(a.mac);
+  for (const e of [...Object.values(ENVS), ...HOOKS.extraEnvs()]) if (e.leases.get(a.mac) === a.lease?.ip) e.leases.delete(a.mac);
 }
 
 /** Is the DHCP pool usable (inside the router's subnet, ordered, not network/broadcast)? Returns an error text or ''. */
@@ -418,7 +440,7 @@ export function onSegment(l: Live, env: Env, self?: Adapter) {
 /** Resolve a name like Windows' resolver (configured DNS servers in order). */
 /** null = NXDOMAIN, 'timeout' = no server answered, 'servfail' = a server answered SERVFAIL (e.g. its zone failed to load). */
 /** Internet access of a segment: the hotel goes through R-EDGE (HOOKS.internet); each customer site has its own ISP line */
-const inet = (env: Env, src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80') => (env.site ? env.internet : HOOKS.internet(env, src, dst, p));
+const inet = (env: Env, src: string, dst: string, p: 'icmp' | 'udp53' | 'tcp80') => HOOKS.gate(env, src, dst, p, 'forward') ?? (env.site ? env.internet : HOOKS.internet(env, src, dst, p));
 export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: string } | null | 'timeout' | 'servfail' {
   const n = name.toLowerCase().replace(/\.$/, '');
   if (parseIp(n) !== null) return { ip: n, via: '' };
@@ -437,6 +459,7 @@ export function resolve(a: Adapter, env: Env, name: string): { ip: string; via: 
 
 /** The DNS forwarder of a segment router answering `n` for a client at srcIp. */
 export function routerAnswer(env: Env, n: string, srcIp: string): { ip: string } | null | 'timeout' | 'refused' {
+  if (HOOKS.gate(env, srcIp, routerOf(env)?.ip ?? '', 'udp53', 'input') === false) return 'timeout';
   if (!env.dnsSrv.allow) return 'refused';
   const short = n.endsWith(`.${env.suffix}`) ? n.slice(0, -env.suffix.length - 1) : n;
   const rec = env.dnsSrv.records.find(x => x.name.toLowerCase() === n || x.name.toLowerCase() === short);
@@ -444,7 +467,7 @@ export function routerAnswer(env: Env, n: string, srcIp: string): { ip: string }
   const host = env.hosts.find(h => h.name === short);
   if (host) return { ip: host.ip };
   const up = env.dnsSrv.upstream.find(u => PUBLIC_DNS.includes(u));
-  if (!up || !inet(env, srcIp, up, 'udp53')) return 'timeout';
+  if (!up || !(HOOKS.gate(env, srcIp, up, 'udp53', 'router') ?? inet(env, srcIp, up, 'udp53'))) return 'timeout';
   return INTERNET[n] ? { ip: INTERNET[n].ip } : null;
 }
 /** One ICMP echo from this adapter to an IP. */
@@ -469,6 +492,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
     // on-link: ARP on the wire works only if both really share the segment
     const h = env.hosts.find(x => x.ip === target && !x.down);
     const pc = [...ADAPTERS.values()].find(o => o !== a && o.enabled && linkUp(o) && envOf(o.pc) === env && live(o, env).ip === target);
+    if (seg && h?.ros && !quiet && HOOKS.gate(env, l.ip, target, 'icmp', 'input') === false) return { kind: 'timeout' };
     if (seg && (h || pc)) { if (!quiet) a.arp.set(target, h?.mac ?? pc!.mac); return { kind: 'reply', ip: target, ttl: h?.ttl ?? 128, ms: () => (Math.random() < 0.8 ? 0 : 1) }; }
     return seg && inEnv(target, env) ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   }
@@ -478,6 +502,7 @@ function pingRaw(a: Adapter, env: Env, target: string, quiet = false): PingRes {
   if (!seg || !gwHost || gwHost.web !== 'router') return gwHost && seg ? { kind: 'timeout' } : { kind: 'unreach', from: l.ip };
   if (!quiet) a.arp.set(gwHost.ip, gwHost.mac);
   const lr = HOOKS.labRoute(env, l.ip, target); if (lr) return lr;
+  const rr = HOOKS.rosRoute(env, l.ip, target); if (rr) return rr;
   for (const e of Object.values(ENVS)) if (e !== env && e.id !== 'none' && (e.site ?? '') === (env.site ?? '') && inEnv(target, e)) {
     const h = e.hosts.find(x => x.ip === target && !x.down);
     const mgmt = env.id === 'lab' && h?.web === 'router';                                          // IT/NOC (lab segment) may manage every router

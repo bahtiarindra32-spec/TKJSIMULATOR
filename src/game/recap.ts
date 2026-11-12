@@ -19,9 +19,9 @@ export function encodeResult(r: ResultData): string {
   const p = b64u(body);
   return `KN1.${r.sheet}.${p}.${fnv(`${r.sheet}.${p}`)}`;
 }
-export const RESULT_RE = /KN1\.[0-9A-Z]{6,7}\.[A-Za-z0-9_-]+\.[0-9a-z]{6}/g;
+export const RESULT_RE = /KN1\.[0-9A-Z]{6,9}\.[A-Za-z0-9_-]+\.[0-9a-z]{6}/g;
 export function decodeResult(code: string): ResultData | null {
-  const m = /^KN1\.([0-9A-Z]{6,7})\.([A-Za-z0-9_-]+)\.([0-9a-z]{6})$/.exec(code.trim()); if (!m) return null;
+  const m = /^KN1\.([0-9A-Z]{6,9})\.([A-Za-z0-9_-]+)\.([0-9a-z]{6})$/.exec(code.trim()); if (!m) return null;
   if (fnv(`${m[1]}.${m[2]}`) !== m[3]) return null;
   let body: string; try { body = unb64u(m[2]); } catch { return null; }
   const f = body.split('|'); if (f.length !== 8) return null;

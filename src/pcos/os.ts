@@ -5,7 +5,9 @@ import { networkOf, broadcastOf, prefixToMask } from '../game/missionLogic';
 import { APS, CLIENTS, AUTH, servingAp, quality, heardAt, pctOf, barsOf, channelClean, CHANNELS, type TxPower, type Heard } from './wifi';
 import { apPowered } from './net';
 import { LinuxShell, sshCheck, webPage, SRV } from './linux';
-import { nanoEditor } from './term';
+import { nanoEditor, Term, type Shell, type TermIO } from './term';
+import { rosThroughput, fmtRate, rosNeighbors, winboxConnect, rosAtIp, rosNeedsLogin, rosHotspotLogin, rosHotspotLogout, rosHotspotInfo, rosLogin, identity as rosIdentity, ROS_VERSION, RosCli, type RosDevice } from './routeros';
+import { refreshSiteRouters } from './siterouters';
 /** extra web apps served by simulated devices (Linux server, NAS, printers): up() false = connection refused */
 export const SITES: Record<string, { up?: (ip: string) => boolean; render: (ip: string, url: URL, os: PcOS) => HTMLElement }> = {};
 /** extra CMD commands (net use, ...) registered by device modules */
@@ -50,6 +52,7 @@ const I = {
   vol: `<svg viewBox="0 0 16 16" fill="none" stroke="#222" stroke-width="1.2"><path d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/></svg>`,
   info: `<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#1976d2"/><path d="M16 14v9" stroke="#fff" stroke-width="3"/><circle cx="16" cy="9.5" r="2" fill="#fff"/></svg>`,
   warn: `<svg viewBox="0 0 32 32"><path d="M16 3l14 25H2z" fill="#f2c111"/><path d="M16 12v8" stroke="#222" stroke-width="3"/><circle cx="16" cy="24" r="1.8" fill="#222"/></svg>`,
+  winbox: `<svg viewBox="0 0 32 32"><rect x="3" y="3" width="26" height="26" rx="3" fill="#2b4a73"/><rect x="7" y="9" width="18" height="14" fill="none" stroke="#e8edf3" stroke-width="2"/><path d="M7 13h18" stroke="#e8edf3" stroke-width="2"/><path d="M10 17l2 3 2-3 2 3 2-3" stroke="#f0c02e" stroke-width="1.6" fill="none"/></svg>`,
   err: `<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#d13438"/><path d="M11 11l10 10M21 11L11 21" stroke="#fff" stroke-width="3"/></svg>`,
 };
 const OSNAME = 'Jendela', CORP = 'Nusa Corporation', BUILD = '10.0.22631.4317';
@@ -57,7 +60,7 @@ const OSNAME = 'Jendela', CORP = 'Nusa Corporation', BUILD = '10.0.22631.4317';
 interface Win { id: string; el: HTMLElement; body: HTMLElement; title: string; icon: string; task: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }
 interface PcState { a: Adapter; readonly env: Env; signed: boolean; notes: string; history: string[] }
 
-export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg' | 'wifi' | 'portal' | 'ssh' | 'print' | 'netuse'; pc: string; detail: any }
+export interface PcEvent { type: 'ping' | 'ipset' | 'browse' | 'cmd' | 'cfg' | 'wifi' | 'portal' | 'ssh' | 'print' | 'netuse' | 'speed'; pc: string; detail: any }
 
 export class PcOS {
   readonly root: HTMLElement;
@@ -166,6 +169,7 @@ export class PcOS {
       this.dicon(I.net, 'Network Connections', () => this.openNcpa()),
       this.dicon(I.web, 'Tepi', () => this.openBrowser()),
       this.dicon(I.note, 'Notepad', () => this.openNotepad()),
+      ...(this.hasWinbox ? [this.dicon(I.winbox, 'Winbox', () => this.openWinbox())] : []),
       ...DESK_EXT.map(([nm, fn]) => this.dicon(I.gear, nm, () => fn(this))),
       ...(isWireless(this.curName) ? [this.dicon(I.wifi, 'Wi-Fi', () => this.openWifi())] : []),
       this.dicon(I.folder, 'Lembar Kerja', () => this.openNotepad('LEMBAR KERJA TKJ\r\n\r\n1. Cek konfigurasi IP: ipconfig /all\r\n2. Uji koneksi ke gateway & server: ping\r\n3. Cek DNS: nslookup cari.id\r\n4. Lacak rute: tracert cari.id\r\n5. Atur IP statis lewat Network Connections > Ethernet > Properties > IPv4\r\n')),
@@ -206,7 +210,8 @@ export class PcOS {
       h('div', { class: 'pins' },
         pin(I.web, 'Tepi', () => this.openBrowser()), pin(I.cmd, 'Command Prompt', () => this.openCmd()), pin(I.gear, 'Settings', () => this.openSettings('network')),
         pin(I.net, 'Network Connections', () => this.openNcpa()), pin(I.note, 'Notepad', () => this.openNotepad()), pin(I.run, 'Run', () => this.openRun()),
-        pin(I.pc, 'This PC', () => this.openSettings('system')), pin(I.folder, 'File Explorer', () => this.openNotepad())),
+        pin(I.pc, 'This PC', () => this.openSettings('system')), pin(I.folder, 'File Explorer', () => this.openNotepad()),
+        ...(this.hasWinbox ? [pin(I.winbox, 'Winbox', () => this.openWinbox())] : [])),
       h('h4', {}, 'Recommended'),
       h('div', { style: { padding: '0 44px', color: '#555', fontSize: '12px' } }, 'Tips: ketik "cmd" atau "ncpa.cpl" di kotak Search lalu Enter.'),
       h('div', { class: 'foot' }, h('div', { class: 'user' }, h('i'), 'Siswa TKJ'), h('div', { class: 'pwr', onclick: (e: Event) => { e.stopPropagation(); pmenu.classList.toggle('show'); } }, svg(I.power))),
@@ -244,6 +249,7 @@ export class PcOS {
     else if (['tepi', 'msedge', 'browser'].includes(c)) this.openBrowser();
     else if (c.startsWith('ms-settings') || c === 'settings' || c === 'control') this.openSettings('network');
     else if (c === 'run') this.openRun();
+    else if ((c === 'winbox' || c === 'winbox.exe' || c === 'winbox64.exe') && this.hasWinbox) this.openWinbox();
     else return false;
     return true;
   }
@@ -252,9 +258,13 @@ export class PcOS {
   private get small() { return matchMedia('(pointer: coarse)').matches || innerWidth < 760 || innerHeight < 520; }
   private win(o: { title: string; icon: string; w: number; h: number; body: HTMLElement; dark?: boolean; task?: boolean; dialog?: boolean; noMax?: boolean; onClose?: () => void; focusEl?: () => HTMLElement | null }): Win {
     const mw = this.mon.clientWidth || innerWidth, mh = (this.mon.clientHeight || innerHeight) - 48;
-    const W = Math.min(o.w, mw - 20), H = Math.min(o.h, mh - 20);
+    const W = Math.min(o.w, mw - 20);
     const off = (this.wins.length % 6) * 26;
-    const el = h('div', { class: `win${o.dark ? ' dark' : ''}`, style: { width: `${W}px`, height: `${H}px`, left: `${Math.max(4, (mw - W) / 2 - 60 + off)}px`, top: `${Math.max(4, (mh - H) / 2 - 30 + off)}px` } });
+    const left = Math.max(4, (mw - W) / 2 - 60 + off);
+    // keep the title-bar buttons clear of the "Tinggalkan PC" button in the top-right corner on narrow screens
+    const minTop = left + W > mw - 180 ? 52 : 4;
+    const H = Math.min(o.h, mh - 20, mh - minTop - 4);
+    const el = h('div', { class: `win${o.dark ? ' dark' : ''}`, style: { width: `${W}px`, height: `${H}px`, left: `${left}px`, top: `${Math.max(minTop, (mh - H) / 2 - 30 + off)}px` } });
     const w: Win = { id: Math.random().toString(36).slice(2), el, body: o.body, title: o.title, icon: o.icon, task: o.task !== false && !o.dialog, onClose: o.onClose, focusEl: o.focusEl };
     const close = () => this.closeWin(w);
     const bar = h('div', { class: 'tbar' }, h('div', { class: 'tt' }, svg(o.icon), o.title),
@@ -822,6 +832,8 @@ export class PcOS {
       const host = url.hostname;
       const l = live(s.a, s.env);
       if (!l.ok) { err('You\'re not connected', 'ERR_INTERNET_DISCONNECTED', ['Check the network cables, modem, and router', 'Reconnect to Wi-Fi', 'Run Network Diagnostics'], host); return; }
+      if (rosNeedsLogin(this.curName)) { const hs = rosHotspotInfo(this.curName)!; set('Hotspot login', this.hotspotLogin(url, u => go(u, false))); addr.value = `http://${hs.dnsName || hs.address}/login?dst=${encodeURIComponent(url.href)}`; return; }
+      { const hs = rosHotspotInfo(this.curName); if (hs && (host === hs.address || (hs.dnsName && host === hs.dnsName)) && /^\/(login|status|logout)/.test(url.pathname)) { set('Hotspot status', this.hotspotStatus(u => go(u, false))); return; } }
       if (s.env.id === 'guest' && !AUTH.has(s.a.mac) && host !== s.env.gateway) { set('Login Wi-Fi Tamu', this.portal(() => go(url.href, false))); addr.value = `http://portal.tamu.hotel/login?redirect=${encodeURIComponent(host)}`; return; }
       const r = resolve(s.a, s.env, host);
       if (r === 'timeout') { err('Hmmm… your Internet access is blocked', 'DNS_PROBE_FINISHED_NO_INTERNET', ['Checking the network cables, modem, and router', 'Checking the DNS server settings', 'Running Network Diagnostics'], host); return; }
@@ -867,6 +879,8 @@ export class PcOS {
     if (kind === 'intranet') { const hostN = Object.values(ENVS).flatMap(e => e.hosts).find(x => x.ip === ip)?.name ?? url.hostname; return h('div', { class: 'web' }, h('div', { style: { background: '#5b2a86', color: '#fff', padding: '16px 40px', fontSize: '22px', fontWeight: '700' } }, `${hostN} · Intranet Nusantara Tech`), h('div', { style: { padding: '20px 40px' } }, h('h2', {}, 'Aplikasi internal berjalan'), h('p', {}, `Kamu membuka ${url.hostname} (${ip}). Nama ini diterjemahkan oleh DNS server jaringanmu.`))); }
     if (kind === 'wlc') return this.wlcUi();
     if (SITES[kind]) return SITES[kind].render(ip, url, this);
+    const ros = rosAtIp(this.curName, ip);
+    if (ros) return this.webFig(ros, ip);
     const renv = Object.values(ENVS).find(e => routerOf(e)?.ip === ip) ?? env;
     return this.routerUi(renv, ip);
   }
@@ -1005,6 +1019,143 @@ export class PcOS {
     return h('div', { class: 'flsel' }, 'Lantai: ', ...[0, 4, 5, 6, 7, 8].map(f => h('button', { class: `btn${cur === f ? ' def' : ''}`, name: `wlc-floor-${f}`, onclick: () => set(f) }, f ? `L${f}` : 'Semua')));
   }
 
+  // ---------------------------------------------------------------- MikroTik: Winbox, WebFig, hotspot login (Fase 2)
+  /** Winbox is installed on the PCs/laptops of the RouterOS sites (warnet, kos) and on the Lab Praktik desks (MikroTik step) */
+  private get hasWinbox() { return /^PROP_(WARNET|KOS|LAB)_/.test(this.curName); }
+  /** a RouterOS terminal pane (term.ts) on a logged-in session; /quit closes it */
+  private rosTerm(cli: RosCli, title: string, onQuit: () => void): Term {
+    const sh: Shell & { secret: boolean } = {
+      banner: () => cli.banner(), prompt: () => cli.prompt(),
+      get secret() { return cli.secret; },
+      exec: (line: string, io: TermIO) => { if (!cli.secret && /^\/?quit$/.test(line)) { setTimeout(() => io.close(), 0); return 'interrupted'; } const r = cli.exec(line); refreshSiteRouters(); this.refreshTray(); return r; },
+    };
+    const t = new Term(sh, title); t.onExit = onQuit; t.root.classList.add('rosterm');
+    return t;
+  }
+  openWinbox() {
+    const old = this.wins.find(w => w.title.startsWith('WinBox')); if (old) { this.closeWin(old); }
+    refreshSiteRouters();
+    const body = h('div', { class: 'wbx' });
+    const to = h('input', { name: 'wbx-to', spellcheck: 'false', placeholder: 'MAC atau IP' }) as HTMLInputElement;
+    const user = h('input', { name: 'wbx-user', value: 'admin', spellcheck: 'false' }) as HTMLInputElement;
+    const pass = h('input', { name: 'wbx-pass', type: 'password' }) as HTMLInputElement;
+    const msg = h('div', { class: 'wbx-msg', name: 'wbx-msg' });
+    const tbody = h('tbody');
+    const w = this.win({ title: 'WinBox (64bit) v3.41', icon: I.winbox, w: 760, h: 470, body, focusEl: () => (to.isConnected && !body.contains(document.activeElement) ? to : null) });
+    const fill = () => {
+      refreshSiteRouters(); tbody.innerHTML = '';
+      const ns = rosNeighbors(this.curName);
+      if (!ns.length) tbody.append(h('tr', {}, h('td', { colspan: '5', class: 'wbx-empty' }, 'Tidak ada router MikroTik di segmen jaringan ini. Cek kabel / Wi-Fi PC ini.')));
+      for (const n of ns) {
+        const tr = h('tr', { class: 'wbx-n', 'data-mac': n.mac, onclick: () => { to.value = n.mac; tbody.querySelectorAll('tr').forEach(x => x.classList.toggle('sel', x === tr)); }, ondblclick: () => { to.value = n.mac; connect(); } },
+          h('td', {}, n.mac), h('td', {}, n.ip || '0.0.0.0'), h('td', {}, n.identity), h('td', {}, n.version), h('td', {}, n.board));
+        tbody.append(tr);
+      }
+    };
+    const connect = () => {
+      msg.textContent = 'Connecting...';
+      const r = winboxConnect(this.curName, to.value, user.value, pass.value);
+      if (!r.cli) { msg.textContent = r.err; return; }
+      this.emit('cfg', { kind: 'winbox', target: to.value.trim(), via: r.via, router: rosIdentity(r.dev!) });
+      session(r.cli, r.dev!, to.value.trim().toUpperCase().replace(/-/g, ':'));
+    };
+    const login = () => {
+      body.innerHTML = '';
+      const row = (l: string, e: HTMLElement) => h('label', { class: 'wbx-row' }, h('span', {}, l), e);
+      body.append(
+        h('div', { class: 'wbx-form' },
+          h('div', { class: 'wbx-fields' }, row('Connect To:', to), row('Login:', user), row('Password:', pass)),
+          h('div', { class: 'wbx-btns' }, h('button', { class: 'btn def', name: 'wbx-connect', onclick: connect }, 'Connect'))),
+        msg,
+        h('div', { class: 'wbx-tabs' }, h('div', { class: 'on' }, 'Neighbors'), h('button', { class: 'btn', name: 'wbx-refresh', onclick: fill }, 'Refresh')),
+        h('div', { class: 'wbx-list' }, h('table', {}, h('thead', {}, h('tr', {}, ...['MAC Address', 'IP Address', 'Identity', 'Version', 'Board'].map(x => h('th', {}, x)))), tbody)),
+        h('div', { class: 'wbx-foot' }, 'Winbox di game ini versi sederhana: setelah login hanya tersedia New Terminal (CLI RouterOS).'));
+      for (const e of [to, user, pass]) e.addEventListener('keydown', ev => { if ((ev as KeyboardEvent).key === 'Enter') connect(); });
+      fill();
+    };
+    const session = (cli: RosCli, dev: RosDevice, target: string) => {
+      body.innerHTML = '';
+      const head = h('div', { class: 'wbx-head', name: 'wbx-head' });
+      const setHead = () => { head.textContent = `${cli.user}@${target} (${rosIdentity(dev)}) - WinBox v3.41 on ${dev.model.id} (mipsbe) · RouterOS ${ROS_VERSION}`; };
+      setHead();
+      const main = h('div', { class: 'wbx-main' }, h('div', { class: 'wbx-hint' }, 'Klik New Terminal untuk membuka CLI RouterOS.'));
+      let n = 0;
+      const openTerm = () => {
+        const t = this.rosTerm(n === 0 ? cli : new RosCli(dev, cli.user), `Terminal <${++n}>`, () => { main.innerHTML = ''; main.append(h('div', { class: 'wbx-hint' }, 'Terminal ditutup. Klik New Terminal untuk membuka lagi.')); });
+        const orig = t.onLine; t.onLine = (l, sec) => { orig(l, sec); setHead(); };
+        main.innerHTML = ''; main.append(t.root); t.focus();
+      };
+      body.append(head, h('div', { class: 'wbx-sess' },
+        h('div', { class: 'wbx-menu' },
+          h('button', { class: 'wbx-mi', name: 'wbx-newterm', onclick: openTerm }, 'New Terminal'),
+          h('div', { class: 'wbx-note' }, 'Menu lain (Interfaces, IP, System, ...) tidak disimulasikan di Winbox ini. Semua konfigurasi lewat terminal.'),
+          h('button', { class: 'wbx-mi wbx-dc', name: 'wbx-disconnect', onclick: () => { msg.textContent = ''; login(); } }, 'Disconnect')),
+        main));
+    };
+    login();
+    return w;
+  }
+  /** WebFig on a RouterOS device (replaces the old RuteOS WebKonfig there): login, then a Terminal */
+  private webFig(dev: RosDevice, ip: string): HTMLElement {
+    const wrap = h('div', { class: 'wfg' });
+    const user = h('input', { name: 'wfg-user', value: 'admin', spellcheck: 'false' }) as HTMLInputElement;
+    const pass = h('input', { name: 'wfg-pass', type: 'password' }) as HTMLInputElement;
+    const msg = h('div', { class: 'wfg-msg', name: 'wfg-msg' });
+    const login = () => {
+      const cli = rosLogin(dev, user.value.trim(), pass.value);
+      if (!cli) { msg.textContent = 'ERROR: wrong username or password'; return; }
+      this.emit('cfg', { kind: 'webfig', ip, router: rosIdentity(dev) });
+      wrap.innerHTML = '';
+      const head = h('div', { class: 'wfg-top' });
+      const setHead = () => { head.textContent = `WebFig · ${rosIdentity(dev)} · ${cli.user}@${ip} · RouterOS v${ROS_VERSION} (${dev.model.id})`; };
+      setHead();
+      const main = h('main', {});
+      const term = this.rosTerm(cli, `Terminal · ${ip}`, () => { main.innerHTML = ''; main.append(h('p', {}, 'Sesi terminal ditutup. Muat ulang halaman untuk login lagi.')); });
+      const orig = term.onLine; term.onLine = (l, sec) => { orig(l, sec); setHead(); };
+      main.append(term.root);
+      wrap.append(head, h('div', { class: 'wfg-body' }, h('aside', {}, h('div', { class: 'on' }, 'Terminal'), h('p', {}, 'WebFig di game ini versi sederhana: hanya Terminal (CLI RouterOS).')), main));
+      setTimeout(() => term.focus(), 0);
+    };
+    for (const e of [user, pass]) e.addEventListener('keydown', ev => { if ((ev as KeyboardEvent).key === 'Enter') login(); });
+    wrap.append(h('div', { class: 'wfg-login' },
+      h('div', { class: 'wfg-brand' }, 'RouterOS'), h('div', { class: 'wfg-sub' }, `${rosIdentity(dev)} · ${dev.model.id} · v${ROS_VERSION}`),
+      h('label', {}, 'Login'), user, h('label', {}, 'Password'), pass,
+      h('button', { class: 'btn def', name: 'wfg-login', onclick: login }, 'Login'), msg));
+    setTimeout(() => pass.focus(), 0);
+    return wrap;
+  }
+  /** MikroTik hotspot captive page (stock login page look) */
+  private hotspotLogin(dst: URL, go: (u: string) => void): HTMLElement {
+    const hs = rosHotspotInfo(this.curName)!;
+    const user = h('input', { name: 'hs-user', spellcheck: 'false', autocomplete: 'off' }) as HTMLInputElement;
+    const pass = h('input', { name: 'hs-pass', type: 'password' }) as HTMLInputElement;
+    const msg = h('div', { class: 'hs-msg', name: 'hs-msg' });
+    const submit = () => {
+      const e = rosHotspotLogin(this.curName, user.value.trim(), pass.value);
+      if (e) { msg.textContent = e; return; }
+      this.emit('portal', { ros: true, user: user.value.trim(), server: hs.server });
+      this.notify('Hotspot', `Login sebagai ${user.value.trim()} berhasil.`); this.refreshTray();
+      const self = dst.hostname === hs.address || (hs.dnsName && dst.hostname === hs.dnsName);
+      go(self ? `http://${hs.dnsName || hs.address}/status` : dst.href);
+    };
+    for (const e of [user, pass]) e.addEventListener('keydown', ev => { if ((ev as KeyboardEvent).key === 'Enter') submit(); });
+    setTimeout(() => user.focus(), 0);
+    return h('div', { class: 'hsp' }, h('div', { class: 'hs-box' },
+      h('div', { class: 'hs-title' }, hs.identity), h('p', {}, 'Please log on to use the internet hotspot service'),
+      h('label', {}, 'login'), user, h('label', {}, 'password'), pass,
+      h('button', { class: 'btn def', name: 'hs-login', onclick: submit }, 'OK'), msg,
+      h('div', { class: 'hs-foot' }, `Powered by MikroTik RouterOS · ${hs.server}`)));
+  }
+  private hotspotStatus(go: (u: string) => void): HTMLElement {
+    const hs = rosHotspotInfo(this.curName)!; const ip = live(this.cur!.a, this.cur!.env).ip;
+    const out = () => { rosHotspotLogout(this.curName); this.refreshTray(); go(`http://${hs.dnsName || hs.address}/login`); };
+    return h('div', { class: 'hsp' }, h('div', { class: 'hs-box' },
+      h('div', { class: 'hs-title' }, hs.identity), h('p', {}, hs.user ? `Welcome ${hs.user}!` : 'Belum login.'),
+      h('table', {}, h('tr', {}, h('td', {}, 'IP address:'), h('td', {}, ip)), h('tr', {}, h('td', {}, 'hotspot:'), h('td', {}, hs.server))),
+      hs.user ? h('button', { class: 'btn', name: 'hs-logout', onclick: out }, 'log off') : null,
+      h('div', { class: 'hs-foot' }, 'Powered by MikroTik RouterOS')));
+  }
+
   // ---------------------------------------------------------------- router WebKonfig (editable)
   private routerUi(env: Env, ip: string): HTMLElement {
     const s = this.cur!;
@@ -1114,6 +1265,24 @@ export class PcOS {
     return wrap;
   }
 }
+
+// speedtest.cari.id (⚠ design page): the effective internet speed of this PC. On a MikroTik customer LAN it is what the
+// router really gives (10/100 port, ISP plan, first matching simple queue unless FastTrack bypasses it [9]); elsewhere
+// the page says it cannot measure. Each run emits a 'speed' event (field orders use it as the customer-device test).
+SITES.speedtest = {
+  render: (_ip, _url, os) => {
+    const pc = os.current()?.name ?? '';
+    const t = rosThroughput(pc);
+    const big = (label: string, v: string) => h('div', { class: 'spd-v', style: { display: 'inline-block', margin: '0 28px', textAlign: 'center' } }, h('div', { style: { fontSize: '13px', color: '#666' } }, label), h('div', { style: { fontSize: '40px', fontWeight: '700', color: '#0b4fa8' } }, v));
+    const mbps = (n: number) => `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)} Mbps`;
+    const head = h('div', { style: { background: '#0b4fa8', color: '#fff', padding: '14px 40px', fontSize: '22px', fontWeight: '700' } }, 'cari · Tes kecepatan');
+    if (!t) return h('div', { class: 'web' }, head, h('p', { style: { padding: '24px 40px' } }, 'Tes kecepatan hanya tersedia di jaringan pelanggan yang memakai router MikroTik (simulasi).'));
+    os.emit('speed', { down: t.down, up: t.up, queue: t.queue, bypassed: t.bypassed });
+    return h('div', { class: 'web spd' }, head, h('div', { style: { padding: '30px 40px', textAlign: 'center' } },
+      big('Download', mbps(t.down)), big('Upload', mbps(t.up)),
+      h('p', { class: 'spd-note', style: { color: '#555', marginTop: '22px' } }, t.down ? (t.bypassed ? `Tidak dibatasi: antrean router ${t.queue} dilewati (FastTrack), kecepatan penuh paket ISP.` : t.queue ? `Batas ${fmtRate(t.up)}/${fmtRate(t.down)} (upload/download) · antrean router: ${t.queue}` : 'Tanpa batas antrean router: kecepatan penuh paket ISP.') : `Tidak tersambung ke internet${t.why ? `: ${t.why}` : ''}.`)));
+  },
+};
 
 // srv-nusa intranet (apache2 on the Linux server): the page is the server's /var/www/html/index.html
 SITES.linux = {

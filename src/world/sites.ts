@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { wx, wz } from '../data/city';
 import { SITES, SITE_PCS, SITE_TV, SITE_AP_DEFS, KOS, FLOOR_Y, siteById, type SitePc, type SiteId, type Rect } from '../data/sites';
-import { M, box, group, mat, texMat, TEX, signTex, addCollider, gableGeo } from './core';
+import { M, box, group, mat, texMat, TEX, signTex, canvasTex, addCollider, gableGeo } from './core';
 import * as ND from '../assets/netdevices';
 
 const T = 0.15;   // wall thickness
@@ -100,6 +100,48 @@ function homeRouter(name: string, color = '#f1f2f0') {
   box(g, -0.11, 0, -0.075, 0.22, 0.035, 0.15, body);
   box(g, -0.09, 0.0352, -0.07, 0.12, 0.001, 0.008, mat('#38ff5c', { emissive: '#38ff5c', emissiveIntensity: 1.2 }), undefined, false);
   for (const x of [-0.09, 0, 0.09]) box(g, x - 0.006, 0.03, 0.06, 0.012, 0.17, 0.008, dark);
+  return g;
+}
+/**
+ * MikroTik desktop router (Fase 2): small white box, the port side faces -z with ether1..N labels, PWR/USR LEDs and a
+ * link LED per port. RB951Ui-2HnD 113×138×29 mm, 5 ports (ether5 PoE out); hAP lite 113×89×28 mm, 4 ports (MikroTik
+ * spec sheets in notes/research-grow.md §1 [2][3]). Origin: bottom centre.
+ */
+export function mikrotikBox(name: string, ports: 4 | 5, model: string) {
+  const g = new THREE.Group(); g.name = name;
+  const W = 0.113, H = ports === 5 ? 0.029 : 0.028, D = ports === 5 ? 0.138 : 0.089;
+  const body = mat('#f3f4f2', { roughness: 0.45 });
+  box(g, -W / 2, 0, -D / 2, W, H, D, body);
+  // front (port side) decal: 1024 px across the 113 mm face
+  const PX = 1024, PY = Math.round(PX * H / W);
+  const tex = canvasTex(PX, PY, c => {
+    c.fillStyle = '#f3f4f2'; c.fillRect(0, 0, PX, PY);
+    const pw = 118, ph = 104, gap = 14, x0 = PX - 24 - ports * pw - (ports - 1) * gap, y0 = PY - ph - 34;
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    for (let i = 0; i < ports; i++) {
+      const x = x0 + i * (pw + gap);
+      c.fillStyle = '#1b1d20'; c.fillRect(x, y0, pw, ph);
+      c.fillStyle = '#0a0b0c'; c.fillRect(x + 16, y0 + 18, pw - 32, ph - 40); c.fillRect(x + 40, y0 + ph - 22, pw - 80, 14);
+      c.fillStyle = '#c9a43a'; for (let k = 0; k < 8; k++) c.fillRect(x + 22 + k * 10, y0 + 20, 5, 12);
+      c.fillStyle = '#38ff5c'; c.beginPath(); c.arc(x + 14, y0 - 12, 7, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#26292d'; c.font = 'bold 30px Arial, sans-serif'; c.fillText(`ether${i + 1}`, x + pw / 2 + 8, y0 - 6);
+      if (ports === 5 && i === 4) { c.font = 'bold 20px Arial, sans-serif'; c.fillText('PoE out', x + pw / 2, PY - 10); }
+      if (i === 0) { c.font = 'bold 20px Arial, sans-serif'; c.fillText('Internet', x + pw / 2, PY - 10); }
+    }
+    c.textAlign = 'left';
+    c.fillStyle = '#26292d'; c.font = 'bold 44px Arial, sans-serif'; c.fillText('MikroTik', 24, 62);
+    c.font = '24px Arial, sans-serif'; c.fillText(model, 24, 96);
+    c.fillStyle = '#1b1d20'; c.beginPath(); c.arc(60, PY - 52, 26, 0, Math.PI * 2); c.fill();          // DC jack
+    c.fillStyle = '#9aa1a8'; c.beginPath(); c.arc(60, PY - 52, 9, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#26292d'; c.font = 'bold 20px Arial, sans-serif'; c.fillText('PWR', 116, PY - 64); c.fillText('USR', 116, PY - 20);
+    c.fillStyle = '#38ff5c'; c.beginPath(); c.arc(176, PY - 71, 8, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#2f8bff'; c.beginPath(); c.arc(176, PY - 27, 8, 0, Math.PI * 2); c.fill();
+  }, false);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: '#ffffff', emissiveIntensity: 0.08, roughness: 0.5 }));
+  face.position.set(0, H / 2, -D / 2 - 0.0005); face.rotation.y = Math.PI; face.name = `${name}_FRONT`; g.add(face);
+  // glowing power LED (a lit dot that reads from across the room)
+  box(g, -W / 2 + 0.018, H * 0.55, -D / 2 - 0.0012, 0.0022, 0.0022, 0.001, mat('#38ff5c', { emissive: '#38ff5c', emissiveIntensity: 1.6 }), `${name}_LED_PWR`, false);
+  box(g, -W / 2 + 0.006, H + 0.0002, -D / 2 + 0.01, 0.03, 0.0004, 0.012, mat('#d8dad7'), undefined, false);   // label sticker on top
   return g;
 }
 /** flat-panel smart TV on a low cabinet; screen faces the yaw direction */
@@ -341,7 +383,7 @@ function buildKos(parent: P) {
   B(g, 138.2, up, 313.2, 1.2, 0.74, 0.7, M.woodLight, 'PROP_KOS_01_MEJA_BERSAMA');
   // ---- ground floor common room: the router on a wall shelf, a bench, the motor parking out front
   B(g, r.x0 + T, FLOOR_Y + 1.45, 312.6, 0.3, 0.03, 0.8, M.woodLight, 'PROP_KOS_01_RAK_ROUTER');
-  put(g, homeRouter('PROP_KOS_01_ROUTER', '#26292d'), 132.3, FLOOR_Y + 1.48, 313.0, -Math.PI / 2);
+  put(g, mikrotikBox('PROP_KOS_01_ROUTER', 4, 'hAP lite · RB941-2nD'), 132.3, FLOOR_Y + 1.48, 313.0, -Math.PI / 2);
   outlet(g, 'PROP_KOS_01_STOPKONTAK_ROUTER', r.x0 + T, 313.6, FLOOR_Y + 1.6, 'W');
   soft(B(g, r.x0 + T + 0.01, FLOOR_Y + 1.48, 313.25, 0.01, 1.7, 0.012, mat('#2f6fb3'), undefined, false));   // LAN cables up the wall to the APs
   B(g, 137.4, FLOOR_Y, 314.9, 2.0, 0.45, 0.5, mat('#5d6a74'), 'PROP_KOS_01_BANGKU');
@@ -385,7 +427,10 @@ function buildWarnet(parent: P) {
   const rk = put(g, ND.wallRack('PROP_WARNET_01_RAK_DINDING', { u: 9, populated: false, doorOpen: 1.2 }), 358.6, FLOOR_Y + 1.25, r.z0 + T, Math.PI);
   ND.placeInRack(rk, ND.patchPanel24('PROP_WARNET_01_PATCH_PANEL'), 8);
   ND.placeInRack(rk, ND.switch16('PROP_WARNET_01_SW_16PORT'), 6);
-  ND.placeInRack(rk, ND.router1U('PROP_WARNET_01_ROUTER'), 3);
+  // MikroTik RB951Ui-2HnD (desktop box) on a 1U cantilever shelf where the 1U router used to sit; port side to the front
+  const shelf = ND.placeInRack(rk, ND.rackShelf1U('PROP_WARNET_01_ROUTER_SHELF'), 3);
+  const rtr = mikrotikBox('PROP_WARNET_01_ROUTER', 5, 'RB951Ui-2HnD');
+  rtr.position.set(0, (shelf.userData as { shelfTopY?: number }).shelfTopY ?? 0.002, -0.35 + 0.012 + 0.138 / 2); shelf.add(rtr);
   soft(B(g, 358.45, FLOOR_Y + 1.7, r.z0 + T + 0.02, 0.3, 1.0, 0.06, mat('#2f6fb3'), undefined, false));   // cable bundle into the rack
   addCollider(wx(358.25), wx(358.95), wz(r.z0 + T), wz(r.z0 + T + 0.5), FLOOR_Y + 1.2, FLOOR_Y + 1.8);
   sign(g, 'PROP_WARNET_01_LABEL_RAK', 'RAK JARINGAN · SW-WARNET', 358.6, FLOOR_Y + 2.15, r.z0 + T + 0.01, 1.0, 0.16, 0, '#13202b', '#ffffff', '#2bd46b');

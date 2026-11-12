@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { wx, wz } from '../data/city';
 import { M, box, group, mat, addCollider, signTex } from './core';
 import * as ND from '../assets/netdevices';
+import { mikrotikBox } from './sites';
 
 export const LAB_BOUNDS = { x0: 232, x1: 252, z0: 492, z1: 508 };
 const H = 3.6, T = 0.2;
@@ -89,6 +90,11 @@ export function buildLabTkj(parent: THREE.Object3D): { group: THREE.Group; pcs: 
   // rack in the north-east corner, front facing south
   const rk = put(L, ND.rack42U('PROP_LAB_RACK_01', { populated: 'idf' }), 250.6, 0, 492.25, Math.PI);
   void rk; addCollider(wx(250.25), wx(250.95), wz(492.2), wz(493.3), 0, 2.1);
+  // Fase 2: the lab hAP lite (RB941-2nD) on a wall shelf on the solid east wall just south of the rack (clear of the
+  // north window band), ports facing the room (west); ether1 runs to SW-LAB, ether2 is patched to the desk of a student
+  // doing the MikroTik step (src/game/labmt.ts)
+  box(L, wx(x1 - T - 0.32), 1.08, wz(493.6), 0.32, 0.03, 0.7, M.wood, 'PROP_LAB_RAK_DINDING');
+  put(L, mikrotikBox('PROP_LAB_MIKROTIK_01', 4, 'hAP lite · RB941-2nD'), x1 - T - 0.16, 1.11, 493.95, Math.PI / 2);
   // tool cabinet south of the door and the crimping table in the middle aisle
   box(L, wx(251.1), 0, wz(502.6), 0.6, 1.9, 1.8, mat('#8d949a', { metalness: 0.4 }), 'PROP_LAB_LEMARI_ALAT'); addCollider(wx(251.1), wx(251.8), wz(502.6), wz(504.4), 0, 1.9);
   const ct = desk(L, 247.0, 500.2, 2.0, 0.8, 'PROP_LAB_MEJA_CRIMPING', mat('#a7b0b6'));
