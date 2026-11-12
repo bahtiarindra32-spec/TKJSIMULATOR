@@ -8,7 +8,12 @@ export const CUST_LABEL: Record<Cust, string> = { rumah: 'Rumah', kos: 'Kos', wa
 
 export type FieldTplId = 'r_router' | 'r_tv' | 'r_kabel' | 'k_ap2' | 'k_kanal' | 'w_port' | 'w_kabel' | 'w_loop'
   /** Fase 2: MikroTik orders on the site routers (state-graded with routeros checkState) */
-  | 'w_hotspot' | 'k_queue' | 'k_fasttrack' | 'w_reset';
+  | 'w_hotspot' | 'k_queue' | 'k_fasttrack' | 'w_reset'
+  /** Fase 3: FTTH faults on the house fibre (graded from the ftth engine state: ONT online, Rx green, port as the ODP data) */
+  | 'f_drop_putus' | 'f_konektor_kotor' | 'f_macrobend' | 'f_port_salah';
+
+/** why a garansi callback comes: sloppy crimp, unsaved switch config, or (Fase 3) a fibre job closed with a weak check */
+export type GaransiReason = 'crimp' | 'config' | 'fiber';
 
 export interface Order {
   id: string;
@@ -30,7 +35,7 @@ export interface Order {
   garansiOf?: string;
   due?: number;
   /** garansi: what went wrong ('crimp' = sloppy cable, 'config' = switch config not saved) */
-  reason?: 'crimp' | 'config';
+  reason?: GaransiReason;
   /** garansi: data needed to re-create the same fault (port, pc, variant) */
   redo?: Record<string, string | number>;
 }
@@ -40,7 +45,7 @@ export interface GaransiPlan {
   of: string;
   tpl: FieldTplId;
   cust: Cust;
-  reason: 'crimp' | 'config';
+  reason: GaransiReason;
   showDay: number;
   redo: Record<string, string | number>;
 }
@@ -50,8 +55,10 @@ export interface Mat {
   utp: number;
   patch: number;
   router: number;
+  /** Fase 3: fusion-splice protection sleeves (heat-shrink); optional so Fase 1 records stay valid */
+  sleeve?: number;
 }
-export const noMat = (): Mat => ({ rj45: 0, utp: 0, patch: 0, router: 0 });
+export const noMat = (): Mat => ({ rj45: 0, utp: 0, patch: 0, router: 0, sleeve: 0 });
 
 /** the invoice handed over when a job closes (or a record of a failed one) */
 export interface Nota {

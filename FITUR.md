@@ -251,6 +251,13 @@ Gedung praktik satu lantai di halaman SMK Nusantara (masuk dari gerbang Jl. Dahl
 - **Router di tempat lapangan**: RB951Ui-2HnD di Warnet Sinar, hAP lite di Kos Mawar. Dari PC/laptop pelanggan: Winbox (Neighbors › connect lewat MAC › New Terminal), WebFig di browser, halaman login hotspot, dan speedtest.cari.id yang menunjukkan batas yang benar-benar berlaku.
 - **Empat order baru** (terbuka per reputasi): hotspot voucher warnet dengan rate-limit (uji login voucher dari PC), simple queue per kamar kos (uji speedtest dari laptop penghuni), limit kamar tidak jalan karena rule fasttrack, internet warnet mati setelah router direset.
 
+### Fase 3: FTTH di lapangan (12 Nov 2026) — `src/pcos/ftth/`, `src/game/field/ftthui.ts`, `src/game/field/simftth.ts`
+- **Rumah Kel. Hendra tersambung fiber**: OLT (STO) → feeder → ODC-FLB → ODP-FLB-01 di tiang depan rumah → drop → roset → ONT. Internet rumah ikut status ONT (LED PON/LOS, Rx dihitung dari redaman tiap elemen).
+- **Alat fiber** dipinjam di lemari Nusa Teknik: OPM, VFL (cahaya merah terlihat di kabel 3D), OTDR (trace + tabel event), fusion splicer (minigame strip → bersihkan → cleave → pasang → fusi → sleeve), kit pembersih, tangga + APD (naik tiang = cutscene, APD kurang dicatat K3).
+- **Empat order FTTH berbayar** (pelanggan rumah, terbuka per reputasi): kabel drop putus (cari dengan OTDR/VFL, sambung fusi), konektor kotor (ukur OPM, bersihkan), kabel tertekuk tajam (Rx lemah, lebih parah di 1550 nm; cari dengan VFL/OTDR lalu rapikan di roset), drop dicolok ke port mati setelah teknisi pasang tetangga (colok balik ke port sesuai data ODP, bersihkan dulu).
+- **Dinilai dari kondisi jaringan**: ONT online, Rx hijau (−13 s/d −24 dBm), port sesuai data ODP, lalu uji internet dari laptop keluarga. Nota mencatat K3, alat yang tertinggal, dan sleeve yang dipakai (material). Sambungan > 0,2 dB / tanpa sleeve atau drop dicolok tanpa dibersihkan → pelanggan minta garansi 1–2 hari kemudian.
+- Tarif FTTH mulai Rp45 rb (riset); batas atasnya perkiraan, diberi label "perkiraan tarif pasar".
+
 ### Pak Nusa: mentor AI (1 Nov 2026) — `src/ai/nusa.ts`
 - **Izin data & API key**: AI tidak mengirim apa pun sebelum pemain/guru memilih *Setuju* di Pengaturan (yang dikirim: pertanyaan, teks surat kerja/jobsheet, konfigurasi IP simulasi; nama siswa dan nilai tidak). API key bisa disimpan *di perangkat ini* atau *sesi ini saja* untuk komputer lab bersama.
 - Tekan **J** (atau tombol **Pak Nusa** di HP) untuk bertanya. Pak Nusa membaca kondisi pekerjaan yang sedang berjalan (surat kerja, log langkahmu, status IP simulasi PC di dekatmu) dan memberi arah diagnosis urut lapisan OSI, bukan jawaban langsung. Ada tombol cepat: *Aku harus ngapain?*, *Kenapa ini terjadi?*, *Jelaskan konsepnya*.

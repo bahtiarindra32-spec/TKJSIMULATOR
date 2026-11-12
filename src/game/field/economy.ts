@@ -4,10 +4,11 @@
 // Star pay factors, denda and reputasi steps are game-design numbers (marked as such in DESIGN.md).
 import type { Mat, Rep, Cust } from './types';
 
-/** Rp per unit: RJ45 per piece, UTP Cat6 per metre, ready-made 1 m patch cord, entry-level Wi-Fi router */
-export const PRICE: Mat = { rj45: 1_000, utp: 5_000, patch: 15_000, router: 180_000 };
-export const MAT_LABEL: Record<keyof Mat, string> = { rj45: 'Konektor RJ45 Cat6', utp: 'Kabel UTP Cat6', patch: 'Patch cord Cat6 1 m (jadi)', router: 'Router Wi-Fi N300 (baru)' };
-export const MAT_UNIT: Record<keyof Mat, string> = { rj45: 'pcs', utp: 'm', patch: 'pcs', router: 'unit' };
+/** Rp per unit: RJ45 per piece, UTP Cat6 per metre, ready-made 1 m patch cord, entry-level Wi-Fi router, one 60 mm splice
+ *  protection sleeve (Fase 3: retail packs of 100 listed at Rp13.000–25.000 in Nov 2026 → Rp250/pcs, the top of that range) */
+export const PRICE: Mat = { rj45: 1_000, utp: 5_000, patch: 15_000, router: 180_000, sleeve: 250 };
+export const MAT_LABEL: Record<keyof Mat, string> = { rj45: 'Konektor RJ45 Cat6', utp: 'Kabel UTP Cat6', patch: 'Patch cord Cat6 1 m (jadi)', router: 'Router Wi-Fi N300 (baru)', sleeve: 'Sleeve pelindung sambungan 60 mm' };
+export const MAT_UNIT: Record<keyof Mat, string> = { rj45: 'pcs', utp: 'm', patch: 'pcs', router: 'unit', sleeve: 'pcs' };
 
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 export const round5k = (v: number) => Math.round(v / 5_000) * 5_000;
@@ -32,7 +33,7 @@ export const denda = (tarif: number) => round5k(tarif * DENDA_RATE);
 
 /** material actually used, in Rp (UTP is billed per started half metre) */
 export function materialCost(m: Mat) {
-  return Math.round(m.rj45 * PRICE.rj45 + Math.ceil(m.utp * 2) / 2 * PRICE.utp + m.patch * PRICE.patch + m.router * PRICE.router);
+  return Math.round(m.rj45 * PRICE.rj45 + Math.ceil(m.utp * 2) / 2 * PRICE.utp + m.patch * PRICE.patch + m.router * PRICE.router + (m.sleeve ?? 0) * (PRICE.sleeve ?? 0));
 }
 
 /** what the technician receives for a closed order: fee × star factor, minus the material used (garansi pays no fee) */

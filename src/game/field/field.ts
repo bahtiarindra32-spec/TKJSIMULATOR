@@ -19,8 +19,11 @@ import { openDay, closeDay, planGaransi, pushNota, repLine } from './orders';
 import { loadField, writeField } from './save';
 import { rosTestEvent, isRosTpl } from './simros';
 import { rosNeedsLogin } from '../../pcos/routeros';
+import { ftthWeak, ftthSiteCheck } from './simftth';
+import { WALK_Y } from '../../data/ftthsite';
+import { kitDef, type Kit, type KitId } from './ftthkit';
 import { inject, rootProblem, cableWeak, snapshotSites, restoreSites, ok, sw, ap, siteDevices, deviceLabel, portParts, NEW_ROUTER, TV, type Injected, type Target, type SiteSnap } from './sim';
-import { CUST_LABEL, noMat, type Order, type Mat, type FieldSave, type Nota, type Cust } from './types';
+import { CUST_LABEL, noMat, type Order, type Mat, type FieldSave, type Nota, type Cust, type GaransiReason } from './types';
 import './field.css';
 
 interface ActTarget extends Target {
@@ -54,6 +57,16 @@ export const FIELD_SPOTS: Record<string, { X: number; Z: number; y: number; labe
   WARNET_RACK: { X: 358.6, Z: 304.9, y: FLOOR_Y, label: 'Rak dinding warnet (SW-WARNET)' },
   BOARD: { X: 55, Z: 119.7, y: FLOOR_Y, label: 'Papan order Nusa Teknik' },
   LEMARI: { X: 51.5, Z: 120.2, y: FLOOR_Y, label: 'Lemari material Nusa Teknik' },
+  /** Fase 3 FTTH: the roset on the inside of the west wall and the ODP pole on the sidewalk (data/ftthsite) */
+  ROSET: { X: 114.75, Z: 580.75, y: FLOOR_Y, label: 'Roset fiber & ONT (ruang depan)' },
+  TIANG: { X: 110, Z: 574.8, y: WALK_Y, label: 'Tiang ODP-FLB-01 (trotoar depan rumah)' },
+};
+/** Fase 3: fibre tools each FTTH order needs before the player can find and fix its fault (⚠ design hint list) */
+const FTTH_TOOLS: Record<string, KitId[]> = {
+  f_drop_putus: ['otdr', 'splicer', 'pembersih', 'tangga'],
+  f_konektor_kotor: ['opm', 'pembersih', 'tangga'],
+  f_macrobend: ['vfl', 'opm'],
+  f_port_salah: ['tangga', 'pembersih'],
 };
 const STARS = (n: number) => '★'.repeat(n) + '☆'.repeat(Math.max(0, 3 - n));
 
@@ -70,6 +83,11 @@ export class FieldWork {
   act: Active | null = null;
   /** field-owned stock in the technician's bag (other materials live in the internship inventory: patch cords, RJ45) */
   bag = { router: 0 };
+  /** Fase 3 FTTH (chunk B1b): the fibre tool shelf in the cabinet and the fibre work at the house roset (set by main.ts) */
+  onFtthShelf: ((back: () => void) => void) | null = null;
+  onFiber: (() => void) | null = null;
+  /** Fase 3 FTTH (chunk B2): the fibre kit the player carries (K3 notes, tools left at the site) */
+  ftthKit: (() => Kit) | null = null;
   /** QA override: open field work without the hotel rank */
   qaUnlock = false;
   /** QA: berita acara required (always on in play) */
@@ -98,7 +116,7 @@ export class FieldWork {
       this.onPc(e);
     };
     noc.onMaterial = (k, n) => {
-      if (this.act && noc.mode === 'idle') this.act.mat[k] += n;
+      if (this.act && noc.mode === 'idle') this.act.mat[k] = (this.act.mat[k] ?? 0) + n;
     };
   }
 
@@ -151,6 +169,7 @@ export class FieldWork {
       return 'Pelanggan menelepon lagi: masalahnya sudah beres sendiri. Order dibatalkan tanpa denda.';
     }
     o.status = 'active';
+    if (inj.ftth) { const k = this.ftthKit?.(); if (k) k.k3 = []; }
     // a MikroTik order carries its own values (vouchers, limits, ISP data) onto the order letter
     for (const l of inj.lines ?? []) if (!o.lines.includes(l)) o.lines.push(l);
     const tg = new Set(inj.targets.map(t => t.pc));
@@ -203,12 +222,18 @@ export class FieldWork {
     // queue orders: only the speed-test page showing the ordered limit counts as the customer-device test
     const rt = a.inj.ros && t.primary ? rosTestEvent(a.inj.ros, e.type, e.detail) : null;
     if (rt !== null) test = rt && !this.problem();
+    // FTTH orders: only a test done after the fibre is right counts (a yellow-Rx line still pings)
+    if (a.inj.ftth && this.problem()) test = false;
     if (test && ok(t.pc)) {
       t.ok = true;
       t.tested = true;
     }
     this.check();
   }
+  /** a line from the fibre toolkit for the running order's work log */
+  note(s: string) { this.log(s); }
+  /** material used by another module during an order (Fase 3: splice sleeves) */
+  consume(k: keyof Mat, n = 1) { if (this.act) this.act.mat[k] = (this.act.mat[k] ?? 0) + n; }
   private log(s: string) {
     const a = this.act;
     if (!a || a.log[a.log.length - 1] === s) return;
@@ -248,7 +273,8 @@ export class FieldWork {
     if (a) {
       a.age += dt;
       const p = this.host.player();
-      if (p && !a.surveyed && siteAt(p.X, p.Z)?.id === a.o.cust) {
+      const atPole = !!a.inj.ftth && !!p && Math.hypot(p.X - FIELD_SPOTS.TIANG.X, p.Z - FIELD_SPOTS.TIANG.Z) < 6;
+      if (p && !a.surveyed && (siteAt(p.X, p.Z)?.id === a.o.cust || atPole)) {
         a.surveyed = true;
         this.log(`Tiba di lokasi: ${CUSTOMER[a.o.cust].place}`);
       }
@@ -285,6 +311,7 @@ export class FieldWork {
     const bad = a.targets.filter(t => !t.ok);
     if (bad.length || pr) {
       const t = a.o.tpl;
+      if (a.inj.ftth) return this.ftthHint(pr);
       if (isRosTpl(t) && pr.startsWith('uji login')) return `Uji dari ${a.targets.find(x => x.primary)?.label ?? 'PC uji'}: buka situs, login hotspot pakai salah satu voucher.`;
       if (isRosTpl(t)) return `${pr ? `${pr} · ` : ''}Konfigurasi router MikroTik lewat Winbox / WebFig dari ${a.targets.find(x => x.primary)?.label ?? 'PC pelanggan'}.`;
       if (t === 'r_router') {
@@ -308,6 +335,25 @@ export class FieldWork {
     if (un) return un.pc === TV ? 'Uji: cek menu jaringan smart TV [F] (harus tersambung internet).' : `Uji dari ${un.label}: buka PC [F], ping / buka situs.`;
     return 'Tunggu…';
   }
+  /** fibre tools of the FTTH order that are not in the bag */
+  private ftthMissing(): KitId[] {
+    const a = this.act, k = this.ftthKit?.();
+    if (!a?.inj.ftth || !k) return [];
+    const need = FTTH_TOOLS[a.o.tpl] ?? [];
+    const out = need.filter(id => !k.has.has(id));
+    if (a.o.tpl === 'f_drop_putus' && !k.sleeves) out.push('sleeve');
+    return out;
+  }
+  private ftthHint(pr: string): string {
+    const a = this.act!, miss = this.ftthMissing();
+    if (miss.length) return `Pinjam alat fiber di lemari Nusa Teknik (Alat fiber FTTH): ${miss.map(id => kitDef(id).short).join(', ')}. APD tiang: helm, sarung tangan, harness, kacamata.`;
+    const t = a.o.tpl, port = a.inj.ftth!.port;
+    const head = pr ? `${pr} · ` : '';
+    if (t === 'f_drop_putus') return `${head}Cari titik putus: OTDR dari port ODP (naik tiang) atau VFL dari roset, lalu sambung dengan fusion splicer di atas tangga.`;
+    if (t === 'f_konektor_kotor') return `${head}Ukur Rx dengan OPM di roset dan di port ODP; konektor yang kotor dibersihkan (alkohol IPA + tisu).`;
+    if (t === 'f_macrobend') return `${head}Bandingkan OPM 1310/1550 nm, cari tekukan dengan VFL di roset / konektor ONT, lalu rapikan tekukannya di roset.`;
+    return `${head}Naik ke ODP-FLB-01: drop rumah harus di port ${port} (data ODP). Bersihkan konektor dulu, baru colok.`;
+  }
   /** next place to go (city coords) for the waypoint and the minimap */
   target(): { X: number; Z: number; y: number; label: string } | null {
     const a = this.act;
@@ -322,6 +368,11 @@ export class FieldWork {
     const needFix = a.targets.some(t => !t.ok) || !!this.problem();
     if (needFix) {
       if (a.o.tpl === 'r_router' && !ap('AP-RUMAH-RTR').mounted && !this.bag.router) return { ...FIELD_SPOTS.LEMARI, label: 'Ambil router baru · lemari material' };
+      if (a.inj.ftth) {
+        if (this.ftthMissing().length) return { ...FIELD_SPOTS.LEMARI, label: 'Pinjam alat fiber · lemari material' };
+        const sp = a.o.tpl === 'f_drop_putus' || a.o.tpl === 'f_port_salah' ? 'TIANG' : 'ROSET';
+        return { ...FIELD_SPOTS[sp], label: `${a.o.id} · ${FIELD_SPOTS[sp].label}` };
+      }
       const sp = this.fixSpot();
       if (sp) return { ...FIELD_SPOTS[sp], label: `${a.o.id} · ${FIELD_SPOTS[sp].label}` };
       if (a.o.tpl === 'r_tv') return stop(a.targets.find(t => t.pc !== TV)?.pc ?? TV);
@@ -528,7 +579,7 @@ export class FieldWork {
     ];
     const list = h('div', 'inv');
     for (const [k, have, take, put] of rows) {
-      const r = h('div', 'inv-row', `<span><b>${MAT_LABEL[k]}</b> <small>${rp(PRICE[k])}/${MAT_UNIT[k]}</small><br><small>${esc(have)}</small></span>`);
+      const r = h('div', 'inv-row', `<span><b>${MAT_LABEL[k]}</b> <small>${rp(PRICE[k] ?? 0)}/${MAT_UNIT[k]}</small><br><small>${esc(have)}</small></span>`);
       if (k !== 'utp') r.append(btn(k === 'rj45' ? 'Ambil 10' : 'Ambil 1', () => (take(), this.openLemari()), 'btn', `field-take-${k}`));
       if (put) r.append(btn('Kembalikan', () => (put(), this.openLemari()), 'btn', `field-put-${k}`));
       list.append(r);
@@ -538,6 +589,7 @@ export class FieldWork {
       this.closeRow(
         btn('Alat kerja (LAN tester, console, …)', () => this.noc.openCabinet(true, 'Alat kerja · Nusa Teknik (pinjam, kembalikan setelah selesai)'), 'btn', 'field-tools'),
         btn('Meja kerja: crimping', () => this.noc.openCrimpBench(), 'btn', 'field-crimp'),
+        ...(this.onFtthShelf ? [btn('Alat fiber (FTTH)', () => this.onFtthShelf?.(() => this.openLemari()), 'btn', 'field-ftth')] : []),
       ),
     );
     this.show(box);
@@ -617,9 +669,10 @@ export class FieldWork {
     return '';
   }
   /** weak checks that bring a garansi callback later */
-  weakness(): { reason: 'crimp' | 'config'; redo: Record<string, string | number>; why: string } | null {
+  weakness(): { reason: GaransiReason; redo: Record<string, string | number>; why: string } | null {
     const a = this.act!;
     const t = a.o.tpl;
+    if (a.inj.ftth) { const w = ftthWeak(a.inj.ftth); return w && { reason: 'fiber', redo: w.redo, why: w.why }; }
     if ((t === 'w_port' || (a.o.kind === 'garansi' && a.o.reason === 'config')) && sw('SW-WARNET').dirty)
       return { reason: 'config', redo: { ...a.inj.data }, why: 'Konfigurasi SW-WARNET diubah tapi belum disimpan (write memory): hilang kalau switch restart.' };
     for (const [k, c] of a.portCable) if (cableWeak(c)) return { reason: 'crimp', redo: { where: k, pc: t0pc(a) }, why: crimpWhy(c!) };
@@ -638,7 +691,10 @@ export class FieldWork {
     const collateral = a.snap.filter(n => !ok(n) && !rosNeedsLogin(n));
     const weak = this.weakness();
     const unsaved = o.tpl === 'w_loop' && sw('SW-WARNET').dirty;
-    const stars = jobStars({ slaMet: slaOk, collateral: collateral.length, wrong: a.wrong, swDirty: !!weak || unsaved });
+    // Fase 3 FTTH: K3 notes (APD missing on the pole / at the splicer / with the VFL) and tools left at the site cost like a wrong step
+    const site = a.inj.ftth ? ftthSiteCheck(this.ftthKit?.() ?? null) : null;
+    const wrong = a.wrong + (site?.k3.length ? 1 : 0) + (site?.left.length ? 1 : 0);
+    const stars = jobStars({ slaMet: slaOk, collateral: collateral.length, wrong, swDirty: !!weak || unsaved });
     const garansi = o.kind === 'garansi';
     const pay = payout(o.tarif, stars, a.mat, garansi);
     const repBefore = this.s.rep[o.cust];
@@ -652,14 +708,22 @@ export class FieldWork {
     pushNota(this.s, nota);
     this.act = null;
     this.save();
-    this.openNota(nota, { berita, detail: a.inj.detail, slaOk, collateral, weak: weak?.why ?? (unsaved ? 'Konfigurasi switch belum disimpan (write memory).' : ''), repFrom: repBefore, repTo: this.s.rep[o.cust], cust: o.cust });
+    const extra = site
+      ? [
+          site.k3.length ? `K3: ${site.k3.join('; ')} (−1 bintang)` : 'K3: APD lengkap saat naik tiang, menyambung dan memakai laser',
+          site.left.length ? `Alat tertinggal di lokasi: ${site.left.join(', ')} (−1 bintang)` : 'Alat dibereskan dari lokasi',
+          ...(site.carried.length ? [`Kembalikan alat fiber ke lemari Nusa Teknik: ${site.carried.join(', ')}`] : []),
+        ]
+      : [];
+    if (site) this.log(`Penutupan: K3 ${site.k3.length ? 'dicatat' : 'lengkap'}, alat ${site.left.length ? 'tertinggal' : 'dibereskan'}`);
+    this.openNota(nota, { berita, detail: a.inj.detail, slaOk, collateral, weak: weak?.why ?? (unsaved ? 'Konfigurasi switch belum disimpan (write memory).' : ''), repFrom: repBefore, repTo: this.s.rep[o.cust], cust: o.cust, extra });
   }
-  openNota(n: Nota, x: { berita: string; detail: string; slaOk: boolean; collateral: string[]; weak: string; repFrom: number; repTo: number; cust: Cust }) {
+  openNota(n: Nota, x: { berita: string; detail: string; slaOk: boolean; collateral: string[]; weak: string; repFrom: number; repTo: number; cust: Cust; extra?: string[] }) {
     const box = h('div', 'noc-box wide field-nota');
     box.append(h('h2', '', `Nota ${esc(n.id)} · Nusa Teknik`));
     const matRows = (Object.keys(n.mat) as (keyof Mat)[])
-      .filter(k => n.mat[k] > 0)
-      .map(k => `<tr><td>${MAT_LABEL[k]}</td><td>${n.mat[k]} ${MAT_UNIT[k]} × ${rp(PRICE[k])}</td><td class="num">− ${rp(k === 'utp' ? (Math.ceil(n.mat.utp * 2) / 2) * PRICE.utp : n.mat[k] * PRICE[k])}</td></tr>`)
+      .filter(k => (n.mat[k] ?? 0) > 0)
+      .map(k => `<tr><td>${MAT_LABEL[k]}</td><td>${n.mat[k]} ${MAT_UNIT[k]} × ${rp(PRICE[k] ?? 0)}</td><td class="num">− ${rp(k === 'utp' ? (Math.ceil(n.mat.utp * 2) / 2) * PRICE.utp : (n.mat[k] ?? 0) * (PRICE[k] ?? 0))}</td></tr>`)
       .join('');
     box.append(
       h(
@@ -682,6 +746,7 @@ export class FieldWork {
       x.slaOk ? 'Waktu: dalam SLA' : 'Waktu: lewat SLA (−1 bintang)',
       x.collateral.length ? `Perangkat lain ikut rusak: ${x.collateral.map(deviceLabel).join(', ')} (−1 bintang)` : 'Tidak ada perangkat lain yang rusak',
       x.weak ? `${x.weak} Pelanggan bisa minta garansi.` : 'Pemeriksaan akhir rapi',
+      ...(x.extra ?? []),
     ];
     box.append(h('ul', 'fo-lines', qc.map(q => `<li>${esc(q)}</li>`).join('')));
     box.append(h('p', '', `<b>Berita acara:</b> ${esc(x.berita)}`));
@@ -713,6 +778,11 @@ export class FieldWork {
     }
     if (id === 'ONT') this.routerSection(box, out);
     if (id === 'ONT') this.portSection(box, out, 'ONT-RUMAH:1', 'LAN1 ONT → router Wi-Fi');
+    if (id === 'ONT' && this.onFiber) {
+      const fr = h('div', 'row left');
+      fr.append(btn('Fiber: roset & konektor ONT (alat FTTH)', () => this.onFiber?.(), 'btn', 'field-fiber'));
+      box.append(fr);
+    }
     if (id === 'KOS_ROUTER') {
       this.portSection(box, out, 'RTR-KOS:1', 'ether2 → AP lantai 1');
       this.portSection(box, out, 'RTR-KOS:2', 'ether3 → AP lantai 2');
@@ -861,7 +931,7 @@ export class FieldWork {
       garansi: this.s.garansi.map(g => ({ ...g })), nota: this.s.nota.slice(-3), bag: { ...this.bag, patch: this.noc.inv.patch, rj45: this.noc.rj45 },
       act: a && {
         id: a.o.id, tpl: a.o.tpl, kind: a.o.kind, variant: a.inj.variant, data: { ...a.inj.data }, detail: a.inj.detail, stage: this.stage(), surveyed: a.surveyed, docReady: a.docReady, problem: this.problem(),
-        targets: a.targets.map(t => ({ pc: t.pc, primary: t.primary, ok: t.ok, tested: t.tested })), mat: { ...a.mat }, age: Math.round(a.age), next: this.nextHint(), weak: this.weakness()?.reason ?? null,
+        targets: a.targets.map(t => ({ pc: t.pc, primary: t.primary, ok: t.ok, tested: t.tested })), mat: { ...a.mat }, age: Math.round(a.age), next: this.nextHint(), weak: this.weakness()?.reason ?? null, ftth: a.inj.ftth ? { ...a.inj.ftth } : null, log: a.log.slice(-8),
       },
     };
   }

@@ -21,11 +21,13 @@ export interface FieldTpl {
   ask: string[];
   /** Fase 2: the job is done on the site's MikroTik router (graded from its configuration state) */
   ros?: boolean;
+  /** Fase 3: the job is done on the house fibre (graded from the ftth engine: ONT online, Rx green, port as the ODP data) */
+  ftth?: boolean;
 }
 
 /** customer per site: who calls and where to go (fictional addresses on the real map streets) */
 export const CUSTOMER: Record<Cust, { who: string; address: string; place: string }> = {
-  rumah: { who: 'Pak Hendra (pemilik rumah)', address: 'Jl. Flamboyan No. 12 (sisi selatan)', place: 'Rumah Kel. Hendra' },
+  rumah: { who: 'Pak Hendra (pemilik rumah)', address: 'Jl. Flamboyan No. 17 (sisi selatan)', place: 'Rumah Kel. Hendra' },
   kos: { who: 'Bu Sri (pemilik Kos Mawar)', address: 'Jl. Anggrek No. 7 (sisi utara)', place: 'Kos Mawar' },
   warnet: { who: 'Koh Andi (pemilik Warnet Sinar)', address: 'Jl. Anggrek No. 31 (sisi utara)', place: 'Warnet Sinar' },
 };
@@ -33,6 +35,9 @@ export const CUSTOMER: Record<Cust, { who: string; address: string; place: strin
 const CRIMP = 'Crimping RJ45 Rp50–100 rb/titik [42]';
 const ROUTER = 'Instalasi router + konfigurasi dasar Rp150–300 rb [42]';
 const HOTSPOT = 'Setting hotspot MikroTik + voucher Rp250–700 rb [44]';
+/** research §4.1 has only a floor for fibre work ("mulai Rp45 rb/titik", unit unclear [47]); the top of each range is ⚠ design */
+const FO = 'Instalasi FO (splicing, OTDR) mulai Rp45 rb/titik [47]; batas atas perkiraan desain';
+const FTTH_DONE = 'Selesai kalau ONT online, Rx di ONT hijau (−13 s/d −24 dBm), lalu internet diuji dari laptop keluarga (ping / buka situs).';
 
 export const FIELD_TPLS: Record<FieldTplId, FieldTpl> = {
   r_router: {
@@ -96,6 +101,27 @@ export const FIELD_TPLS: Record<FieldTplId, FieldTpl> = {
     id: 'w_reset', cust: 'warnet', title: 'Internet warnet mati setelah router direset', tarif: [150_000, 300_000], tarifSrc: ROUTER, minRep: 50, sla: 1300, weight: 0.9, ros: true,
     say: ['Tadi keponakan saya tekan lama tombol reset di router. Sekarang PC dapat IP aneh 192.168.88 dan semuanya tidak bisa internet.', 'Router warnet ke-reset waktu listrik naik-turun dan ada yang pencet tombol reset. Semua PC tidak bisa internet.'],
     ask: ['Kembalikan konfigurasi router MikroTik warnet seperti sebelum reset (Winbox/WebFig dari PC warnet).', 'Data dari ISP & catatan teknisi lama ada di bawah. Kalau di router masih ada file backup, boleh dipakai.', 'Uji dari PC booth yang ditunjuk; PC lain juga harus normal lagi.'],
+  },
+  // ---- Fase 3: FTTH faults on the house line (ODP-FLB-01 → drop → roset → ONT). Graded from the ftth engine state (simftth.ts).
+  f_drop_putus: {
+    id: 'f_drop_putus', cust: 'rumah', title: 'Internet mati, LOS merah (kabel drop)', tarif: [45_000, 150_000], tarifSrc: FO, minRep: 55, sla: 1600, weight: 0.8, ftth: true,
+    say: ['Internet mati total sejak tadi pagi, lampu LOS di modem merah. Semalam ada truk tinggi lewat, kabel hitam di depan rumah sempat tersangkut.', 'Wi-Fi tersambung tapi tidak ada internet. Lampu LOS di ONT merah terus, kabel dari tiang kelihatan kendur.'],
+    ask: ['Cari titik gangguan di jalur fiber rumah (drop dari ODP-FLB-01 di tiang depan rumah sampai roset). Alat fiber dipinjam di lemari Nusa Teknik.', 'Kabel putus disambung dengan fusion splicer; sleeve pelindung dihitung sebagai material. Naik tiang dengan APD lengkap.', FTTH_DONE],
+  },
+  f_konektor_kotor: {
+    id: 'f_konektor_kotor', cust: 'rumah', title: 'Internet mati setelah kabel fiber dicabut-colok', tarif: [45_000, 100_000], tarifSrc: FO, minRep: 0, sla: 1400, weight: 0.9, ftth: true,
+    say: ['Kemarin ONT dipindah waktu bersih-bersih, kabel kuningnya dicabut lalu dicolok lagi. Sekarang lampu LOS merah.', 'Internet mati, lampu LOS di ONT merah. Kemarin ada petugas yang membuka box di tiang depan rumah.'],
+    ask: ['Ukur daya optik (OPM) di roset dan di port ODP, cari sambungan konektor yang kotor.', 'Bersihkan konektor dengan kit pembersih (alkohol IPA + tisu lint-free) sebelum dicolok lagi.', FTTH_DONE],
+  },
+  f_macrobend: {
+    id: 'f_macrobend', cust: 'rumah', title: 'Internet lambat & sering putus (Rx lemah)', tarif: [45_000, 100_000], tarifSrc: FO, minRep: 50, sla: 1400, weight: 0.8, ftth: true,
+    say: ['Internet lambat dan sering putus sejak bufet di ruang tamu digeser. Kabel kuning di dekat roset tertekuk-tekuk.', 'Internet kadang jalan kadang putus. Anak saya merapikan kabel di belakang bufet pakai cable ties.'],
+    ask: ['Cari penyebab redaman tinggi di sisi pelanggan: OPM (bandingkan 1310/1550 nm), VFL, atau OTDR.', 'Rapikan tekukan kabel di titik yang ketemu (jari-jari tekukan jangan terlalu kecil).', FTTH_DONE],
+  },
+  f_port_salah: {
+    id: 'f_port_salah', cust: 'rumah', title: 'Internet mati setelah tetangga pasang baru', tarif: [45_000, 100_000], tarifSrc: FO, minRep: 0, sla: 1400, weight: 0.8, ftth: true,
+    say: ['Kemarin teknisi memasang internet di rumah tetangga dan naik ke box di tiang depan. Sejak itu internet kami mati, LOS merah.', 'Sejak tetangga pasang internet baru kemarin sore, ONT kami lampu LOS-nya merah terus.'],
+    ask: ['Periksa drop rumah di ODP-FLB-01 (tiang depan rumah, naik dengan APD lengkap). Port yang benar ada di data ODP di bawah.', 'Bersihkan konektor sebelum dicolok ke port, pasang lagi tutup debu port yang kosong.', FTTH_DONE],
   },
 };
 

@@ -29,7 +29,11 @@ import { hotelAnchorsWorld } from './game/missionSystem';
 import { initLinux, linuxQa } from './pcos/linux';
 import { initOffice, officeQa } from './pcos/office';
 import { edgeQa } from './pcos/edge';
-import { initSwitches, SWITCHES, portOf, panelOf, adapterOf, envOf, healthy, ENVS } from './pcos/net';
+import { initSwitches, SWITCHES, portOf, panelOf, adapterOf, envOf, healthy, ENVS, portLink } from './pcos/net';
+import { rumahOnt, rumahFtth } from './pcos/ftthsite';
+import { updateFtthLeds, ftthLedColours, buildFtthFx } from './world/ftthsite';
+import { FTTH_RUMAH, WALK_Y } from './data/ftthsite';
+import { FtthField } from './game/field/ftthui';
 import { registerClient, AUTH, APS, quality as wifiQuality, servingAp, CLIENTS } from './pcos/wifi';
 import { Vertical } from './game/vertical';
 import { createWaypoint, updateWaypoint, createAnchorMarker } from './ui/waypoint';
@@ -197,6 +201,21 @@ dressL1(hotel);
 l1Lights(scene);
 const signals = new Signals(tls);
 const gameLayer = new THREE.Group(); gameLayer.name = 'GAME_LAYER'; scene.add(gameLayer);
+// Fase 3 FTTH (chunk B1b): fibre toolkit from the Nusa Teknik cabinet, used at the house roset, the ODP pole (ladder +
+// climb cutscene) and the ODC cabinet. Ladder + VFL glow live in the game layer (not baked).
+const ftthFx = buildFtthFx(gameLayer);
+const ftth = new FtthField({
+  noc, toast: (t, ms) => toast(t, ms), glows: pts => ftthFx.setGlows(pts), ladder: on => ftthFx.setLadder(on),
+  climbCam: (up, then) => startClimb(up, then), log: t => field.note(t), consume: k => field.consume(k),
+});
+field.ftthKit = () => ftth.kit;
+field.onFtthShelf = back => ftth.openShelf('', back);
+field.onFiber = () => ftth.openRoset();
+DEVICES.push(
+  { id: 'FTTH_ROSET', x: wx(114.75), z: wz(580.75), y: FLOOR_Y, level: 1, r: 0.75, hint: () => '[F] Roset fiber & ONT (alat FTTH)', use: () => ftth.openRoset() },
+  { id: 'FTTH_TIANG', x: wx(FTTH_RUMAH.pole.X), z: wz(FTTH_RUMAH.pole.Z + 0.8), y: WALK_Y, level: 1, r: 1.1, hint: () => ftth.poleHint(), use: () => ftth.usePole() },
+  { id: 'FTTH_ODC', x: wx(FTTH_RUMAH.odc.X), z: wz(FTTH_RUMAH.odc.Z0 - 0.65), y: WALK_Y, level: 1, r: 1.1, hint: () => '[F] Kabinet ODC-FLB', use: () => ftth.openOdc() },
+);
 const traffic = new Traffic(gameLayer, signals);
 const peds = new Pedestrians(gameLayer, SOUTH_PEDS);
 const hotelNpcs = new HotelNpcs(gameLayer, PCS);
@@ -252,6 +271,15 @@ const nocWall = (() => {
   return { g, tex, mesh: m };
 })();
 let nocWallT = 0, hintIdle = 0; const _nwp = new THREE.Vector3();
+/** Fase 3: the house ONT LEDs follow the FTTH netsim (8×/s, only within 60 m of the house) */
+let ftthLedT = 0;
+function tickFtthLeds(dt: number, t: number) {
+  if ((ftthLedT -= dt) > 0) return; ftthLedT = 0.125;
+  if (Math.hypot(player.pos.x - wx(FTTH_RUMAH.ont[0]), player.pos.z - wz(FTTH_RUMAH.ont[2])) > 60) return;
+  const st = rumahOnt(); if (!st) return;
+  const o = SWITCHES.find(x => x.name === 'ONT-RUMAH');
+  updateFtthLeds(sitesB.ftthLeds, { pon: st.leds.pon, los: st.leds.los, inet: ENVS.rumah.internet, lan: !!o && portLink(o, o.ports[0]) }, t);
+}
 for (const n of ['FASE_A_JALAN', 'FASE_C_GEDUNG_KOTA', 'FASE_E_PROPERTI_JALAN']) batches.add(bakeStatic(world.getObjectByName(n)!, `BATCH_${n}`, o => o.name.startsWith('TL_'), n === 'FASE_A_JALAN' ? undefined : OUT_DETAIL));
 batches.add(bakeStatic(world.getObjectByName('FASE_B_TANAH_ZONA')!, 'BATCH_FASE_B', o => o.name === 'ZONE_OVERLAY'));
 // south district: two halves so looking north (or from the old district) frustum-culls them
@@ -654,6 +682,30 @@ function updateSeat(dt: number) {
   if (S.phase === 'sit' && S.t >= 1) { S.phase = 'seated'; pcos.open(S.pc.name, S.pc.label); }
   else if (S.phase === 'stand' && S.t >= 1) { player.yaw = view.yaw = S.tyaw; player.pitch = view.pitch = S.tpitch; seat = null; }
 }
+/** Fase 3 FTTH: the ladder climb is a short camera cutscene (research: pole work = cutscene); the player's feet stay at the pole base */
+let climbCam: { phase: 'up' | 'on' | 'down'; t: number; fp: THREE.Vector3; tp: THREE.Vector3; fyaw: number; fpitch: number; tyaw: number; tpitch: number; then?: () => void } | null = null;
+function startClimb(up: boolean, then?: () => void) {
+  keys.clear();
+  if (up) {
+    const top = new THREE.Vector3(wx(FTTH_RUMAH.pole.X), WALK_Y + 1.65 + 1.6, wz(FTTH_RUMAH.pole.Z) + 0.78);
+    climbCam = { phase: 'up', t: 0, fp: camera.position.clone(), tp: top, fyaw: view.yaw, fpitch: view.pitch, tyaw: 0, tpitch: -0.16, then };
+  } else if (climbCam) {
+    climbCam = { phase: 'down', t: 0, fp: camera.position.clone(), tp: new THREE.Vector3(player.pos.x, player.pos.y + 1.62, player.pos.z), fyaw: climbCam.tyaw, fpitch: climbCam.tpitch, tyaw: 0, tpitch: -0.05, then };
+  } else then?.();
+}
+function updateClimb(dt: number) {
+  const C = climbCam!;
+  if (C.phase !== 'on') C.t = Math.min(1, C.t + dt / 1.3);
+  const e = C.t * C.t * (3 - 2 * C.t), k = C.phase === 'on' ? 1 : e;
+  const p = new THREE.Vector3().lerpVectors(C.fp, C.tp, k);
+  if (C.phase !== 'on') p.y += Math.sin(Math.PI * C.t * 4) * 0.025;   // rung steps
+  camera.position.copy(p); camera.rotation.set(C.fpitch + (C.tpitch - C.fpitch) * k, C.fyaw + (C.tyaw - C.fyaw) * k, 0, 'YXZ');
+  avatar.root.visible = false;
+  if (C.phase === 'up' && C.t >= 1) { C.phase = 'on'; C.fp = C.tp.clone(); C.fyaw = C.tyaw; C.fpitch = C.tpitch; const f = C.then; C.then = undefined; f?.(); }
+  else if (C.phase === 'down' && C.t >= 1) { player.yaw = view.yaw = C.tyaw; player.pitch = view.pitch = C.tpitch; climbCam = null; avatar.root.visible = thirdPerson; C.then?.(); }
+  if (climbCam?.phase === 'on' && !uiBlocked()) { const hint = ftth.poleHint(); $('hudHint').textContent = hint; prompt.show(hint, new THREE.Vector3(wx(FTTH_RUMAH.pole.X), WALK_Y + FTTH_RUMAH.odp.y + 0.45, wz(FTTH_RUMAH.pole.Z) + 0.3)); }
+  else prompt.hide();
+}
 function nearSpot() {
   let best: ReturnType<typeof noc.spots>[number] | null = null, bd = 1e9;
   for (const sp of noc.spots()) { if (sp.y !== undefined && Math.abs(player.pos.y - sp.y) > 1.2) continue; const d = Math.hypot(player.pos.x - sp.x, player.pos.z - sp.z); if (sp.level === player.level && d < (sp.r ?? 1.5) && d < bd) { bd = d; best = sp; } }
@@ -675,6 +727,7 @@ function nearNpcNow() {
 function talkNpc(n: NonNullable<ReturnType<typeof nearNpcNow>>) { toast(`${hotelNpcs.title(n)}: "${hotelNpcs.talk(n, npcCtx(), n.pc ?? nearPc?.name ?? null)}"`, 6500); }
 function interact() {
   if (uiBlocked() || ride) return;
+  if (climbCam) { if (climbCam.phase === 'on') ftth.openOdp(); return; }
   if (riding) { requestDismount(); return; }
   const nb = nearBike(); if (nb) { mount(nb); return; }
   const sp = nearSpot(); if (sp) { noc.useSpot(sp.id); return; }
@@ -700,6 +753,10 @@ const gtao = new GTAOPass(scene, camera, window.innerWidth, window.innerHeight);
 gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
 gtao.blendIntensity = 0.85;
 composer.addPass(gtao);
+{ // the FTTH VFL glow sprites stay out of the AO normal/depth pass (override material turns a sprite into a flat quad)
+  const r0 = gtao.render.bind(gtao);
+  gtao.render = (...a: Parameters<typeof r0>) => { const vis = ftthFx.glows.map(g => g.visible); ftthFx.glows.forEach(g => (g.visible = false)); try { r0(...a); } finally { ftthFx.glows.forEach((g, i) => (g.visible = vis[i])); } };
+}
 composer.addPass(new OutputPass());
 const hiDetail = buildHiDetail(scene, world, hotel);
 const gfx = new GfxTier([world, batches, hiDetail]); gfx.collect();
@@ -1131,12 +1188,13 @@ function frame() {
   { const fg = scene.fog as THREE.Fog, Qf = LOOK.fog, fn = mode === 'walk' ? Qf[0] : Math.max(Qf[0], 220), ff = mode === 'walk' ? Qf[1] : Math.max(Qf[1], 1300); if (fg.near !== fn || fg.far !== ff) { fg.near = fn; fg.far = ff; } }
   { const wantNear = mode === 'walk' ? 0.15 : activeView === 'overview' ? 3 : 0.6, wantFar = mode === 'walk' ? farBase : Math.max(farBase, 1600); if (camera.near !== wantNear || camera.far !== wantFar) { camera.near = wantNear; camera.far = wantFar; camera.updateProjectionMatrix(); } }
   cullHotel();
-  noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt); field.update(dt);
+  noc.playerMoving = vel.lengthSq() > 0.04 || keys.size > 0; noc.update(dt); field.update(dt); ftth.update(dt0, mode === 'walk' && !menu.paused && document.body.classList.contains('entered')); tickFtthLeds(dt0, t);
   if (nocWall && (nocWallT -= dt0) <= 0) { nocWallT = 1; if (player.level === 1 && Math.hypot(player.pos.x - nocWall.mesh.getWorldPosition(_nwp).x, player.pos.z - _nwp.z) < 25) { noc.drawWall(nocWall.g, dn.clock()); nocWall.tex.needsUpdate = true; } }
   hintIdle = keys.size > 0 && !uiBlocked() ? hintIdle + dt0 : hintIdle; document.body.classList.toggle('hints-off', hintIdle > 20);
   updateDoors(dt, mode === 'walk' ? player.pos.x : 1e6, mode === 'walk' ? player.pos.z : 1e6, player.pos.y, cutaway ? LEVELS[1].elev - 0.5 : null);
   if (mode !== 'walk') { /* orbit */ }
   else if (seat) { updateSeat(dt); prompt.hide(); }
+  else if (climbCam) updateClimb(dt);
   else if (!uiBlocked()) { if (riding) updateRide(dt); else { vertical.update(dt, player); updateWalk(dt); } }
   else { prompt.hide(); if (riding) { motors.engine.on = false; motors.engine.update(0, 0); } }
   { const tx = mode === 'walk' ? vertical.hud() : ''; if (liftInd.textContent !== tx) liftInd.textContent = tx; liftInd.classList.toggle('on', !!tx); }
@@ -1324,6 +1382,13 @@ if (QA0 || import.meta.env.DEV) (window as any).__kota = {
   sites: () => SITES.map(s => ({ id: s.id, bld: s.bld, anchor: s.anchor, inside: s.inside, park: s.park, rect: s.rect })),
   goSite: (id: SiteId, where: 'anchor' | 'inside' = 'anchor') => { const s = siteById(id); const a = where === 'anchor' ? s.anchor : s.inside; if (riding) forceDismount(); player.pos.set(wx(a.X), FLOOR_Y, wz(a.Z)); player.level = 1; player.yaw = a.yaw; player.vy = 0; },
   readout: (id: string) => readout(id),
+  /** Fase 3 FTTH: the house ONT status, and the live network (for QA: break / dirty with the engine) */
+  ftth: () => { const st = rumahOnt(); return st && { state: st.state, rxDbm: st.rxDbm, band: st.band, leds: st.leds, internet: ENVS.rumah.internet, reason: st.reason }; },
+  ftthNet: () => rumahFtth(),
+  ftthLeds: () => ftthLedColours(sitesB.ftthLeds),
+  /** QA: fibre toolkit state, last instrument results, the VFL glow sprites and the climb cutscene */
+  ftthUi: () => ({ ...ftth.qa(), climbCam: climbCam?.phase ?? null, ladderVisible: ftthFx.ladder.visible, glows: ftthFx.glows.filter(s => s.visible).map(s => [cityX(s.position.x), +s.position.y.toFixed(2), cityZ(s.position.z)]) }),
+  ftthKit: () => ftth,
   env: (id: string) => ENVS[id as keyof typeof ENVS], swDirty: (n: string) => SWITCHES.find(s => s.name === n)?.dirty ?? null,
   /** QA: Fase 1 field work (orders, saldo, reputasi, garansi) */
   field: {

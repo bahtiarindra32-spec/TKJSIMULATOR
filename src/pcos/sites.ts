@@ -6,6 +6,8 @@ import { ENVS, SWITCHES, adapterOf, envOf, live, healthy, apPowered, portLink, r
 import { registerClient, SITE_APS, CLIENTS, servingAp, quality } from './wifi';
 import { initSiteRouters, siteRouter } from './siterouters';
 import { wanStatus, identity } from './routeros';
+import { initFtthSite, rumahOnt } from './ftthsite';
+import type { Led } from './ftth';
 
 /** desk-top height of a site PC/laptop (city floor 1 or the kos upper floor) */
 export const deskY = (floor: 1 | 2) => (floor === 2 ? KOS.upper : FLOOR_Y) + 0.78;
@@ -13,6 +15,7 @@ export const deskY = (floor: 1 | 2) => (floor === 2 ? KOS.upper : FLOOR_Y) + 0.7
 /** register every site laptop and the TV as Wi-Fi clients (world = city - (200,150)); call after initSwitches */
 export function initSiteClients() {
   initSiteRouters();
+  initFtthSite();
   for (const p of SITE_PCS) if (p.wifi) registerClient(p.name, p.X - 200, deskY(p.floor), p.Z - 150, p.floor, { site: p.site, ssid: ssidOf(p.site), key: keyOf(p.site) });
   registerClient(SITE_TV.name, SITE_TV.X - 200, SITE_TV.y, SITE_TV.Z - 150, SITE_TV.floor, { site: SITE_TV.site, ssid: ssidOf(SITE_TV.site), key: keyOf(SITE_TV.site) });
   for (const id of [...SITE_PCS.map(p => p.name), SITE_TV.name]) adapterOf(id);
@@ -22,6 +25,9 @@ export const ssidOf = (site: SiteId) => (site === 'rumah' ? 'HENDRA_HOME' : site
 /** the Wi-Fi password saved on the residents' devices */
 export const keyOf = (site: SiteId) => (site === 'rumah' ? SITE_WIFI_KEY.rumah : site === 'kos' ? SITE_WIFI_KEY.kos : '');
 
+/** an ONT LED as words for the read-out */
+const ledText = (l: Led, green: string, greenBlink: string) =>
+  l === 'green' ? `hijau${green ? ` (${green})` : ''}` : l === 'green-blink' ? `hijau berkedip${greenBlink ? ` (${greenBlink})` : ''}` : l === 'red' ? 'merah (tidak ada sinyal optik)' : l === 'red-blink' ? 'merah berkedip (daya optik terlalu kuat)' : 'mati';
 export interface Readout { title: string; rows: [string, string][]; note: string }
 const sw = (n: string) => SWITCHES.find(s => s.name === n) ?? null;
 const apLine = (id: string) => {
@@ -33,12 +39,13 @@ const apLine = (id: string) => {
 /** what a technician reads off a device at a site */
 export function readout(id: string): Readout {
   if (id === 'ONT') {
+    const st = rumahOnt();
     const o = sw('ONT-RUMAH'); const lan = (n: number) => (o && portLink(o, o.ports[n - 1]) ? 'hijau' : 'mati');
     return {
       title: 'ONT NusaFiber NF-609 (GPON) · ruang tamu',
-      rows: [['POWER', 'hijau'], ['PON', 'hijau (terdaftar ke OLT ISP)'], ['LOS', 'mati (sinyal optik ada)'], ['INTERNET', ENVS.rumah.internet ? 'hijau' : 'mati'],
+      rows: [['POWER', 'hijau'], ['PON', ledText(st?.leds.pon ?? 'off', 'terdaftar ke OLT ISP', 'ada cahaya, SN belum terdaftar')], ['LOS', (st?.leds.los ?? 'off') === 'off' ? 'mati (sinyal optik ada)' : ledText(st!.leds.los, '', '')], ['INTERNET', ENVS.rumah.internet ? 'hijau' : 'mati'],
         ['LAN1', `${lan(1)} · kabel ke router Wi-Fi keluarga`], ['LAN2-4', 'kosong'], ['WLAN', apLine('AP-RUMAH-ONT')], ['Gateway', `${routerOf(ENVS.rumah)?.ip}/${ENVS.rumah.prefix} · DHCP ${ENVS.rumah.dhcp ? `${ENVS.rumah.dhcp.start}–${ENVS.rumah.dhcp.end}` : 'mati'}`]],
-      note: 'Halaman admin ONT dibuka dari laptop di rumah ini (browser → alamat gateway). Kabel drop fiber masuk lewat roset di dinding.',
+      note: `${st && st.state !== 'online' ? `Optik: ${st.reason}. ` : ''}Halaman admin ONT dibuka dari laptop di rumah ini (browser → alamat gateway). Kabel drop fiber masuk lewat roset di dinding.`,
     };
   }
   if (id === 'RUMAH_ROUTER') return { title: 'Router Wi-Fi keluarga (mode access point)', rows: [['Kabel', 'LAN router ↔ LAN1 ONT'], ['Wi-Fi', apLine('AP-RUMAH-RTR')], ['Alamat', '192.168.1.2 (manajemen)']], note: 'Mode AP: DHCP dan NAT tetap di ONT, router hanya memancarkan Wi-Fi.' };

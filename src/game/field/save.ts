@@ -41,7 +41,7 @@ function readOrder(o: unknown): Order | null {
   if (kind === 'garansi') {
     out.garansiOf = str(x.garansiOf);
     out.due = int0(x.due);
-    out.reason = x.reason === 'config' ? 'config' : 'crimp';
+    out.reason = x.reason === 'config' || x.reason === 'fiber' ? x.reason : 'crimp';
     out.redo = readRedo(x.redo);
   }
   return out;
@@ -55,7 +55,7 @@ function readPlan(v: unknown): GaransiPlan | null {
   if (!v || typeof v !== 'object') return null;
   const x = v as Record<string, unknown>;
   if (!isTpl(x.tpl)) return null;
-  return { of: str(x.of), tpl: x.tpl, cust: FIELD_TPLS[x.tpl].cust, reason: x.reason === 'config' ? 'config' : 'crimp', showDay: int0(x.showDay, 1), redo: readRedo(x.redo) };
+  return { of: str(x.of), tpl: x.tpl, cust: FIELD_TPLS[x.tpl].cust, reason: x.reason === 'config' || x.reason === 'fiber' ? x.reason : 'crimp', showDay: int0(x.showDay, 1), redo: readRedo(x.redo) };
 }
 function readNota(v: unknown): Nota | null {
   if (!v || typeof v !== 'object') return null;
@@ -63,7 +63,7 @@ function readNota(v: unknown): Nota | null {
   const m = (x.mat && typeof x.mat === 'object' ? x.mat : {}) as Record<string, unknown>;
   return {
     id: str(x.id), day: int0(x.day), title: str(x.title), who: str(x.who), tarif: int0(x.tarif), stars: clamp(int0(x.stars), 0, 3), jasa: int0(x.jasa),
-    mat: { ...noMat(), rj45: int0(m.rj45), utp: Math.max(0, num(m.utp)), patch: int0(m.patch), router: int0(m.router) },
+    mat: { ...noMat(), rj45: int0(m.rj45), utp: Math.max(0, num(m.utp)), patch: int0(m.patch), router: int0(m.router), sleeve: int0(m.sleeve) },
     material: int0(x.material), denda: int0(x.denda), net: Math.round(num(x.net)), garansi: !!x.garansi, failed: !!x.failed,
   };
 }

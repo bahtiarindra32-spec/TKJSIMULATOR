@@ -204,7 +204,8 @@ function fix(tpl: FieldTplId, d: Record<string, string | number>) {
 describe('field templates on the network simulation', () => {
   beforeEach(fresh);
   // MikroTik (Fase 2) templates are graded from the router state: tests/fieldros.test.ts
-  for (const tpl of TPL_IDS.filter(id => !FIELD_TPLS[id].ros))
+  // FTTH (Fase 3) templates: tests/fieldftth.test.ts
+  for (const tpl of TPL_IDS.filter(id => !FIELD_TPLS[id].ros && !FIELD_TPLS[id].ftth))
     it(`${tpl}: inject breaks the customer device, the in-game fix heals it`, () => {
       for (let seed = 1; seed <= 6; seed++) {
         fresh();

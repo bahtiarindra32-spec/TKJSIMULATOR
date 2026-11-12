@@ -11,6 +11,7 @@ import { wx, wz } from '../data/city';
 import { SITES, SITE_PCS, SITE_TV, SITE_AP_DEFS, KOS, FLOOR_Y, siteById, type SitePc, type SiteId, type Rect } from '../data/sites';
 import { M, box, group, mat, texMat, TEX, signTex, canvasTex, addCollider, gableGeo } from './core';
 import * as ND from '../assets/netdevices';
+import { buildFtthRumah, type FtthLeds } from './ftthsite';
 
 const T = 0.15;   // wall thickness
 type P = THREE.Object3D;
@@ -263,6 +264,7 @@ function buildNusaTeknik(parent: P) {
 }
 
 // =================================================================================================
+let ftthLeds: FtthLeds | null = null;
 function buildRumah(parent: P) {
   const { g, r } = shell(parent, 'rumah', 'tile');
   const h = 3.2, wm = mat('#efe3c2'), trim = mat('#8a5a35');
@@ -319,6 +321,8 @@ function buildRumah(parent: P) {
   outlet(g, 'PROP_RUMAH_01_STOPKONTAK_04', 121.0, r.z1 - T, FLOOR_Y + 1.1, 'S');
   // motor-friendly carport: a parked family scooter is not needed; a plant pot and a clothes line instead
   B(g, 113.0, 0, 577.2, 0.4, 0.5, 0.4, M.pot); soft(B(g, 113.0, 0.5, 577.2, 0.4, 0.35, 0.4, M.plant));
+  // Fase 3: the fibre plant outside (pole, ODP, drop, ODC) and the ONT LEDs driven by the netsim
+  ftthLeds = buildFtthRumah(g);
   return g;
 }
 
@@ -449,7 +453,7 @@ function buildWarnet(parent: P) {
   return g;
 }
 
-export interface SitesBuilt { groups: Record<SiteId, THREE.Group>; pcs: { name: string; label: string; o: THREE.Object3D }[] }
+export interface SitesBuilt { groups: Record<SiteId, THREE.Group>; pcs: { name: string; label: string; o: THREE.Object3D }[]; ftthLeds: FtthLeds }
 /** build all four places under one parent; the PC list feeds main.ts PCS (PcOS, nearPc) */
 export function buildSites(parent: P): SitesBuilt {
   const root = group(parent, 'FASE1_LOKASI');
@@ -459,7 +463,7 @@ export function buildSites(parent: P): SitesBuilt {
   const pcs: SitesBuilt['pcs'] = [];
   for (const pc of SITE_PCS) { const o = groups[pc.site].getObjectByName(pc.name); if (o) pcs.push({ name: pc.name, label: pc.label, o }); }
   root.updateMatrixWorld(true);
-  return { groups, pcs };
+  return { groups, pcs, ftthLeds: ftthLeds! };
 }
 /** is a world (three.js) point inside one of the site buildings */
 export function insideSite(x: number, z: number) { const X = x + 200, Z = z + 150; return SITES.some(s => X > s.rect.x0 && X < s.rect.x1 && Z > s.rect.z0 && Z < s.rect.z1); }

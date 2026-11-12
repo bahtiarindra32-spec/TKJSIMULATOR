@@ -2,7 +2,7 @@
 // end-of-day bookkeeping. The network side (injecting the fault when an order is accepted) lives in sim.ts.
 import { FIELD_TPLS, TPL_IDS, CUSTOMER } from './templates';
 import { tarifFor, applyRep, denda, REP_FLOOR } from './economy';
-import { CUSTS, type Cust, type FieldTplId, type Order, type GaransiPlan, type Rep, type FieldSave, type Nota, noMat } from './types';
+import { CUSTS, type Cust, type FieldTplId, type Order, type GaransiPlan, type GaransiReason, type Rep, type FieldSave, type Nota, noMat } from './types';
 
 /** templates that can appear with this reputasi (customer type above the floor and the template's own minimum met) */
 export function availableTpls(rep: Rep): FieldTplId[] {
@@ -44,13 +44,14 @@ export function genDay(day: number, rep: Rep, seq: number, r: () => number): Ord
 }
 
 /** a weak check at closing schedules a garansi callback 1 or 2 days later */
-export function planGaransi(o: Order, reason: 'crimp' | 'config', redo: Record<string, string | number>, closedDay: number, r: () => number): GaransiPlan {
+export function planGaransi(o: Order, reason: GaransiReason, redo: Record<string, string | number>, closedDay: number, r: () => number): GaransiPlan {
   return { of: o.id, tpl: o.tpl, cust: o.cust, reason, showDay: closedDay + 1 + (r() < 0.5 ? 0 : 1), redo };
 }
 
-const GARANSI_TEXT: Record<'crimp' | 'config', string> = {
+const GARANSI_TEXT: Record<GaransiReason, string> = {
   crimp: 'Kabel yang kemarin dipasang sudah putus-putus lagi. Katanya bergaransi?',
   config: 'Semalam listrik padam. Setelah menyala, masalah yang kemarin muncul lagi.',
+  fiber: 'Internet mati lagi, lampu LOS di modem merah seperti kemarin. Katanya bergaransi?',
 };
 /** the callback order for a plan (unpaid; reputasi drops if it is not handled by `due`) */
 export function garansiOrder(p: GaransiPlan, seq: number): Order {

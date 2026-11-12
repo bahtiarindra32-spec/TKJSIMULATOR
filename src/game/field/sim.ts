@@ -7,7 +7,9 @@ import { SITE_APS, quality, type Ap, type WifiSec, type TxPower } from '../../pc
 import { SITE_PCS, SITE_TV, SITE_WIFI_KEY } from '../../data/sites';
 import { judge, type Cable } from '../crimp';
 import { resetSiteRouter } from '../../pcos/siterouters';
+import { initFtthSite } from '../../pcos/ftthsite';
 import { injectRos, rosProblem, isRosTpl, type RosJob } from './simros';
+import { injectFtth, ftthProblem, isFtthTpl, type FtthJob } from './simftth';
 import type { Cust, FieldTplId } from './types';
 
 export const sw = (n: string): Switch => SWITCHES.find(s => s.name === n)!;
@@ -37,6 +39,8 @@ export interface Injected {
   data: Record<string, string | number>;
   /** Fase 2 MikroTik order: graded from the site router's configuration state */
   ros?: RosJob;
+  /** Fase 3 FTTH order: graded from the house fibre state (simftth.ts) */
+  ftth?: FtthJob;
   /** per-order values for the order letter (vouchers, limits, ISP data) */
   lines?: string[];
 }
@@ -62,6 +66,11 @@ export function inject(tpl: FieldTplId, r: () => number, redo?: Record<string, s
   if (isRosTpl(tpl)) {
     const x = injectRos(tpl, r);
     return x && { tpl, variant: x.variant, detail: x.detail, targets: x.targets.map(t => T(t.pc, t.primary)), data: x.data, ros: x.ros, lines: x.lines };
+  }
+  if (isFtthTpl(tpl)) {
+    const x = injectFtth(tpl, r, redo);
+    // the family laptop is where the internet is tested; the TV only has to come back too
+    return x && { tpl, variant: x.variant, detail: x.detail, targets: [T(LAPTOP_RUMAH, true), T(TV, false)], data: x.data, ftth: x.ftth, lines: x.lines };
   }
   if (tpl === 'r_router') {
     const a = ap('AP-RUMAH-RTR');
@@ -180,6 +189,7 @@ export function inject(tpl: FieldTplId, r: () => number, redo?: Record<string, s
 /** root cause still present beyond device health ('' = fixed) */
 export function rootProblem(i: Injected): string {
   if (i.ros) return rosProblem(i.ros, i.targets.find(t => t.primary)?.pc);
+  if (i.ftth) return ftthProblem(i.ftth);
   if (i.tpl === 'r_router') {
     const a = ap('AP-RUMAH-RTR');
     if (!a.mounted) return 'router Wi-Fi belum diganti';
@@ -258,6 +268,8 @@ export function restoreSites(snap: SiteSnap, only?: Cust) {
   }
   // the MikroTik site routers go back to the customer configuration (before the clients re-lease)
   for (const site of ['kos', 'warnet'] as const) if (!only || only === site) resetSiteRouter(site);
+  // the house fibre (Fase 3) goes back to a healthy line too
+  if (!only || only === 'rumah') initFtthSite();
   for (const x of snap.ads) {
     if (only && custOfName(x.pc) !== only) continue;
     const a = adapterOf(x.pc);

@@ -1,0 +1,62 @@
+/* Fase 3 FTTH chunk B1b: fibre toolkit chip, instrument panels, OTDR screen and the fusion splicer.
+   Same language as src/ui/skin.css: charcoal panels, hairline rules, square corners, safety-yellow accent, mono for
+   readings. No gradients, glows or emoji. */
+#ftth-chip { position: fixed; right: 22px; top: 392px; z-index: 19; display: none; width: 200px; box-sizing: border-box; padding: 6px 9px; pointer-events: none;
+  background: rgba(17,19,22,.82); border: 1px solid var(--k-line2, #3a4047); border-top: 2px solid var(--k-acc, #f0c02e); border-radius: 3px;
+  color: var(--k-tx, #ebe7de); font: 600 11px/1.45 var(--k-mono, monospace); }
+#ftth-chip.on { display: block; }
+#ftth-chip b { display: block; color: var(--k-acc); font-size: 10px; letter-spacing: .08em; }
+#ftth-chip span { display: inline-block; margin-right: 8px; color: var(--k-tx2); font-weight: 500; }
+body:not(.entered) #ftth-chip, body.paused #ftth-chip, body.menu #ftth-chip { display: none !important; }
+@media (max-width: 720px) { #ftth-chip { top: auto; bottom: 214px; right: 12px; width: auto; max-width: 46vw; } }
+body.touch #ftth-chip { top: calc(124px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); width: auto; max-width: 60vw; padding: 3px 7px; font-size: 10.5px; }
+body.touch #ftth-chip b { display: none; }
+
+.ftth-panel .fd-sec, .ftth-splice .fd-sec { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--k-line); }
+.ftth-panel h3 .badge { margin-left: 6px; text-transform: none; letter-spacing: 0; }
+.ftth-ont { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 7px 10px; background: var(--k-p3); border: 1px solid var(--k-line); font: 600 12px/1.3 var(--k-mono); color: var(--k-tx); }
+.ftth-ont .lbl { color: var(--k-mute); margin-right: 4px; }
+.ftth-ont small { color: var(--k-mute); font-weight: 500; }
+.ftth-ont .led { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 1px solid #000; background: #3a3e43; transform: translateY(1px); }
+.ftth-ont .led.green { background: var(--k-ok); } .ftth-ont .led.red { background: var(--k-bad); }
+.ftth-ont .led.blink { animation: ftth-blink 0.5s steps(1) infinite; }
+@keyframes ftth-blink { 50% { background: #3a3e43; } }
+@media (prefers-reduced-motion: reduce) { .ftth-ont .led.blink { animation: none; outline: 1px dashed var(--k-mute); outline-offset: 1px; } }
+.ftth-seg { display: inline-flex; gap: 2px; padding: 2px; margin-bottom: 6px; background: var(--k-p3); border: 1px solid var(--k-line); border-radius: 3px; }
+.ftth-seg .seg { padding: 4px 10px; border: 0; border-radius: 2px; background: transparent; color: var(--k-tx2); font: 600 12px/1.2 var(--k-mono); cursor: pointer; }
+.ftth-seg .seg.on { background: var(--k-acc); color: var(--k-ink); }
+.ftth-meter { display: inline-flex; flex-direction: column; gap: 2px; min-width: 240px; margin-top: 6px; padding: 8px 12px; background: #0b0d0c; border: 1px solid var(--k-line2); font-family: var(--k-mono); }
+.ftth-meter small { color: var(--k-mute); font-size: 11px; }
+.ftth-meter b { color: var(--k-ok); font-size: 22px; letter-spacing: .02em; }
+.ftth-meter.lo b { color: var(--k-bad); }
+.ftth-ports td, .ftth-ports th { font-family: var(--k-mono); font-size: 12px; padding-top: 3px; padding-bottom: 3px; }
+.ftth-ports tr.cur td { color: var(--k-acc); }
+.ftth-panel select, .ftth-splice select { background: var(--k-p3); color: var(--k-tx); border: 1px solid var(--k-line2); border-radius: 3px; padding: 5px 6px; font: 13px var(--k-ui); }
+
+.ftth-otdr { max-width: min(800px, 94vw); }
+.ftth-trace { display: block; width: 100%; max-width: 720px; height: auto; aspect-ratio: 720 / 250; border: 1px solid var(--k-line2); }
+.ftth-ev td, .ftth-ev th { font-size: 12px; }
+.ftth-ev td:nth-child(-n+3) { font-family: var(--k-mono); white-space: nowrap; }
+.ftth-ev tr.dz td { color: var(--k-mute); }
+.ftth-sum { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 8px; font: 12px var(--k-mono); color: var(--k-mute); }
+.ftth-sum b { color: var(--k-tx); }
+
+.ftth-splice { max-width: min(820px, 94vw); }
+.ftth-splice .stg { display: flex; gap: 2px; margin: 0 0 10px; font: 600 10px/1.2 var(--k-mono); text-transform: uppercase; letter-spacing: .04em; }
+.ftth-splice .stg span { flex: 1; padding: 4px 0; text-align: center; border: 1px solid var(--k-line); color: var(--k-mute); }
+.ftth-splice .stg span.done { color: var(--k-tx); border-color: var(--k-line2); }
+.ftth-splice .stg span.cur { color: var(--k-acc); border-color: var(--k-acc); }
+.sp-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }
+@media (max-width: 640px) { .sp-wrap { grid-template-columns: 1fr; } }
+.sp-screen { padding: 10px 12px; background: #0b0d0c; border: 1px solid var(--k-line2); font: 12px/1.7 var(--k-mono); color: var(--k-tx); }
+.sp-screen small { display: inline-block; width: 72px; color: var(--k-mute); }
+.sp-screen .est b { color: var(--k-ok); font-size: 16px; }
+.sp-screen .msgl { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--k-line); color: var(--k-tx2); white-space: normal; }
+.sp-act p { margin: 0 0 8px; }
+.sp-bar { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.sp-bar .trk { position: relative; flex: 1; height: 18px; background: var(--k-p3); border: 1px solid var(--k-line2); }
+.sp-bar .zone { position: absolute; left: 40%; width: 20%; top: 0; bottom: 0; background: rgba(67,192,127,.22); border-left: 1px solid var(--k-ok); border-right: 1px solid var(--k-ok); }
+.sp-bar .mk { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: var(--k-acc); }
+.sp-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; margin-bottom: 8px; }
+.sp-grid > .btn { grid-column: span 2; text-align: left; }
+.sp-grid .btn.on { border-color: var(--k-ok); }

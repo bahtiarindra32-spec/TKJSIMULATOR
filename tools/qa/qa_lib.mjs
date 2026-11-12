@@ -9,7 +9,7 @@ export async function boot(save, opt = {}) {
   const errs = []; p.on('pageerror', e => errs.push(e.message.slice(0, 300))); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push('console: ' + m.text().slice(0, 200)); });
   p.on('crash', () => console.log('!! PAGE CRASH'));
   const t0 = Date.now();
-  await p.goto('http://127.0.0.1:8787/?qa' + (opt.query ?? '&low'), { waitUntil: 'commit', timeout: 60000 });
+  await p.goto('http://127.0.0.1:' + (process.env.QA_PORT ?? 8787) + '/?qa' + (opt.query ?? '&low'), { waitUntil: 'commit', timeout: 60000 });
   await p.waitForFunction(() => window.__kota && window.__kota.noc, null, { timeout: 100000 });
   console.log('  boot', Date.now() - t0, 'ms');
   if (!process.env.DOC) await p.evaluate(() => { window.__kota.noc.docRequired = false; });

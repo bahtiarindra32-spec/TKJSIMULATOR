@@ -3,6 +3,14 @@
 Ringkasan per hari. Detail lengkap ada di riwayat git.
 
 ## 2026-11-12
+- Fase 3 FTTH: mesin fiber (`src/pcos/ftth/`): budget redaman per elemen (kelas B+), OPM (1310/1490/1550 nm), VFL, OTDR (trace + tabel event), sambungan fusi dengan loss per splice.
+- Rumah Kel. Hendra (Jl. Flamboyan No. 17) tersambung fiber: tiang 7,5 m dengan ODP-FLB-01, kabel drop, ODC-FLB di Jl. Flamboyan, roset, ONT dengan LED POWER/PON/LOS/INTERNET/LAN yang mengikuti Rx.
+- Toolkit fiber di lemari Nusa Teknik: OPM, VFL, OTDR, fusion splicer, kit pembersih, tangga + APD (naik tiang = cutscene, APD kurang dicatat K3).
+- Minigame splicing: strip → bersihkan → cleave → pasang → fusi → sleeve.
+- Empat order FTTH: `f_drop_putus`, `f_konektor_kotor`, `f_macrobend`, `f_port_salah`; dinilai dari ONT online, Rx hijau, port sesuai data ODP, dan uji internet dari laptop keluarga.
+- Garansi fiber: sambungan > 0,2 dB, tanpa sleeve, atau konektor tidak dibersihkan → pelanggan minta garansi 1–2 hari kemudian.
+- Perbaikan: alamat order rumah disamakan dengan label rumah/ODP (No. 17).
+- Playtest: qa_ftth order, qa_sites rumah, qa_praktik mikrotik, qa_tutor; 448 unit test.
 - Fase 2 MikroTik: mesin RouterOS 7 (`src/pcos/routeros/`: model, CLI dengan path `/ip …`, `print`/`export`, wizard `/ip dhcp-server setup` dan `/ip hotspot setup`, simple queue, firewall filter/NAT, user hotspot + profile rate-limit, backup) yang ikut simulasi jaringan dan dinilai dari kondisi router, bukan dari ketikan.
 - Router MikroTik di tempat lapangan: RB951Ui-2HnD di Warnet Sinar dan hAP lite (RB941-2nD) di Kos Mawar. Dari PC/laptop pelanggan: Winbox (Neighbors › connect lewat MAC › New Terminal), WebFig di browser, halaman login hotspot, dan halaman speedtest.cari.id yang menampilkan batas queue/hotspot yang benar-benar berlaku.
 - Empat order lapangan baru (terbuka per reputasi): `w_hotspot` (hotspot voucher warnet + rate-limit di user profile, diuji login voucher dari PC), `k_queue` (simple queue per kamar kos, diuji speedtest dari laptop penghuni), `k_fasttrack` (limit kamar tidak jalan karena rule fasttrack), `w_reset` (internet warnet mati setelah router direset).
